@@ -1,4 +1,5 @@
 import db from "../db/db.js";
+import { InvalidateAlertConfigTagIndex } from "../cache/alertConfigTags.js";
 import type {
   MonitorAlertConfigRecord,
   MonitorAlertConfigInsert,
@@ -168,6 +169,10 @@ export async function CreateMonitorAlertConfig(
     throw new Error("Failed to retrieve created monitor alert config");
   }
 
+  // Which tags have an active config just changed; drop the index alertingQueue
+  // uses to skip monitors, so it fails open until the next appScheduler tick.
+  await InvalidateAlertConfigTagIndex();
+
   return result;
 }
 
@@ -243,6 +248,10 @@ export async function UpdateMonitorAlertConfig(
     throw new Error("Failed to retrieve updated monitor alert config");
   }
 
+  // Which tags have an active config just changed; drop the index alertingQueue
+  // uses to skip monitors, so it fails open until the next appScheduler tick.
+  await InvalidateAlertConfigTagIndex();
+
   return result;
 }
 
@@ -262,6 +271,10 @@ export async function ToggleMonitorAlertConfigStatus(id: number): Promise<Monito
   if (!updatedConfig) {
     throw new Error("Failed to retrieve updated monitor alert config");
   }
+
+  // Which tags have an active config just changed; drop the index alertingQueue
+  // uses to skip monitors, so it fails open until the next appScheduler tick.
+  await InvalidateAlertConfigTagIndex();
 
   return updatedConfig;
 }
@@ -331,6 +344,9 @@ export async function DeleteMonitorAlertConfig(id: number): Promise<boolean> {
   // The repository deletes trigger/monitor junctions and v2 alerts explicitly;
   // FK cascades are not enforced on SQLite
   const deleted = await db.deleteMonitorAlertConfig(id);
+  // Which tags have an active config just changed; drop the index alertingQueue
+  // uses to skip monitors, so it fails open until the next appScheduler tick.
+  await InvalidateAlertConfigTagIndex();
   return deleted > 0;
 }
 
@@ -338,7 +354,11 @@ export async function DeleteMonitorAlertConfig(id: number): Promise<boolean> {
  * Delete all monitor alert configs for a specific monitor
  */
 export async function DeleteMonitorAlertConfigsByMonitorTag(monitorTag: string): Promise<number> {
-  return await db.deleteMonitorAlertConfigsByMonitorTag(monitorTag);
+  const deleted = await db.deleteMonitorAlertConfigsByMonitorTag(monitorTag);
+  // Which tags have an active config just changed; drop the index alertingQueue
+  // uses to skip monitors, so it fails open until the next appScheduler tick.
+  await InvalidateAlertConfigTagIndex();
+  return deleted;
 }
 
 // ============ Trigger Operations ============

@@ -129,6 +129,20 @@ export class MonitorAlertConfigRepository extends BaseRepository {
   }
 
   /**
+   * Distinct monitor tags that have at least one active alert config.
+   *
+   * Feeds the Redis index that lets alertingQueue.push short-circuit; one query
+   * per scheduler tick replaces two per monitor per minute.
+   */
+  async getMonitorTagsWithActiveAlertConfigs(): Promise<string[]> {
+    const rows = await this.knex("monitor_alerts_config_monitors as macm")
+      .distinct("macm.monitor_tag as monitor_tag")
+      .join("monitor_alerts_config as mac", "mac.id", "macm.monitor_alerts_id")
+      .where("mac.is_active", "YES");
+    return rows.map((row: { monitor_tag: string }) => row.monitor_tag);
+  }
+
+  /**
    * Get all active monitor alert configs for a specific monitor
    */
   async getActiveMonitorAlertConfigsByMonitorTag(monitorTag: string): Promise<MonitorAlertConfigRecord[]> {

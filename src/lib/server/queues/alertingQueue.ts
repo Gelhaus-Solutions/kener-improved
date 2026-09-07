@@ -26,6 +26,7 @@ import {
 import type { IncidentInput } from "../controllers/incidentController.js";
 import { GetMonitorAlertsV2 } from "../controllers/monitorAlertConfigController.js";
 import db from "../db/db.js";
+import { MayHaveAlertConfig } from "../cache/alertConfigTags.js";
 import { getUnixTime, differenceInSeconds } from "date-fns";
 import { parseDbTimestamp } from "../tool.js";
 import GC from "../../global-constants.js";
@@ -300,6 +301,14 @@ export const push = async (monitor_tag: string, ts: number, status: string, opti
   };
   const queue = getQueue();
   addWorker();
+
+  // Most monitors have no alert config, and this runs for every datapoint of
+  // every monitor every minute. One Redis lookup instead of the two queries
+  // below. Answers true whenever it cannot be certain, so a Redis problem costs
+  // queries rather than alerts.
+  if (!(await MayHaveAlertConfig(monitor_tag))) {
+    return;
+  }
 
   //fetch monitorTyped from monitor_tag
   const monitors = await GetMonitorsParsed({ tag: monitor_tag });

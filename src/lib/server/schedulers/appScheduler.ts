@@ -7,6 +7,8 @@ import { getSchedulers, addJobToSchedulerQueue, removeJobFromSchedulerQueue } fr
 
 import { GetMonitorsParsed } from "../controllers/controller.js";
 import { UpdateMaintenanceEventStatuses } from "../controllers/maintenanceController.js";
+import { RebuildAlertConfigTagIndex } from "../cache/alertConfigTags.js";
+import db from "../db/db.js";
 
 let appSchedulerQueue: Queue | null = null;
 let worker: Worker | null = null;
@@ -72,6 +74,12 @@ const addWorker = () => {
 
     //we have to update the maintenances events also
     await UpdateMaintenanceEventStatuses();
+
+    // Refresh the index alertingQueue.push uses to skip monitors with no alert
+    // config. One query here replaces two per monitor per minute there. Failures
+    // are swallowed inside the helper: the marker then expires and push() goes
+    // back to querying, which is the safe direction.
+    await RebuildAlertConfigTagIndex(await db.getMonitorTagsWithActiveAlertConfigs());
 
     return activeMonitors.length;
   });
