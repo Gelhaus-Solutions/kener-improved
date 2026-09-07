@@ -136,7 +136,8 @@ git push
 | `.github/workflows/publish-*.yml` | Publish to GHCR only; no Docker Hub, no cosign signing         |
 | `.github/workflows/create-release.yml` | Uses `GITHUB_TOKEN` instead of upstream's `RELEASE_TOKEN` |
 | `.github/ISSUE_TEMPLATE/`  | No upstream assignee                                                   |
-| `docs/agents/issue-tracker.md` | Points at this repo's issues                                       |
+| `docs/agents/issue-tracker.md` | Points at the Plane project, not GitHub Issues                     |
+| `docs/agents/triage-labels.md` | States that triage labels are unused                               |
 | `CLAUDE.md`, `AGENTS.md`   | Fork-specific agent instructions; no upstream counterpart              |
 | `docs/adr/`                | ADRs reconstructed by the fork, numbered from 0100                     |
 | `src/**`, `migrations/**`  | Diverge by design; conflicts are resolved by hand on each sync         |

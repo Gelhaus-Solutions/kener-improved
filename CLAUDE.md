@@ -157,11 +157,19 @@ Read `.claude/skills/` for specialized instructions on:
 
 ### Issue tracker
 
-Issues and PRDs are tracked in GitHub Issues for `Gelhaus-Solutions/kener-improved`. See `docs/agents/issue-tracker.md`.
+Roadmap work, PRDs and agent tasks are tracked in **Plane**, project `KENER`
+(`427cd087-24cd-489f-9bb9-53454dea0a70`), via the `plane` MCP server. Work items
+are `KENER-<n>`; modules are backlog categories A-J plus Z, cycles are phases
+P0-P11. Move an item to `In Progress` when you start it, and comment with the
+commit and any deviation before moving it to `Done`.
+
+GitHub Issues is retained **only** for reporting bugs that also exist upstream
+in `rajnandan1/kener`, so the fix arrives here on the next sync. Nothing else
+goes there. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
-Triage uses the default mattpocock/skills label vocabulary. See `docs/agents/triage-labels.md`.
+Not used. Triage state is the Plane work item state. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 

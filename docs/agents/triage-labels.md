@@ -1,15 +1,28 @@
 # Triage Labels
 
-The skills speak in terms of five canonical triage roles. This file maps those roles to the actual label strings used in this repo's issue tracker.
+**This repo does not use triage labels.** The five canonical roles the skills
+speak in (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`,
+`wontfix`) have no counterpart here, and creating them would be theatre: there
+is no inbound public issue queue to triage.
 
-| Label in mattpocock/skills | Label in our tracker | Meaning                                  |
-| -------------------------- | -------------------- | ---------------------------------------- |
-| `needs-triage`             | `needs-triage`       | Maintainer needs to evaluate this issue  |
-| `needs-info`               | `needs-info`         | Waiting on reporter for more information |
-| `ready-for-agent`          | `ready-for-agent`    | Fully specified, ready for an AFK agent  |
-| `ready-for-human`          | `ready-for-human`    | Requires human implementation            |
-| `wontfix`                  | `wontfix`            | Will not be actioned                     |
+If a skill asks you to apply a triage label, **skip that step** and say so once.
+Do not invent a label to satisfy it.
 
-When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
+## What we use instead
 
-Edit the right-hand column to match whatever vocabulary you actually use.
+The tracker is Plane, not GitHub Issues (see
+[issue-tracker.md](issue-tracker.md)). Triage state is carried by the **work
+item state**, not by a label:
+
+| Triage role in the skills | Equivalent here |
+| --- | --- |
+| `needs-triage` | State `Backlog` |
+| `needs-info` | No equivalent. Comment on the item and leave its state alone. |
+| `ready-for-agent` | State `Todo` |
+| `ready-for-human` | No equivalent. Say so in a comment. |
+| `wontfix` | State `Cancelled` |
+
+Plane's own labels (`effort:*`, `risk:high`, `blocks-others`,
+`schema-migration`, `perf`, `security`, `already-upstream`) describe the shape
+of the work, not its triage status. They are documented in
+[issue-tracker.md](issue-tracker.md) and are the only labels in the project.

@@ -16,6 +16,7 @@
 /.github/workflows/publish-images.yml   merge=ours
 /.github/workflows/create-release.yml   merge=ours
 /docs/agents/issue-tracker.md           merge=ours
+/docs/agents/triage-labels.md           merge=ours
 /docs/adr/**                            merge=ours
 /scripts/sync-upstream.sh               merge=ours
 /scripts/merge-package-json.mjs         merge=ours
