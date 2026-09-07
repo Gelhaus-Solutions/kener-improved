@@ -81,18 +81,23 @@ export function hasFullTextSearch(knex?: Knex): boolean {
  * `INSERT ... RETURNING`, so a write can read back the stored row without a
  * follow-up SELECT.
  *
- * Postgres only. SQLite and MySQL re-SELECT after the write, which is one extra
- * round trip but identical in result. This matches what the repositories
- * already do by hand via `GetDbType() === "postgresql"` (twelve call sites,
- * e.g. `incidents.ts` `createIncident`), so it is a rename of existing
- * behaviour, not a change to it.
+ * Everything except MySQL, where knex silently ignores `.returning()` and hands
+ * back an insert id instead, which is a different shape rather than an error.
+ * MySQL therefore re-SELECTs after the write: one extra round trip, identical
+ * result.
  *
- * SQLite has supported RETURNING since 3.35 and knex may well emit it for
- * better-sqlite3, but that is unverified, and a wrong answer here silently
- * changes what a write returns. Widen it only after testing a real upsert.
+ * SQLite is included on evidence, not on the version number. Verified against
+ * this repo's knex 3.1 and better-sqlite3 12.6: an
+ * `insert ... onConflict().merge().returning("*")` compiles to a statement
+ * ending in `returning *` and returns the full row for both the insert and the
+ * update path.
+ *
+ * Note that the twelve inherited `GetDbType() === "postgresql"` branches in the
+ * repositories are narrower than this, since they predate the check. They stay
+ * correct, just Postgres-only; fold them in as you touch them.
  */
 export function supportsInsertReturning(knex?: Knex): boolean {
-  return dialectOf(knex) === "postgresql";
+  return dialectOf(knex) !== "mysql";
 }
 
 /**

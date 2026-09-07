@@ -1,6 +1,6 @@
 import type { Knex as KnexType } from "knex";
 import { BaseRepository } from "./base.js";
-import { hasFloorFunction } from "../capabilities.js";
+import { hasFloorFunction, supportsInsertReturning } from "../capabilities.js";
 import GC from "../../../global-constants.js";
 import type { MonitoringStatus } from "../../../types/status.js";
 import { GetMinuteStartNowTimestampUTC } from "../../tool.js";
@@ -43,13 +43,21 @@ export class MonitoringRepository extends BaseRepository {
   async insertMonitoringData(data: MonitoringDataInsert): Promise<MonitoringData | null> {
     const { monitor_tag, timestamp, status, latency, type, error_message, raw_status } = data;
 
-    // Perform insert/update - works across PostgreSQL, MySQL, and SQLite
-    await this.knex("monitoring_data")
+    const upsert = this.knex("monitoring_data")
       .insert({ monitor_tag, timestamp, status, latency, type, error_message, raw_status })
       .onConflict(["monitor_tag", "timestamp"])
       .merge({ status, latency, type, error_message, raw_status });
 
-    // Query and return the inserted/updated record (works consistently across all databases)
+    // This runs once per monitor per minute on the worker pool, so the second
+    // round trip is worth avoiding. MySQL is the dialect without RETURNING; it
+    // re-SELECTs below for the same result.
+    if (supportsInsertReturning(this.knex)) {
+      const rows = (await upsert.returning("*")) as MonitoringData[];
+      return rows[0] ?? null;
+    }
+
+    await upsert;
+
     const record = await this.knex("monitoring_data")
       .where("monitor_tag", monitor_tag)
       .where("timestamp", timestamp)
