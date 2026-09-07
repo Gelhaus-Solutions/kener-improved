@@ -126,18 +126,19 @@ Optional: `DATABASE_URL` (defaults to SQLite), `KENER_BASE_PATH`, `PORT` (defaul
 
 ## This repo is a fork
 
-`Gelhaus-Solutions/kener-improved` is a soft fork of `rajnandan1/kener`, kept
-deliberately close to upstream so that automated syncs stay cheap. **Read
-`FORK.md` before changing anything outside `src/`.**
+`Gelhaus-Solutions/kener-improved` is a fork of `rajnandan1/kener` that diverges
+on purpose in `src/` and `migrations/`, while never renaming or rebranding the
+product. **Read `FORK.md` before changing anything outside `src/`.**
 
 Practical rules when working here:
 
 - **Do not rename or rebrand the product.** "Kener", the UI strings, the seeded
   site data and the docs content are intentionally identical to upstream.
-  Renaming them would make every future upstream merge conflict.
-- **Prefer fixing things upstream.** If a change is not fork-specific, branch
-  from `upstream/main` and open the PR against `rajnandan1/kener`. It reaches
-  this fork on the next sync.
+  Renaming them would make every future upstream merge conflict, and that
+  restraint is what pays for diverging freely everywhere else.
+- **Fix things here, not upstream.** Nothing is contributed back; the sync is
+  one-directional. An upstream bug this fork also carries may be *reported*
+  upstream, but the fix still lands here first.
 - **Never `git merge upstream/main` directly.** Use `npm run sync:upstream`. The
   `merge=ours` driver that `.gitattributes` relies on is registered by that
   script; a plain merge silently ignores it.

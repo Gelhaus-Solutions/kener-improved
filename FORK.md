@@ -4,10 +4,20 @@
 maintained by Gelhaus Solutions. Upstream is MIT-licensed; the original
 copyright and `LICENSE` are preserved unchanged.
 
-This is a **soft fork**. It deliberately keeps the product, its name, its UI
-strings and its documentation identical to upstream, and diverges only where a
-fork must: repository metadata, CI targets, and the sync tooling below. Keeping
-the divergence small is what makes staying current with upstream cheap.
+This fork **diverges on purpose**. Application code under `src/` and the schema
+under `migrations/` are expected to differ from upstream, and that divergence
+grows over time as the fork adds features upstream does not carry.
+
+What the fork deliberately does **not** do is rename or rebrand. The product
+name, the UI strings, the seeded site data and the documentation content stay
+identical to upstream. Cosmetic churn is what makes syncing expensive: it
+collides with every upstream edit while adding nothing, whereas a real feature
+change only collides with upstream work in the same place. Keeping the naming
+identical is exactly what buys the freedom to diverge everywhere else.
+
+Nothing here is contributed back upstream. The sync runs in one direction and
+continues indefinitely; conflicts in `src/` and `migrations/` are resolved by
+hand on each sync PR.
 
 ## Staying current with upstream
 
@@ -20,7 +30,7 @@ It never pushes to `main`. Every upstream change lands through a reviewable PR
 that CI runs against.
 
 If a sync PR is still open, the next scheduled run **skips** rather than opening
-a second one — stacking a merge on top of an unreviewed merge makes conflicts
+a second one - stacking a merge on top of an unreviewed merge makes conflicts
 much harder to read. Merge or close the open PR and the next run proceeds.
 
 ### Running a sync locally
@@ -34,7 +44,7 @@ Run it from a clean working tree, on a throwaway branch.
 > **Node 24+ required.** `.npmrc` sets `engine-strict=true` and `package.json`
 > pins `node >=24.14.0`, so the lockfile regeneration step fails outright on an
 > older Node. The sync still completes and reports a warning naming the version
-> mismatch — but you will need a matching Node (or CI, which runs 24) to produce
+> mismatch - but you will need a matching Node (or CI, which runs 24) to produce
 > the lockfile.
 
 Environment overrides:
@@ -48,33 +58,33 @@ Environment overrides:
 
 ## What gets resolved automatically
 
-The sync is only allowed to settle conflicts that are mechanical — where the
+The sync is only allowed to settle conflicts that are mechanical - where the
 "right" answer follows from a rule, not from judgement. Everything else is
 handed to a human.
 
-### `package.json` — three-way JSON merge
+### `package.json` - three-way JSON merge
 
 [`scripts/merge-package-json.mjs`](scripts/merge-package-json.mjs) reads the
 three conflict stages out of the git index and merges them per key instead of
 per line, so a dependency bump upstream and a dependency addition here no longer
 collide:
 
-- **Fork-owned keys** (`repository`, `bugs`, `homepage`, `funding`) — our value
+- **Fork-owned keys** (`repository`, `bugs`, `homepage`, `funding`) - our value
   always wins, silently.
-- **Upstream-owned keys** (`version`) — upstream's value always wins. The fork
+- **Upstream-owned keys** (`version`) - upstream's value always wins. The fork
   tracks upstream release numbers, so a version bump on both sides is not a
   conflict.
-- **Everything else** — a real three-way merge. If only one side changed a key,
+- **Everything else** - a real three-way merge. If only one side changed a key,
   that change is taken. If both sides changed it identically, fine. Arrays of
   strings (`keywords`) are union-merged, honouring removals from either side.
-- **Anything genuinely contested** — the script exits non-zero, naming the exact
+- **Anything genuinely contested** - the script exits non-zero, naming the exact
   key path (e.g. `scripts.build`), and the file keeps its conflict markers.
 
 Owned keys are aligned across all three stages *before* the merge runs, so keys
 stay in their original position rather than shuffling to the end of the file on
 every sync.
 
-### `package-lock.json` — regenerated, never merged
+### `package-lock.json` - regenerated, never merged
 
 A lockfile conflict is meaningless to resolve by hand. The sync takes upstream's
 lockfile, then runs `npm install --package-lock-only` against the freshly merged
@@ -82,7 +92,7 @@ lockfile, then runs `npm install --package-lock-only` against the freshly merged
 fork depends on. Skipped if `package.json` itself is still conflicted, since the
 regeneration would be based on a broken file.
 
-### Fork-owned files — `merge=ours`
+### Fork-owned files - `merge=ours`
 
 Files listed in [`.gitattributes`](.gitattributes) under *Fork-owned files* use
 the `ours` merge driver: upstream edits to them are dropped instead of raising a
@@ -91,7 +101,7 @@ an upstream diff has nothing useful to contribute.
 
 > The `ours` driver is registered by `scripts/sync-upstream.sh`
 > (`git config merge.ours.driver true`). It is repo-local config, so **a plain
-> `git merge upstream/main` will not honour it** — always sync through the
+> `git merge upstream/main` will not honour it** - always sync through the
 > script or the workflow.
 
 ### Files the fork deleted
@@ -102,8 +112,8 @@ modify/delete conflict. The sync keeps the deletion.
 ## What is *not* resolved automatically
 
 Source conflicts in `src/`, `migrations/`, `scripts/` and everywhere else. When
-the sync hits one, it still commits and opens the PR — **with the conflict
-markers in the tree** — and labels it `needs-manual-resolution`, listing the
+the sync hits one, it still commits and opens the PR - **with the conflict
+markers in the tree** - and labels it `needs-manual-resolution`, listing the
 affected files in the PR body. That way the merge is already staged and you only
 have to settle the disputed hunks:
 
@@ -122,32 +132,43 @@ git push
 | -------------------------- | --------------------------------------------------------------------- |
 | `package.json`             | `repository`, `homepage`, `bugs` point here; `sync:upstream` script    |
 | `README.md`                | Fork notice at the top; upstream content otherwise                     |
-| `.github/FUNDING.yml`      | Emptied — sponsor upstream directly, not this fork                     |
+| `.github/FUNDING.yml`      | Emptied - sponsor upstream directly, not this fork                     |
 | `.github/workflows/publish-*.yml` | Publish to GHCR only; no Docker Hub, no cosign signing         |
 | `.github/workflows/create-release.yml` | Uses `GITHUB_TOKEN` instead of upstream's `RELEASE_TOKEN` |
 | `.github/ISSUE_TEMPLATE/`  | No upstream assignee                                                   |
 | `docs/agents/issue-tracker.md` | Points at this repo's issues                                       |
-| `LICENSE`, `src/**`, docs content | **Unchanged** — kept identical to upstream on purpose           |
+| `CLAUDE.md`, `AGENTS.md`   | Fork-specific agent instructions; no upstream counterpart              |
+| `docs/adr/`                | ADRs reconstructed by the fork, numbered from 0100                     |
+| `src/**`, `migrations/**`  | Diverge by design; conflicts are resolved by hand on each sync         |
+| `LICENSE`, product name, UI strings, docs content | **Unchanged** - the fork does not rebrand       |
 
-Adding a divergence? If it is a file the fork owns outright, add it to
-`.gitattributes` and to the table above.
+Not every row here is `merge=ours`. A file is *fork-owned* only when an upstream
+diff to it has nothing useful to contribute, and those are the rows that also
+appear in `.gitattributes`. `src/**` and `migrations/**` diverge but are still
+merged normally, because upstream changes there are worth reading.
+
+Adding a divergence? Add it to the table above, and to `.gitattributes` as well
+if the fork owns the file outright.
 
 ## Optional repository setup
 
 Neither is required; the sync works without both.
 
-- **`SYNC_TOKEN` secret** — a PAT with `repo` scope. GitHub suppresses workflow
+- **`SYNC_TOKEN` secret** - a PAT with `repo` scope. GitHub suppresses workflow
   runs on PRs opened by the default `GITHUB_TOKEN`, so without this the sync PR
   arrives with no CI results and you have to close/reopen it to get them. With
   it, `test.yml` runs on every sync PR.
-- **GHCR packages** — the image workflows push to
+- **GHCR packages** - the image workflows push to
   `ghcr.io/gelhaus-solutions/kener-improved` using the built-in `GITHUB_TOKEN`.
   New packages default to private; make them public in the repo's *Packages*
   settings if you want to pull without authenticating.
 
-## Contributing back
+## Nothing is contributed back
 
-Fixes that are not fork-specific belong upstream. Branch from `upstream/main`
-rather than from this fork's `main`, and open the PR against
-[rajnandan1/kener](https://github.com/rajnandan1/kener) so everyone benefits and
-the fix arrives here on the next sync anyway.
+This fork does not open pull requests against
+[rajnandan1/kener](https://github.com/rajnandan1/kener). Fix things here, on a
+branch off this fork's `main`, including fixes that are not fork-specific. The
+sync is one-directional by decision, not by oversight.
+
+Upstream bugs that this fork also carries may still be *reported* upstream, so
+an upstream fix arrives on the next sync. Reporting is not contributing.
