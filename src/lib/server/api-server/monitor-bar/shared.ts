@@ -4,6 +4,24 @@ import type { StatusType } from "$lib/types/status";
 import type { MonitorRecord, TimestampStatusCount } from "$lib/server/types/db";
 import { UptimeCalculator } from "$lib/server/tool";
 import type { MonitorBarResponse } from "./get";
+import { toZonedTime, fromZonedTime } from "date-fns-tz";
+import { startOfDay, getUnixTime } from "date-fns";
+
+/**
+ * End of today in `timeZone`, as UTC seconds. This is the bar's right-hand edge,
+ * and it decides where every day bucket falls.
+ *
+ * The browser computes the same value from the viewer's timezone in
+ * `$lib/client/layoutClientData`. Kept identical on purpose: a server render and
+ * a client render of the same bar must agree, or the bars shift by a day.
+ * IANA offsets include :30 and :45, so this cannot be integer arithmetic on a
+ * UTC day.
+ */
+export const endOfDayAtTz = (timeZone: string): number => {
+  const now = new Date();
+  const startOfDayInUTC = fromZonedTime(startOfDay(toZonedTime(now, timeZone)), timeZone);
+  return getUnixTime(startOfDayInUTC) + 86400;
+};
 
 interface ParsedMonitorSettings {
   uptime_formula_numerator?: string;

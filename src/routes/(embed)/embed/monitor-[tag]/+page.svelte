@@ -12,6 +12,8 @@
       monitorTag: string;
       days: number;
       endOfDayTodayAtTz: number;
+      serverEndOfDayTodayAtTz: number;
+      monitorBar: MonitorBarResponse;
       theme: string;
       localTz: string;
     };
@@ -19,10 +21,14 @@
 
   let { data }: Props = $props();
 
-  // State
-  let loading = $state(true);
-  let overviewData = $state<MonitorBarResponse | null>(null);
+  // State. The server load already built the bar, so there is nothing to load on
+  // first paint and no skeleton for the common case. A client refetch, when the
+  // viewer's timezone needs one, overrides it.
+  let loading = $state(false);
+  let refetched = $state<MonitorBarResponse | null>(null);
   let error = $state<string | null>(null);
+
+  let overviewData = $derived(refetched ?? data.monitorBar);
 
   const localTz = $derived(data.localTz || "UTC");
 
@@ -43,7 +49,7 @@
         throw new Error("Monitor not found");
       }
 
-      overviewData = await response.json();
+      refetched = await response.json();
     } catch (e) {
       console.error("Failed to fetch monitor data:", e);
       error = e instanceof Error ? e.message : "Failed to load data";
@@ -56,7 +62,12 @@
     if (data.theme) {
       setMode(data.theme === "dark" ? "dark" : "light");
     }
-    fetchData();
+    // The bars are bucketed by day in a timezone. The server rendered them for
+    // UTC, or for the ?tz= the embedder pinned; only refetch when the viewer's
+    // day boundary actually differs, otherwise the server payload is correct.
+    if (data.endOfDayTodayAtTz !== data.serverEndOfDayTodayAtTz) {
+      fetchData();
+    }
   });
 </script>
 

@@ -1,4 +1,7 @@
 import type { PageServerLoad } from "./$types";
+import { error } from "@sveltejs/kit";
+import db from "$lib/server/db/db";
+import { buildMonitorBarResponse, endOfDayAtTz } from "$lib/server/api-server/monitor-bar/shared";
 
 const DEFAULT_DAYS = 90;
 const MAX_DAYS = 90;
@@ -9,9 +12,30 @@ export const load: PageServerLoad = async ({ params, url }) => {
   const daysParam = url.searchParams.get("days");
   const days = Math.min(MAX_DAYS, Math.max(1, daysParam ? parseInt(daysParam, 10) : DEFAULT_DAYS));
 
+  // Day buckets depend on a timezone, and the server does not know the viewer's.
+  // An embedder can pin one with ?tz=; otherwise render UTC. The page refetches
+  // in the browser only when the viewer's day boundary differs from this one, so
+  // a pinned tz (and every UTC viewer) costs no request at all.
+  const timeZone = url.searchParams.get("tz") || "UTC";
+  let serverEndOfDayTodayAtTz: number;
+  try {
+    serverEndOfDayTodayAtTz = endOfDayAtTz(timeZone);
+  } catch {
+    serverEndOfDayTodayAtTz = endOfDayAtTz("UTC");
+  }
+
+  const monitor = await db.getMonitorByTag(tag);
+  if (!monitor) {
+    throw error(404, { message: "Monitor not found" });
+  }
+
+  const monitorBar = await buildMonitorBarResponse(monitor, days, serverEndOfDayTodayAtTz);
+
   return {
     monitorTag: tag,
     days,
     theme,
+    serverEndOfDayTodayAtTz,
+    monitorBar,
   };
 };
