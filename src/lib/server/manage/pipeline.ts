@@ -1,0 +1,120 @@
+import { json } from "@sveltejs/kit";
+import type { RequestEvent } from "@sveltejs/kit";
+import { getActionDefinition } from "./registry.js";
+import { runLegacy } from "./legacy.js";
+import { ActionError } from "./types.js";
+import type { ActionContext } from "./types.js";
+import { authenticate } from "./middleware/authenticate.js";
+import { requireOrg } from "./middleware/requireOrg.js";
+import { authorize, isKnownAction } from "./middleware/authorize.js";
+import { rateLimit } from "./middleware/rateLimit.js";
+import { auditBefore, auditAfter } from "./middleware/audit.js";
+
+/**
+ * The admin action pipeline.
+ *
+ * Order is load-bearing, not stylistic:
+ *
+ *   requestId -> authenticate -> requireOrg -> authorize -> rateLimit
+ *             -> validate -> audit:before -> handler -> audit:after -> errors
+ *
+ * The reasoning for each position lives on the middleware itself, so that
+ * anyone about to move a step reads why it is where it is first. In short:
+ * requireOrg both asserts and establishes so the context cannot be had without
+ * the check; org context precedes validation and the audit snapshot so no query
+ * runs unscoped; rate limiting sits after auth so tenants get separate buckets,
+ * and before validation so floods stay cheap.
+ *
+ * Unmigrated actions fall through to `runLegacy`, which is the inherited
+ * if/else chain verbatim. That fallback is what makes migrating incrementally
+ * safe: an action nobody has moved yet still runs, with the same auth and the
+ * same response, so a batch can ship without being complete.
+ */
+export async function runAction(event: RequestEvent): Promise<Response> {
+  let payload: { action?: unknown; data?: unknown };
+  try {
+    payload = await event.request.json();
+  } catch {
+    return json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const action = typeof payload.action === "string" ? payload.action : "";
+  const data = (payload.data ?? {}) as Record<string, unknown>;
+
+  // requestId. Set by hooks.server.ts once the audit log lands; generated here
+  // meanwhile so handlers and logs can already correlate.
+  const requestId = (event.locals as { requestId?: string }).requestId ?? crypto.randomUUID();
+
+  const def = getActionDefinition(action);
+
+  try {
+    const { user, permissions } = await authenticate(event.cookies);
+
+    const ctx: ActionContext = {
+      user,
+      permissions,
+      requestId,
+      cookies: event.cookies,
+      ip: safeClientAddress(event),
+      userAgent: event.request.headers.get("user-agent"),
+    };
+
+    await requireOrg(ctx);
+
+    // Deliberately after authenticate, not before it. The inherited chain
+    // resolved the session first and only then consulted the permission map, so
+    // an unknown action from a signed-out caller answered 401, not 400. Keeping
+    // that order preserves the status codes and avoids telling an
+    // unauthenticated caller which actions exist.
+    if (!isKnownAction(action, def)) {
+      return json({ error: "Unknown action" }, { status: 400 });
+    }
+
+    authorize(action, def, permissions);
+
+    await rateLimit(action, def, ctx);
+
+    // Unmigrated: hand over to the inherited chain, which has already had auth
+    // and authorization applied above exactly as it applied them itself.
+    if (!def) {
+      const result = await runLegacy(action, data, ctx);
+      return result instanceof Response ? result : json(result, { status: 200 });
+    }
+
+    const validated = def.schema ? def.schema(data) : data;
+
+    const auditRecord = await auditBefore(action, def, validated, ctx);
+
+    const result = await def.handler(validated, ctx);
+
+    if (result instanceof Response) {
+      await auditAfter(auditRecord, def, validated, result.ok ? "ok" : "error", result.status);
+      return result;
+    }
+
+    await auditAfter(auditRecord, def, validated, "ok", 200);
+    return json(result, { status: 200 });
+  } catch (error: unknown) {
+    if (error instanceof ActionError) {
+      return json({ error: error.message }, { status: error.status });
+    }
+    // Everything else is a 500 carrying the message, which is what the
+    // inherited chain did for every failure. Kept identical so migrating an
+    // action cannot change how its errors look to the admin UI.
+    console.log(error);
+    const message = error instanceof Error ? error.message : String(error);
+    return json({ error: message }, { status: 500 });
+  }
+}
+
+/**
+ * `event.getClientAddress()` throws when the adapter cannot determine an
+ * address. An audit field is never worth failing a request over.
+ */
+function safeClientAddress(event: RequestEvent): string | null {
+  try {
+    return event.getClientAddress();
+  } catch {
+    return null;
+  }
+}

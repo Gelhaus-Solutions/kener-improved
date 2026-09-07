@@ -1,0 +1,911 @@
+import { json } from "@sveltejs/kit";
+import Service, { type MonitorWithType } from "$lib/server/services/service.js";
+import { format } from "date-fns";
+import sharp from "sharp";
+import { nanoid } from "nanoid";
+import db from "$lib/server/db/db";
+import GC, { isMonitoringStatus } from "$lib/global-constants.js";
+import type { MonitoringStatus } from "$lib/types/status.js";
+import {
+  CreateUpdateMonitor,
+  UpdateMonitoringData,
+  InsertKeyValue,
+  GetMonitors,
+  CreateUpdateTrigger,
+  GetAllTriggers,
+  UpdateTriggerData,
+  DeleteTrigger,
+  GetIncidentByIDDashboard,
+  GetMonitorsParsed,
+  GetAllAPIKeys,
+  GetAllSiteData,
+  CreateNewAPIKey,
+  UpdateApiKeyStatus,
+  DeleteApiKey,
+  GetIncidentsDashboard,
+  CreateIncident,
+  AddIncidentMonitor,
+  RemoveIncidentMonitor,
+  GetIncidentActiveComments,
+  UpdateCommentStatusByID,
+  AddIncidentComment,
+  UpdateCommentByID,
+  UpdateIncident,
+  DeleteIncident,
+  GetTriggerByID,
+  GetLoggedInSession,
+  UpdateUserData,
+  UpdatePassword,
+  SendInvitationEmail,
+  SendVerificationEmail,
+  ResendInvitationEmail,
+  GetAllUsersPaginatedDashboard,
+  GetUserByIDDashboard,
+  GetAllUsers,
+  GetAllUsersPaginated,
+  GetUsersCount,
+  GetUserByID,
+  GetUserByEmail,
+  ManualUpdateUserData,
+  DeleteMonitorCompletelyUsingTag,
+  CloneMonitor,
+  GetSiteDataByKey,
+  GetMonitoringDataPaginated,
+} from "$lib/server/controllers/controller.js";
+
+import { ListDockerContainers } from "$lib/server/controllers/dockerController.js";
+import { GetNowTimestampUTC } from "$lib/server/tool.js";
+import {
+  CreatePage,
+  GetAllPages,
+  GetPageById,
+  UpdatePage,
+  DeletePage,
+  AddMonitorToPage,
+  RemoveMonitorFromPage,
+  GetPageMonitors,
+  ReorderPageMonitors,
+} from "$lib/server/controllers/pagesController.js";
+import {
+  CreateMaintenance,
+  GetMaintenanceWithEvents,
+  GetMaintenancesDashboard,
+  UpdateMaintenance,
+  DeleteMaintenance,
+  CreateMaintenanceEvent,
+  GetMaintenanceEventById,
+  GetMaintenanceEventsByMaintenanceId,
+  UpdateMaintenanceEvent,
+  UpdateMaintenanceEventStatus,
+  DeleteMaintenanceEvent,
+  AddMonitorToMaintenance,
+  RemoveMonitorFromMaintenance,
+  GetMaintenanceMonitors,
+  UpdateMaintenanceMonitorImpact,
+} from "$lib/server/controllers/maintenanceController.js";
+import {
+  CreateMonitorAlertConfig,
+  UpdateMonitorAlertConfig,
+  GetMonitorAlertConfigById,
+  GetMonitorAlertConfigsByMonitorTag,
+  DeleteMonitorAlertConfig,
+  ToggleMonitorAlertConfigStatus,
+  GetMonitorAlertsV2Paginated,
+  GetMonitorAlertConfigsPaginated,
+  DeleteMonitorAlertV2,
+  UpdateMonitorAlertV2Status,
+  type MonitorAlertConfigRecord,
+  type MonitorAlertV2Record,
+} from "$lib/server/controllers/monitorAlertConfigController.js";
+
+import {
+  GetSubscribersByMethod,
+  GetSubscriberWithSubscriptionsV2,
+  GetSubscriberCountsByMethod,
+  DeleteUserSubscription,
+  UpdateUserSubscriptionStatus,
+  GetAdminSubscribersPaginated,
+  AdminUpdateSubscriptionStatus,
+  AdminDeleteSubscriber,
+  AdminAddSubscriber,
+} from "$lib/server/controllers/userSubscriptionsController.js";
+import {
+  GetAllGeneralEmailTemplates,
+  GetGeneralEmailTemplateById,
+  UpdateGeneralEmailTemplate,
+} from "$lib/server/controllers/generalTemplateController.js";
+import {
+  GetAllRoles,
+  GetAllPermissions,
+  GetRolePermissions,
+  UpdateRolePermissions,
+  GetRoleUsers,
+  AddUserToRole,
+  RemoveUserFromRole,
+  CreateRole,
+  UpdateRole,
+  DeleteRole,
+  GetUserPermissions,
+  RequirePermission,
+} from "$lib/server/controllers/userController.js";
+import type { SiteDataForNotification } from "$lib/server/notification/types";
+import { alertToVariables, siteDataToVariables } from "$lib/server/notification/notification_utils";
+import type { TriggerMeta } from "$lib/server/types/db.js";
+import sendWebhook from "$lib/server/notification/webhook_notification.js";
+import sendEmail from "$lib/server/notification/email_notification.js";
+import sendDiscord from "$lib/server/notification/discord_notification.js";
+import sendSlack from "$lib/server/notification/slack_notification.js";
+import heicConvert from "heic-convert";
+import serverResolver from "$lib/server/resolver.js";
+import { TestOidcConnection, ClearOidcConfigCache } from "$lib/server/controllers/oidcController.js";
+import { MaskString } from "$lib/server/tool.js";
+import type { ActionContext } from "$lib/server/manage/types.js";
+
+/**
+ * The inherited admin action chain, moved here verbatim.
+ *
+ * This exists so the registry migration can be incremental. `pipeline.ts` looks
+ * an action up in the registry first and falls through to here when it has not
+ * been moved yet, so a batch of actions can ship without being complete and an
+ * action nobody has touched behaves exactly as it always did.
+ *
+ * **Do not add anything here.** New actions go in `actions/<domain>/`. This file
+ * only ever shrinks, and is deleted once the last action has moved.
+ *
+ * Authentication and authorization are NOT repeated here: the pipeline has
+ * already applied them, using the same permission map and the same checks this
+ * chain used to apply itself. What remains is the dispatch.
+ *
+ * `data` is `any` because that is what it was: the chain reads dozens of
+ * differently-shaped payloads off it and mutates some of them. Typing it
+ * properly is what migrating an action into `actions/` is for.
+ */
+export async function runLegacy(
+  action: string,
+  rawData: Record<string, unknown>,
+  ctx: ActionContext,
+): Promise<unknown> {
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const data = rawData as any;
+  const userDB = ctx.user;
+  const userPermissions = ctx.permissions;
+  let resp: any = {};
+
+      if (action == "updateUser") {
+        data.userID = userDB.id;
+        resp = await UpdateUserData(data);
+      } else if (action == "manualUpdate") {
+        await ManualUpdateUserData(data.id, data);
+        resp = await GetUserByIDDashboard(data.id);
+      } else if (action == "createNewUser") {
+        await SendInvitationEmail(data.email, data.role_ids, data.name);
+        resp = await GetUserByEmail(data.email);
+      } else if (action == "resendInvitation") {
+        await ResendInvitationEmail(data.email);
+        resp = { success: true };
+      } else if (action == "getUsers") {
+        const page = parseInt(String(data.page)) || 1;
+        const limit = parseInt(String(data.limit)) || 10;
+        const filter: { is_active?: number } = {};
+        if (data.is_active !== undefined && data.is_active !== null) {
+          filter.is_active = parseInt(String(data.is_active));
+        }
+        const hasFilter = Object.keys(filter).length > 0 ? filter : undefined;
+        const users = await GetAllUsersPaginatedDashboard({ page, limit }, hasFilter);
+        const totalResult = await GetUsersCount(hasFilter);
+        const total = totalResult ? Number(totalResult.count) : 0;
+        resp = { users, total };
+      } else if (action === "storeSiteData") {
+        resp = await storeSiteData(data);
+      } else if (action == "storeMonitorData") {
+        resp = await CreateUpdateMonitor(data);
+      } else if (action == "updateMonitoringData") {
+        data.type = GC.MANUAL;
+        resp = await UpdateMonitoringData(data);
+      } else if (action == "getMonitors") {
+        resp = await GetMonitors(data);
+      } else if (action == "deleteMonitor") {
+        resp = await DeleteMonitorCompletelyUsingTag(data.tag);
+      } else if (action == "deleteMonitorData") {
+        let status: MonitoringStatus | undefined;
+        if (data.status !== undefined && data.status !== null && data.status !== "ALL") {
+          if (!isMonitoringStatus(data.status)) {
+            return json({ error: "Invalid monitoring status" }, { status: 400 });
+          }
+          status = data.status;
+        }
+        await db.deleteMonitorDataByTag(data.tag || undefined, data.start, data.end, status);
+        resp = { success: true };
+      } else if (action == "cloneMonitor") {
+        resp = await CloneMonitor({
+          sourceTag: String(data.sourceTag || ""),
+          newTag: String(data.newTag || ""),
+          newName: String(data.newName || ""),
+        });
+      } else if (action == "createUpdateTrigger") {
+        resp = await CreateUpdateTrigger(data);
+      } else if (action == "getTriggers") {
+        resp = await GetAllTriggers(data);
+      } else if (action == "updateMonitorTriggers") {
+        resp = await UpdateTriggerData(data);
+      } else if (action == "deleteTrigger") {
+        resp = await DeleteTrigger(data.trigger_id);
+      } else if (action == "getAllAlertsPaginated") {
+        const page = parseInt(String(data.page)) || 1;
+        const limit = parseInt(String(data.limit)) || 20;
+        const filter: { alert_status?: "TRIGGERED" | "RESOLVED"; config_id?: number } = {};
+        if (data.status && data.status !== "ALL") filter.alert_status = data.status as "TRIGGERED" | "RESOLVED";
+        if (data.config_id) filter.config_id = parseInt(String(data.config_id));
+        resp = await GetMonitorAlertsV2Paginated(page, limit, Object.keys(filter).length > 0 ? filter : undefined);
+      } else if (action == "getMonitoringDataPaginated") {
+        const page = parseInt(String(data.page)) || 1;
+        const limit = parseInt(String(data.limit)) || 50;
+        const filter: { monitor_tag?: string; status?: MonitoringStatus; start_time?: number; end_time?: number } = {};
+        if (data.monitor_tag && data.monitor_tag !== "ALL") {
+          filter.monitor_tag = data.monitor_tag;
+        }
+        if (data.status !== undefined && data.status !== null && data.status !== "ALL") {
+          if (!isMonitoringStatus(data.status)) {
+            return json({ error: "Invalid monitoring status" }, { status: 400 });
+          }
+          filter.status = data.status;
+        }
+        if (data.start_time) {
+          filter.start_time = parseInt(String(data.start_time));
+        }
+        if (data.end_time) {
+          filter.end_time = parseInt(String(data.end_time));
+        }
+        resp = await GetMonitoringDataPaginated(page, limit, Object.keys(filter).length > 0 ? filter : undefined);
+      } else if (action == "getAPIKeys") {
+        resp = await GetAllAPIKeys();
+      } else if (action == "createNewApiKey") {
+        resp = await CreateNewAPIKey(data);
+      } else if (action == "updateApiKeyStatus") {
+        resp = await UpdateApiKeyStatus(data);
+      } else if (action == "deleteApiKey") {
+        const deleted = await DeleteApiKey(data);
+        if (!deleted) {
+          throw new Error("API key not found");
+        }
+        resp = { success: true };
+      } else if (action == "getIncidents") {
+        resp = await GetIncidentsDashboard(data);
+      } else if (action == "getIncident") {
+        resp = await GetIncidentByIDDashboard(data);
+        if (!!!resp) {
+          throw new Error("Incident not found");
+        }
+      } else if (action == "createIncident") {
+        resp = await CreateIncident(data);
+      } else if (action == "updateIncident") {
+        resp = await UpdateIncident(data.id, data);
+      } else if (action == "deleteIncident") {
+        resp = await DeleteIncident(data.incident_id);
+      } else if (action == "addMonitor") {
+        resp = await AddIncidentMonitor(data.incident_id, data.monitor_tag, data.monitor_impact);
+      } else if (action == "removeMonitor") {
+        resp = await RemoveIncidentMonitor(data.incident_id, data.monitor_tag);
+      } else if (action == "getComments") {
+        resp = await GetIncidentActiveComments(data.incident_id);
+      } else if (action == "addComment") {
+        resp = await AddIncidentComment(data.incident_id, data.comment, data.state, data.commented_at);
+      } else if (action == "deleteComment") {
+        resp = await UpdateCommentStatusByID(data.incident_id, data.comment_id, "INACTIVE");
+      } else if (action == "updateComment") {
+        resp = await UpdateCommentByID(data.incident_id, data.comment_id, data.comment, data.state, data.commented_at);
+      } else if (action == "testTrigger") {
+        const trigger = await GetTriggerByID(data.trigger_id);
+        const siteData = await GetAllSiteData();
+        if (!trigger || !siteData) {
+          throw new Error("Trigger not found");
+        }
+        //fetch the last monitor tag from monitoring data and use that for testing instead of "test-monitor"
+        const lastMonitoringData = await GetMonitoringDataPaginated(1, 1);
+        let testTag = "test-monitor";
+        if (lastMonitoringData && lastMonitoringData.data && lastMonitoringData.data.length > 0) {
+          testTag = lastMonitoringData.data[0].monitor_tag;
+        }
+        const triggerMetaParsed = JSON.parse(trigger.trigger_meta) as TriggerMeta;
+        const testAlert: MonitorAlertConfigRecord = {
+          id: 1,
+          monitor_tag: testTag,
+          alert_for: "STATUS",
+          alert_value: "DOWN",
+          failure_threshold: 1,
+          success_threshold: 1,
+          alert_description: "This is a test alert",
+          create_incident: "NO",
+          is_active: "YES",
+          severity: "WARNING",
+          created_at: new Date(),
+          updated_at: new Date(),
+        };
+        const testAlertData: MonitorAlertV2Record = {
+          id: 1,
+          config_id: 1,
+          monitor_tag: null,
+          incident_id: 4,
+          alert_status: Math.random() > 0.5 ? "TRIGGERED" : "RESOLVED",
+          created_at: new Date(),
+          updated_at: new Date(),
+        };
+
+        const templateSiteVars = siteDataToVariables(siteData);
+        const templateAlertVars = alertToVariables(testAlert, testAlertData, templateSiteVars);
+        if (trigger.trigger_type === "webhook") {
+          resp = await sendWebhook(
+            triggerMetaParsed.webhook_body,
+            { ...templateAlertVars, ...templateSiteVars },
+            triggerMetaParsed.url,
+            JSON.stringify(triggerMetaParsed.headers),
+          );
+        } else if (trigger.trigger_type === "email") {
+          const toAddresses = triggerMetaParsed.to
+            .trim()
+            .split(",")
+            .map((addr) => addr.trim())
+            .filter((addr) => addr.length > 0);
+          resp = await sendEmail(
+            triggerMetaParsed.email_body,
+            triggerMetaParsed.email_subject,
+            { ...templateAlertVars, ...templateSiteVars },
+            toAddresses,
+            triggerMetaParsed.from,
+          );
+        } else if (trigger.trigger_type === "discord") {
+          resp = await sendDiscord(
+            triggerMetaParsed.discord_body,
+            { ...templateAlertVars, ...templateSiteVars },
+            triggerMetaParsed.url,
+          );
+        } else if (trigger.trigger_type === "slack") {
+          resp = await sendSlack(
+            triggerMetaParsed.slack_body,
+            { ...templateAlertVars, ...templateSiteVars },
+            triggerMetaParsed.url,
+          );
+        } else {
+          throw new Error("Unsupported trigger type for testing");
+        }
+      } else if (action == "testMonitor") {
+        let monitorID = data.monitor_id;
+        let monitors = await GetMonitorsParsed({ id: monitorID });
+        let monitor = monitors[0];
+        if (monitor.monitor_type === "NONE") {
+          throw new Error("Tests can't be run on monitor type NONE");
+        }
+        const monitorReducedType: MonitorWithType = {
+          tag: monitor.tag,
+          monitor_type: monitor.monitor_type,
+          type_data: monitor.type_data,
+          cron: monitor.cron ? monitor.cron : undefined,
+        };
+        const serviceClient = new Service(monitorReducedType);
+        resp = await serviceClient.execute();
+      } else if (action == "uploadImage") {
+        resp = await uploadImage(data);
+      } else if (action == "deleteImage") {
+        resp = await db.deleteImage(data.id);
+      } else if (action == "getPages") {
+        const pages = await GetAllPages();
+        // Fetch monitors for each page
+        const pagesWithMonitors = await Promise.all(
+          pages.map(async (page) => {
+            const monitors = await GetPageMonitors(page.id);
+            return { ...page, monitors };
+          }),
+        );
+        resp = pagesWithMonitors;
+      } else if (action == "createPage") {
+        resp = await CreatePage(data);
+      } else if (action == "updatePage") {
+        const { id, ...updateData } = data;
+        resp = await UpdatePage(id, updateData);
+      } else if (action == "deletePage") {
+        await DeletePage(data.id);
+        resp = { success: true };
+      } else if (action == "addMonitorToPage") {
+        await AddMonitorToPage(data.page_id, data.monitor_tag);
+        resp = { success: true };
+      } else if (action == "removeMonitorFromPage") {
+        await RemoveMonitorFromPage(data.page_id, data.monitor_tag);
+        resp = { success: true };
+      } else if (action == "reorderPageMonitors") {
+        await ReorderPageMonitors(data.page_id, data.monitor_tags);
+        resp = { success: true };
+      }
+      // ============ Maintenance Actions ============
+      else if (action == "getMaintenances") {
+        resp = await GetMaintenancesDashboard(data);
+      } else if (action == "getMaintenance") {
+        resp = await GetMaintenanceWithEvents(data.id);
+        if (!resp) {
+          throw new Error("Maintenance not found");
+        }
+      } else if (action == "createMaintenance") {
+        resp = await CreateMaintenance(data);
+      } else if (action == "updateMaintenance") {
+        const { id, ...updateData } = data;
+        await UpdateMaintenance(id, updateData);
+        resp = { success: true };
+      } else if (action == "deleteMaintenance") {
+        await DeleteMaintenance(data.id);
+        resp = { success: true };
+      } else if (action == "getMaintenanceEvents") {
+        resp = await GetMaintenanceEventsByMaintenanceId(data.maintenance_id);
+      } else if (action == "getMaintenanceEvent") {
+        resp = await GetMaintenanceEventById(data.id);
+        if (!resp) {
+          throw new Error("Maintenance event not found");
+        }
+      } else if (action == "createMaintenanceEvent") {
+        resp = await CreateMaintenanceEvent(data);
+      } else if (action == "updateMaintenanceEvent") {
+        const { id, ...updateData } = data;
+        await UpdateMaintenanceEvent(id, updateData);
+        resp = { success: true };
+      } else if (action == "updateMaintenanceEventStatus") {
+        resp = await UpdateMaintenanceEventStatus(data.id, data.status);
+      } else if (action == "deleteMaintenanceEvent") {
+        await DeleteMaintenanceEvent(data.id);
+        resp = { success: true };
+      } else if (action == "addMonitorToMaintenance") {
+        await AddMonitorToMaintenance(data.maintenance_id, data.monitor_tag);
+        resp = { success: true };
+      } else if (action == "removeMonitorFromMaintenance") {
+        await RemoveMonitorFromMaintenance(data.maintenance_id, data.monitor_tag);
+        resp = { success: true };
+      } else if (action == "getMaintenanceMonitors") {
+        resp = await GetMaintenanceMonitors(data.maintenance_id);
+      } else if (action == "updateMaintenanceMonitorImpact") {
+        await UpdateMaintenanceMonitorImpact(data.maintenance_id, data.monitor_tag, data.monitor_impact);
+        resp = { success: true };
+      }
+      // ============ Monitor Alert Config Actions ============
+      else if (action == "createMonitorAlertConfig") {
+        resp = await CreateMonitorAlertConfig(data);
+      } else if (action == "updateMonitorAlertConfig") {
+        resp = await UpdateMonitorAlertConfig(data);
+      } else if (action == "getMonitorAlertConfig" || action == "getMonitorAlertConfigById") {
+        resp = await GetMonitorAlertConfigById(data.id);
+        if (!resp) {
+          throw new Error("Monitor alert config not found");
+        }
+      } else if (action == "getMonitorAlertConfigsByMonitorTag") {
+        resp = await GetMonitorAlertConfigsByMonitorTag(data.monitor_tag);
+      } else if (action == "deleteMonitorAlertConfig") {
+        await DeleteMonitorAlertConfig(data.id);
+        resp = { success: true };
+      } else if (action == "toggleMonitorAlertConfigStatus") {
+        resp = await ToggleMonitorAlertConfigStatus(data.id);
+      } else if (action == "getAlertConfigsPaginated") {
+        const page = parseInt(String(data.page)) || 1;
+        const limit = parseInt(String(data.limit)) || 10;
+        const filter: { monitor_tag?: string; is_active?: "YES" | "NO"; alert_for?: "STATUS" | "LATENCY" | "UPTIME" } =
+          {};
+        if (data.monitor_tag) filter.monitor_tag = data.monitor_tag;
+        if (data.is_active) filter.is_active = data.is_active as "YES" | "NO";
+        if (data.alert_for) filter.alert_for = data.alert_for as "STATUS" | "LATENCY" | "UPTIME";
+        resp = await GetMonitorAlertConfigsPaginated(page, limit, Object.keys(filter).length > 0 ? filter : undefined);
+      } else if (action == "deleteMonitorAlertV2") {
+        const deleteIncident = data.deleteIncident === true;
+        // If deleteIncident is true, delete the incident first
+        if (deleteIncident && data.incident_id) {
+          await db.deleteIncident(data.incident_id);
+        }
+        resp = await DeleteMonitorAlertV2(data.id);
+      } else if (action == "updateMonitorAlertV2Status") {
+        resp = await UpdateMonitorAlertV2Status(data.id, data.status);
+      }
+
+      // ============ User Subscriptions (Admin) ============
+      else if (action == "getSubscribersByMethod") {
+        const { method, page = 1, limit = 25 } = data;
+        if (!method) {
+          throw new Error("Method is required");
+        }
+        resp = await GetSubscribersByMethod(method, page, limit);
+      } else if (action == "getSubscriberWithSubscriptions") {
+        // V2: subscriberId is actually the method_id from subscriber_methods table
+        const { subscriberId, method } = data;
+        if (!subscriberId || !method) {
+          throw new Error("subscriberId and method are required");
+        }
+        // Use V2 function which expects method_id
+        const result = await GetSubscriberWithSubscriptionsV2(subscriberId);
+        if (result) {
+          // Map V2 result to expected format for compatibility with existing UI
+          resp = {
+            subscriber: {
+              id: result.method.id,
+              subscriber_send: result.method.method_value,
+              subscriber_meta: result.user.email, // Store user email in meta for display
+              subscriber_type: result.method.method_type,
+              subscriber_status: result.method.status,
+              created_at: result.method.created_at,
+              updated_at: result.method.updated_at,
+            },
+            subscriptions: result.subscriptions.map((s) => ({
+              id: s.id,
+              subscriber_id: s.subscriber_method_id,
+              subscription_method: result.method.method_type,
+              event_type: s.event_type,
+              status: s.status,
+              created_at: s.created_at,
+              updated_at: s.updated_at,
+            })),
+          };
+        } else {
+          resp = { subscriber: null, subscriptions: [] };
+        }
+      } else if (action == "getSubscriberCountsByMethod") {
+        resp = await GetSubscriberCountsByMethod();
+      } else if (action == "deleteUserSubscription") {
+        const { subscriptionId } = data;
+        if (!subscriptionId) {
+          throw new Error("subscriptionId is required");
+        }
+        resp = await DeleteUserSubscription(subscriptionId);
+      } else if (action == "updateUserSubscriptionStatus") {
+        const { subscriptionId, status } = data;
+        if (!subscriptionId || !status) {
+          throw new Error("subscriptionId and status are required");
+        }
+        resp = await UpdateUserSubscriptionStatus(subscriptionId, status);
+      }
+      // ============ Email Template Config ============
+
+      // ============ General Email Templates ============
+      else if (action == "getGeneralEmailTemplates") {
+        resp = await GetAllGeneralEmailTemplates();
+      } else if (action == "getGeneralEmailTemplateById") {
+        const { templateId } = data;
+        if (!templateId) {
+          throw new Error("Template ID is required");
+        }
+        resp = await GetGeneralEmailTemplateById(templateId);
+        if (!resp) {
+          throw new Error("Template not found");
+        }
+      } else if (action == "updateGeneralEmailTemplate") {
+        const { templateId, template_subject, template_html_body, template_text_body } = data;
+        if (!templateId) {
+          throw new Error("Template ID is required");
+        }
+        resp = await UpdateGeneralEmailTemplate(templateId, {
+          template_subject,
+          template_html_body,
+          template_text_body,
+        });
+        if (!resp.success) {
+          throw new Error(resp.error);
+        }
+      }
+      // ============ Admin Subscribers Management ============
+      else if (action == "getAdminSubscribers") {
+        const page = parseInt(String(data.page)) || 1;
+        const limit = parseInt(String(data.limit)) || 10;
+        resp = await GetAdminSubscribersPaginated(page, limit);
+      } else if (action == "adminUpdateSubscriptionStatus") {
+        const { methodId, eventType, enabled } = data;
+        if (!methodId || !eventType) {
+          throw new Error("Method ID and event type are required");
+        }
+        resp = await AdminUpdateSubscriptionStatus(methodId, eventType, enabled);
+        if (!resp.success) {
+          throw new Error(resp.error);
+        }
+      } else if (action == "adminDeleteSubscriber") {
+        const { methodId } = data;
+        if (!methodId) {
+          throw new Error("Method ID is required");
+        }
+        resp = await AdminDeleteSubscriber(methodId);
+        if (!resp.success) {
+          throw new Error(resp.error);
+        }
+      } else if (action == "adminAddSubscriber") {
+        const { email, incidents, maintenances } = data;
+        if (!email) {
+          throw new Error("Email is required");
+        }
+        resp = await AdminAddSubscriber(email, incidents ?? false, maintenances ?? false);
+        if (!resp.success) {
+          throw new Error(resp.error);
+        }
+      } else if (action == "getSubscriptionsConfig") {
+        let subscriptionsSettings = await GetSiteDataByKey("subscriptionsSettings");
+        if (!!!subscriptionsSettings) {
+          subscriptionsSettings = {
+            enable: false,
+            methods: {
+              emails: {
+                incidents: true,
+                maintenances: true,
+              },
+            },
+          };
+        }
+        resp = subscriptionsSettings;
+      } else if (action == "getSiteDataByKey") {
+        const { key } = data;
+        if (!key) {
+          throw new Error("Key is required");
+        }
+        let siteData = await GetSiteDataByKey(key);
+        if (!!!siteData) {
+          throw new Error("Site data not found for the given key");
+        }
+        resp = siteData;
+      } else if (action == "updateSubscriptionsConfig") {
+        resp = await InsertKeyValue("subscriptionsSettings", JSON.stringify(data));
+      } else if (action == "getRoles") {
+        resp = await GetAllRoles();
+      } else if (action == "getAllPermissions") {
+        resp = await GetAllPermissions();
+      } else if (action == "getRolePermissions") {
+        resp = await GetRolePermissions(data.roleId);
+      } else if (action == "updateRolePermissions") {
+        resp = await UpdateRolePermissions(data.roleId, data.permissionIds);
+      } else if (action == "getRoleUsers") {
+        resp = await GetRoleUsers(data.roleId);
+      } else if (action == "addUserToRole") {
+        resp = await AddUserToRole(data.roleId, data.userId);
+      } else if (action == "removeUserFromRole") {
+        resp = await RemoveUserFromRole(data.roleId, data.userId);
+      } else if (action == "createRole") {
+        resp = await CreateRole({ role_id: data.role_id, name: data.name });
+      } else if (action == "updateRole") {
+        resp = await UpdateRole(data.roleId, { name: data.name, status: data.status });
+      } else if (action == "deleteRole") {
+        resp = await DeleteRole(data.roleId, data.options);
+      } else if (action == "listDockerContainers") {
+        resp = await ListDockerContainers(data);
+      }
+      // ============ OIDC Group-Role Mappings ============
+      else if (action == "getOidcGroupRoleMappings") {
+        resp = await db.getAllOidcGroupRoleMappings();
+      } else if (action == "upsertOidcGroupRoleMapping") {
+        if (!data.oidc_group || typeof data.oidc_group !== "string" || !data.oidc_group.trim()) {
+          throw new Error("OIDC group name is required");
+        }
+        if (!data.role_id || typeof data.role_id !== "string") {
+          throw new Error("Role ID is required");
+        }
+        const role = await db.getRoleById(data.role_id);
+        if (!role) {
+          throw new Error(`Role "${data.role_id}" not found`);
+        }
+        await db.upsertOidcGroupRoleMapping({
+          oidc_group: data.oidc_group.trim(),
+          role_id: data.role_id,
+        });
+        resp = { success: true };
+      } else if (action == "deleteOidcGroupRoleMapping") {
+        const mappingId = Number(data.id);
+        if (!Number.isInteger(mappingId) || mappingId <= 0) {
+          throw new Error("Mapping ID is required");
+        }
+        await db.deleteOidcGroupRoleMapping(mappingId);
+        resp = { success: true };
+      } else if (action == "testOidcConnection") {
+        resp = await TestOidcConnection(data.settings);
+      } else if (action == "getOidcSettingsMasked") {
+        const raw = await GetSiteDataByKey("oidcSettings");
+        if (raw && typeof raw === "object") {
+          const settings = { ...(raw as Record<string, unknown>) };
+          if (settings.client_secret && typeof settings.client_secret === "string") {
+            settings.client_secret = MaskString(settings.client_secret);
+          }
+          resp = settings;
+        } else {
+          resp = raw;
+        }
+      }
+
+  return resp;
+}
+
+async function storeSiteData(data: { [x: string]: any }) {
+  for (const key in data) {
+    if (Object.prototype.hasOwnProperty.call(data, key)) {
+      let element = data[key];
+      if (key === "socialPreviewImage" && (element === null || element === undefined)) {
+        element = "";
+      }
+      // If oidcSettings is saved without client_secret, preserve the existing one.
+      // An explicit empty string clears it.
+      if (key === "oidcSettings" && typeof element === "string") {
+        try {
+          const newSettings = JSON.parse(element);
+          if (newSettings.client_secret === undefined) {
+            const existing = await GetSiteDataByKey("oidcSettings");
+            if (existing && typeof existing === "object") {
+              newSettings.client_secret = (existing as Record<string, unknown>).client_secret;
+              element = JSON.stringify(newSettings);
+            }
+          }
+        } catch {
+          // If parsing fails, proceed with the original value
+        }
+      }
+      await InsertKeyValue(key, element);
+
+      // Clear OIDC config cache when settings change so logins
+      // pick up new credentials immediately
+      if (key === "oidcSettings") {
+        ClearOidcConfigCache();
+      }
+    }
+  }
+  return { success: true };
+}
+
+interface ImageUploadData {
+  base64: string; // base64 encoded image data (without data URI prefix)
+  mimeType: string;
+  fileName?: string;
+  maxWidth?: number;
+  maxHeight?: number;
+  forceDimensions?: boolean;
+  prefix?: string; // prefix for the ID (e.g., "logo_", "favicon_")
+}
+
+async function uploadImage(data: ImageUploadData): Promise<{ id: string; url: string }> {
+  const {
+    base64,
+    mimeType,
+    fileName,
+    maxWidth = 256,
+    maxHeight = 256,
+    forceDimensions = false,
+    prefix = "img_",
+  } = data;
+
+  if (!base64) {
+    throw new Error("Image data is required");
+  }
+
+  const allowedMimeTypes = ["image/png", "image/jpeg", "image/jpg", "image/webp", "image/heic", "image/heif"];
+  if (!allowedMimeTypes.includes(mimeType)) {
+    throw new Error(`Invalid image type. Allowed types: ${allowedMimeTypes.join(", ")}`);
+  }
+
+  // Decode base64 to buffer
+  const imageBuffer = Buffer.from(base64, "base64");
+  if (!imageBuffer.length) {
+    throw new Error("Invalid image data");
+  }
+
+  if (imageBuffer.length > GC.MAX_UPLOAD_BYTES) {
+    throw new Error("Image is too large. Maximum upload size is 5MB");
+  }
+
+  const normalizedRequestedMime = mimeType === "image/jpg" ? "image/jpeg" : mimeType;
+  const maybeTextHeader = imageBuffer.subarray(0, 4096).toString("utf8");
+  const looksLikeSvg = /<svg[\s>]/i.test(maybeTextHeader) || /<\?xml/i.test(maybeTextHeader);
+
+  if (normalizedRequestedMime === "image/svg+xml" || looksLikeSvg) {
+    throw new Error("SVG uploads are not allowed");
+  }
+
+  let processedBuffer: Buffer;
+  let finalMimeType = mimeType;
+  let width: number | undefined;
+  let height: number | undefined;
+
+  // Pre-convert HEIC/HEIF to JPEG before passing to sharp (sharp may lack HEVC codec)
+  let sharpInputBuffer = imageBuffer;
+  const heicSignature = imageBuffer.subarray(4, 12).toString("ascii");
+  const isHeicData = heicSignature.includes("ftyp");
+  if (isHeicData) {
+    const converted = await heicConvert({
+      buffer: new Uint8Array(imageBuffer) as unknown as ArrayBuffer,
+      format: "JPEG",
+      quality: 0.85,
+    });
+    sharpInputBuffer = Buffer.from(converted);
+  }
+
+  // Process with sharp and normalize output
+  const image = sharp(sharpInputBuffer, { limitInputPixels: GC.MAX_INPUT_PIXELS });
+  const metadata = await image.metadata();
+
+  const formatToMime: Record<string, string> = {
+    png: "image/png",
+    jpeg: "image/jpeg",
+    webp: "image/webp",
+    svg: "image/svg+xml",
+    heic: "image/heic",
+    heif: "image/heif",
+  };
+
+  const detectedMimeType = metadata.format ? formatToMime[metadata.format] : undefined;
+  if (!detectedMimeType) {
+    throw new Error("Could not detect a valid image format");
+  }
+
+  if (detectedMimeType === "image/svg+xml") {
+    throw new Error("SVG uploads are not allowed");
+  }
+
+  // HEIC/HEIF files often have .jpg extension (e.g. iPhone photos); allow the mismatch
+  const isHeicDetected = detectedMimeType === "image/heic" || detectedMimeType === "image/heif";
+  const isHeicRequested = normalizedRequestedMime === "image/heic" || normalizedRequestedMime === "image/heif";
+  if (normalizedRequestedMime !== detectedMimeType && !isHeicDetected && !isHeicRequested) {
+    throw new Error("Image MIME type does not match file content");
+  }
+
+  const sourceWidth = metadata.width || maxWidth;
+  const sourceHeight = metadata.height || maxHeight;
+
+  if (sourceWidth > GC.MAX_IMAGE_DIMENSION || sourceHeight > GC.MAX_IMAGE_DIMENSION) {
+    throw new Error(
+      `Image dimensions exceed maximum allowed size of ${GC.MAX_IMAGE_DIMENSION}x${GC.MAX_IMAGE_DIMENSION}`,
+    );
+  }
+
+  const boundedMaxWidth = Math.min(maxWidth, GC.MAX_IMAGE_DIMENSION);
+  const boundedMaxHeight = Math.min(maxHeight, GC.MAX_IMAGE_DIMENSION);
+
+  // Calculate new dimensions.
+  let newWidth = sourceWidth;
+  let newHeight = sourceHeight;
+
+  if (forceDimensions) {
+    newWidth = Math.max(1, boundedMaxWidth);
+    newHeight = Math.max(1, boundedMaxHeight);
+  } else if (newWidth > boundedMaxWidth || newHeight > boundedMaxHeight) {
+    const ratio = Math.min(boundedMaxWidth / newWidth, boundedMaxHeight / newHeight);
+    newWidth = Math.max(1, Math.round(newWidth * ratio));
+    newHeight = Math.max(1, Math.round(newHeight * ratio));
+  }
+
+  width = newWidth;
+  height = newHeight;
+
+  // Keep JPEG as JPEG; convert HEIC/HEIF to JPEG; convert everything else (WebP/PNG) to PNG.
+  if (detectedMimeType === "image/jpeg" || isHeicDetected) {
+    processedBuffer = await image
+      .resize(newWidth, newHeight, {
+        fit: forceDimensions ? "cover" : "inside",
+        position: "centre",
+      })
+      .jpeg({ quality: 85 })
+      .toBuffer();
+    finalMimeType = "image/jpeg";
+  } else {
+    processedBuffer = await image
+      .resize(newWidth, newHeight, {
+        fit: forceDimensions ? "cover" : "inside",
+        position: "centre",
+      })
+      .png()
+      .toBuffer();
+    finalMimeType = "image/png";
+  }
+
+  // Generate ID with nanoid and extension
+  const fileExtension = finalMimeType === "image/jpeg" ? "jpg" : "png";
+  const id = `${nanoid(16)}.${fileExtension}`;
+
+  // Convert processed image back to base64
+  const processedBase64 = processedBuffer.toString("base64");
+
+  // Store in database
+  await db.insertImage({
+    id,
+    data: processedBase64,
+    mime_type: finalMimeType,
+    original_name: fileName || null,
+    width: width || null,
+    height: height || null,
+    size: processedBuffer.length,
+  });
+
+  return {
+    id,
+    url: `/assets/images/${id}`,
+  };
+}
