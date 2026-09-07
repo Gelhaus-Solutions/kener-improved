@@ -1,6 +1,11 @@
 import Knex from "knex";
 import type { Knex as KnexType } from "knex";
-import { runWithWorkerKnex } from "./poolContext.js";
+import { runWithWorkerKnex, getWorkerKnex } from "./poolContext.js";
+import { runInTrx, getTrx } from "./trxContext.js";
+
+// A transaction open longer than this is almost always doing non-database work
+// inside the body. Warned about in development only.
+const SLOW_TRANSACTION_MS = 250;
 
 // Import all repositories
 import { MonitoringRepository } from "./repositories/monitoring.js";
@@ -881,6 +886,58 @@ class DbImpl {
    */
   runInWorkerContext<T>(fn: () => Promise<T>): Promise<T> {
     return runWithWorkerKnex(this.workerKnex, fn);
+  }
+
+  /**
+   * Runs `fn` inside a database transaction that every repository call made
+   * within it automatically joins. Commits when `fn` resolves, rolls back when
+   * it throws.
+   *
+   *     await db.withTransaction(async () => {
+   *       await db.createIncident(...);
+   *       await db.addIncidentMonitor(...);   // same transaction, no plumbing
+   *     });
+   *
+   * **Reentrant.** If a transaction is already open in this context, `fn` joins
+   * it and does not start a nested one. So a helper that wraps its own writes
+   * stays correct when called from inside a larger transaction: the outermost
+   * caller decides the commit boundary. The consequence is that an inner
+   * `withTransaction` cannot commit independently, which is the intended
+   * behaviour and not a limitation to work around.
+   *
+   * **Keep the body to database work only.** No `fetch`, no queue pushes, no
+   * `GetAllSiteData()` (it reads Redis). On SQLite this is not a style
+   * preference: better-sqlite3 transactions are synchronous and hold a lock on
+   * the entire database file, so awaiting anything slow inside one stalls every
+   * other query in the process. Gather what you need first, then open the
+   * transaction. Compute, notify and enqueue after it commits, since work
+   * enqueued inside a transaction can be picked up by a worker before the
+   * transaction commits, and then it reads state that does not exist yet.
+   */
+  async withTransaction<T>(fn: () => Promise<T>): Promise<T> {
+    const existing = getTrx();
+    if (existing) {
+      // Already inside one: join it. Nesting here would either deadlock on
+      // SQLite or create a savepoint whose rollback semantics differ per
+      // dialect, and neither is what a caller expects.
+      return await fn();
+    }
+
+    const knex = getWorkerKnex() ?? this.knex;
+    const startedAt = Date.now();
+    try {
+      return await knex.transaction((trx) => runInTrx(trx, fn));
+    } finally {
+      // Dev-only, because the cost of a long transaction is invisible until it
+      // is someone else's timeout. See the SQLite note above.
+      const elapsed = Date.now() - startedAt;
+      if (elapsed > SLOW_TRANSACTION_MS && process.env.NODE_ENV !== "production") {
+        console.warn(
+          `Slow transaction: held for ${elapsed}ms. Transaction bodies should do database work only; ` +
+            `move fetches, queue pushes and cache reads outside. See DbImpl.withTransaction.`,
+        );
+      }
+    }
   }
 
   /** Probes database connectivity with a trivial query. Never throws. */

@@ -1,5 +1,6 @@
 import type { Knex as KnexType } from "knex";
 import { getWorkerKnex } from "../poolContext.js";
+import { getTrx } from "../trxContext.js";
 
 // Filter types for queries
 export interface MonitorFilter {
@@ -45,13 +46,20 @@ export abstract class BaseRepository {
   /**
    * The Knex instance for the current execution context.
    *
-   * Background jobs run inside a worker-pool context (set in queues/q.ts), so
-   * their queries use the dedicated worker connection pool. Everything else —
-   * SvelteKit requests, startup — falls back to the web pool this repository
-   * was constructed with. This keeps a burst of background jobs from exhausting
-   * the connections that serve page loads. See poolContext.ts and knexfile.ts.
+   * Resolved per call, in priority order:
+   *
+   *   1. An ambient transaction, if one is open (db.withTransaction). Everything
+   *      inside it must go through the same connection or it is not in the
+   *      transaction at all, so this wins over any pool choice.
+   *   2. The worker connection pool, when running inside a background job
+   *      (set in queues/q.ts). This keeps a burst of jobs from exhausting the
+   *      connections that serve page loads.
+   *   3. The web pool this repository was constructed with: SvelteKit requests,
+   *      startup, anything else.
+   *
+   * See trxContext.ts, poolContext.ts and knexfile.ts.
    */
   protected get knex(): KnexType {
-    return getWorkerKnex() ?? this.fallbackKnex;
+    return getTrx() ?? getWorkerKnex() ?? this.fallbackKnex;
   }
 }
