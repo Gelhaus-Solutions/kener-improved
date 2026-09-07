@@ -1,3 +1,10 @@
+> [!NOTE]
+> **This is a fork.** [`Gelhaus-Solutions/kener-improved`](https://github.com/Gelhaus-Solutions/kener-improved)
+> tracks [`rajnandan1/kener`](https://github.com/rajnandan1/kener) and merges upstream automatically.
+> The badges and links below point at the upstream project, which remains the
+> home of the software — please star, sponsor and report bugs there.
+> See [FORK.md](FORK.md) for what differs here and how the sync works.
+
 # Kener - Stunning Status Pages
 
 <p align="center">

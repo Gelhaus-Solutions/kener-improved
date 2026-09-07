@@ -1,0 +1,176 @@
+name: Sync with upstream
+
+on:
+  schedule:
+    # Daily at 04:17 UTC. Off the hour so it does not queue behind the crowd.
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+    inputs:
+      upstream_branch:
+        description: "Upstream branch to merge"
+        required: false
+        type: string
+        default: "main"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_URL: https://github.com/rajnandan1/kener.git
+  UPSTREAM_BRANCH: ${{ inputs.upstream_branch || 'main' }}
+  SYNC_LABEL: upstream-sync
+
+jobs:
+  sync:
+    name: Merge upstream into a sync PR
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the fork
+        uses: actions/checkout@v4.2.2
+        with:
+          fetch-depth: 0
+          # A PAT here (repo scope) lets the sync PR trigger the test workflow.
+          # With the default GITHUB_TOKEN, GitHub suppresses workflow runs on
+          # PRs it opens, so the PR arrives without CI results.
+          token: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # Stacking sync PRs merges upstream on top of an unreviewed merge, which
+      # makes conflicts harder to read. Wait for the open one to land instead.
+      - name: Check for an already-open sync PR
+        id: existing
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          NUMBER="$(gh pr list --state open --label "$SYNC_LABEL" \
+            --json number --jq '.[0].number // empty')"
+          if [ -n "$NUMBER" ]; then
+            echo "Sync PR #$NUMBER is still open; skipping this run." >> "$GITHUB_STEP_SUMMARY"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure git identity
+        if: steps.existing.outputs.skip == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create sync branch
+        if: steps.existing.outputs.skip == 'false'
+        id: branch
+        run: |
+          BRANCH="sync/upstream-$(date -u +%Y-%m-%d)-${GITHUB_RUN_ID}"
+          git checkout -b "$BRANCH"
+          echo "name=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Merge upstream and auto-resolve
+        if: steps.existing.outputs.skip == 'false'
+        id: sync
+        run: ./scripts/sync-upstream.sh
+
+      - name: Push sync branch
+        if: steps.existing.outputs.skip == 'false' && steps.sync.outputs.has_changes == 'true'
+        run: git push origin "HEAD:${{ steps.branch.outputs.name }}"
+
+      - name: Open sync pull request
+        if: steps.existing.outputs.skip == 'false' && steps.sync.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ steps.branch.outputs.name }}
+          STATUS: ${{ steps.sync.outputs.status }}
+          UPSTREAM_SHA: ${{ steps.sync.outputs.upstream_sha }}
+          COMMIT_COUNT: ${{ steps.sync.outputs.commit_count }}
+          AUTO_RESOLVED: ${{ steps.sync.outputs.auto_resolved }}
+          CONFLICTS: ${{ steps.sync.outputs.conflicts }}
+          WARNINGS: ${{ steps.sync.outputs.warnings }}
+        run: |
+          set -euo pipefail
+
+          gh label create "$SYNC_LABEL" --color 1D76DB \
+            --description "Automated merge from rajnandan1/kener" 2>/dev/null || true
+          gh label create "needs-manual-resolution" --color B60205 \
+            --description "Automated sync left conflict markers" 2>/dev/null || true
+
+          SHORT="$(git rev-parse --short "$UPSTREAM_SHA")"
+
+          {
+            echo "Automated merge of \`rajnandan1/kener@${SHORT}\` into this fork."
+            echo
+            echo "- **Upstream commits merged:** ${COMMIT_COUNT}"
+            echo "- **Upstream ref:** [\`${SHORT}\`](https://github.com/rajnandan1/kener/commit/${UPSTREAM_SHA})"
+            echo
+
+            if [ -n "$AUTO_RESOLVED" ]; then
+              echo "### Auto-resolved"
+              echo "$AUTO_RESOLVED" | sed '/^$/d; s/^/- /'
+              echo
+            fi
+
+            if [ "$STATUS" = "conflicts" ]; then
+              echo "### ⚠️ Needs manual resolution"
+              echo
+              echo "These files were committed **with conflict markers** — check them out and fix before merging:"
+              echo
+              echo "$CONFLICTS" | sed '/^$/d; s/^/- `/; s/$/`/'
+              echo
+            fi
+
+            if [ -n "$WARNINGS" ]; then
+              echo "### ⚠️ Warnings"
+              echo
+              echo "$WARNINGS" | sed '/^$/d; s/^/- /'
+              echo
+            fi
+
+            if [ "$STATUS" = "merged" ]; then
+              echo "### ✅ No manual resolution needed"
+              echo
+            fi
+
+            echo "### Upstream changelog"
+            echo
+            echo '```'
+            git log --no-merges --oneline "HEAD~1..${UPSTREAM_SHA}" | head -50
+            echo '```'
+            echo
+            echo "<sub>Opened by \`.github/workflows/sync-upstream.yml\`. See [FORK.md](../blob/main/FORK.md).</sub>"
+          } > /tmp/pr-body.md
+
+          LABELS="$SYNC_LABEL"
+          TITLE="chore(sync): merge upstream ${SHORT}"
+          case "$STATUS" in
+            conflicts)
+              LABELS="$LABELS,needs-manual-resolution"
+              TITLE="chore(sync): merge upstream ${SHORT} (conflicts)"
+              ;;
+            warnings)
+              LABELS="$LABELS,needs-manual-resolution"
+              TITLE="chore(sync): merge upstream ${SHORT} (needs attention)"
+              ;;
+          esac
+
+          gh pr create \
+            --base "${{ github.event.repository.default_branch }}" \
+            --head "$BRANCH" \
+            --title "$TITLE" \
+            --body-file /tmp/pr-body.md \
+            --label "$LABELS"
+
+          cat /tmp/pr-body.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report no-op
+        if: steps.existing.outputs.skip == 'false' && steps.sync.outputs.has_changes != 'true'
+        run: echo "Already up to date with upstream." >> "$GITHUB_STEP_SUMMARY"

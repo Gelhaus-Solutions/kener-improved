@@ -25,7 +25,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/rajnandan1/kener.git"
+    "url": "https://github.com/Gelhaus-Solutions/kener-improved.git"
+  },
+  "homepage": "https://github.com/Gelhaus-Solutions/kener-improved#readme",
+  "bugs": {
+    "url": "https://github.com/Gelhaus-Solutions/kener-improved/issues"
   },
   "scripts": {
     "build": "node scripts/build-sveltekit.js && node scripts/build-server.js",
@@ -49,6 +53,7 @@
     "schedule": "vite-node src/lib/server/startup.ts",
     "seed": "npx knex seed:run",
     "start": "node build/main.js",
+    "sync:upstream": "./scripts/sync-upstream.sh",
     "test": "cross-env TZ=UTC vitest run",
     "test:client": "vitest run --project=client",
     "test:server": "cross-env TZ=UTC vitest run --project=server",

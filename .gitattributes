@@ -1,1 +1,18 @@
 * text=auto eol=lf
+
+# --- Fork-owned files -------------------------------------------------------
+# These diverge from upstream (rajnandan1/kener) by design. `merge=ours` keeps
+# the fork's version during an upstream sync instead of raising a conflict every
+# time upstream edits them. The driver is registered by scripts/sync-upstream.sh
+# via `git config merge.ours.driver true` — without that, git falls back to a
+# normal merge, so run syncs through that script.
+/FORK.md                                merge=ours
+/.github/FUNDING.yml                    merge=ours
+/.github/workflows/sync-upstream.yml    merge=ours
+/.github/workflows/publish-main.yml     merge=ours
+/.github/workflows/publish-release.yml  merge=ours
+/.github/workflows/publish-images.yml   merge=ours
+/.github/workflows/create-release.yml   merge=ours
+/docs/agents/issue-tracker.md           merge=ours
+/scripts/sync-upstream.sh               merge=ours
+/scripts/merge-package-json.mjs         merge=ours

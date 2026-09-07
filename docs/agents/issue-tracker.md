@@ -1,6 +1,12 @@
 # Issue tracker: GitHub
 
-Issues and PRDs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
+Issues and PRDs for this repo live as GitHub issues in
+[`Gelhaus-Solutions/kener-improved`](https://github.com/Gelhaus-Solutions/kener-improved/issues).
+Use the `gh` CLI for all operations.
+
+This is a fork (see [FORK.md](../../FORK.md)). A bug that also exists upstream in
+`rajnandan1/kener` belongs upstream — file it there so the fix reaches everyone
+and arrives here on the next sync. Track fork-specific work here.
 
 ## Conventions
 
@@ -11,7 +17,12 @@ Issues and PRDs for this repo live as GitHub issues. Use the `gh` CLI for all op
 - **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
 - **Close**: `gh issue close <number> --comment "..."`
 
-Infer the repo from `git remote -v` — `gh` does this automatically when run inside a clone.
+This clone has two remotes (`origin` and `upstream`), so `gh` cannot always infer
+the target. Pass it explicitly:
+
+```bash
+gh issue list --repo Gelhaus-Solutions/kener-improved
+```
 
 ## When a skill says "publish to the issue tracker"
 

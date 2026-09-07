@@ -70,6 +70,10 @@ Each monitor type has a dedicated implementation in `src/lib/server/services/`:
 
 ## Key Conventions
 
+- Always ask a lot of questions.
+- Never commit with any desc or coauthor. Use only a small conventional title for regular commits too. 
+- Never use any em-dashes.
+
 ### Svelte 5 + TypeScript
 
 - Use **TypeScript** for new/modified code
@@ -120,6 +124,26 @@ Locale files in `src/lib/locales/`. Add translations by creating `{code}.json` a
 Required: `KENER_SECRET_KEY`, `ORIGIN`, `REDIS_URL`
 Optional: `DATABASE_URL` (defaults to SQLite), `KENER_BASE_PATH`, `PORT` (default 3000), `RESEND_API_KEY`, `RESEND_SENDER_EMAIL`
 
+## This repo is a fork
+
+`Gelhaus-Solutions/kener-improved` is a soft fork of `rajnandan1/kener`, kept
+deliberately close to upstream so that automated syncs stay cheap. **Read
+`FORK.md` before changing anything outside `src/`.**
+
+Practical rules when working here:
+
+- **Do not rename or rebrand the product.** "Kener", the UI strings, the seeded
+  site data and the docs content are intentionally identical to upstream.
+  Renaming them would make every future upstream merge conflict.
+- **Prefer fixing things upstream.** If a change is not fork-specific, branch
+  from `upstream/main` and open the PR against `rajnandan1/kener`. It reaches
+  this fork on the next sync.
+- **Never `git merge upstream/main` directly.** Use `npm run sync:upstream`. The
+  `merge=ours` driver that `.gitattributes` relies on is registered by that
+  script; a plain merge silently ignores it.
+- **Adding a fork-owned file?** Add it to the *Fork-owned files* block in
+  `.gitattributes` and to the divergence table in `FORK.md`.
+
 ## Skills
 
 Read `.claude/skills/` for specialized instructions on:
@@ -132,7 +156,7 @@ Read `.claude/skills/` for specialized instructions on:
 
 ### Issue tracker
 
-Issues and PRDs are tracked in GitHub Issues for `rajnandan1/kener`. See `docs/agents/issue-tracker.md`.
+Issues and PRDs are tracked in GitHub Issues for `Gelhaus-Solutions/kener-improved`. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
