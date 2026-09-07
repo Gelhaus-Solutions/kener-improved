@@ -173,111 +173,161 @@ const getQueue = () => {
   return alertingQueue;
 };
 
+/**
+ * Evaluates whether the monitor currently violates the alert condition.
+ *
+ * Returns null for a config whose alert_for this build does not handle, which
+ * the caller treats as "nothing to do" rather than an error.
+ */
+async function evaluateIsAffected(job: JobData, threshold: number): Promise<boolean | null> {
+  const { monitor_tag, numerator, denominator, monitor_alerts_configured } = job;
+  const alertValue = monitor_alerts_configured.alert_value;
+
+  if (monitor_alerts_configured.alert_for === GC.STATUS) {
+    //alertValue can be DOWN or DEGRADED
+    return await db.consecutivelyStatusFor(monitor_tag, alertValue, threshold);
+  }
+  if (monitor_alerts_configured.alert_for === GC.LATENCY) {
+    return await db.consecutivelyLatencyGreaterThan(monitor_tag, parseFloat(alertValue), threshold);
+  }
+  if (monitor_alerts_configured.alert_for === GC.UPTIME) {
+    return await IsUptimeLessThanXPercent(monitor_tag, parseFloat(alertValue), threshold, numerator, denominator);
+  }
+  return null;
+}
+
+/** The recovery side of evaluateIsAffected: has the monitor been healthy long enough to resolve. */
+async function evaluateIsRecovered(job: JobData, threshold: number): Promise<boolean> {
+  const { monitor_tag, numerator, denominator, monitor_alerts_configured } = job;
+  const alertValue = monitor_alerts_configured.alert_value;
+
+  if (monitor_alerts_configured.alert_for === GC.STATUS) {
+    return await db.consecutivelyStatusFor(monitor_tag, GC.UP, threshold);
+  }
+  if (monitor_alerts_configured.alert_for === GC.LATENCY) {
+    return await db.consecutivelyLatencyLessThan(monitor_tag, parseFloat(alertValue), threshold);
+  }
+  if (monitor_alerts_configured.alert_for === GC.UPTIME) {
+    return await IsUptimeGreaterThanXPercent(monitor_tag, parseFloat(alertValue), threshold, numerator, denominator);
+  }
+  return false;
+}
+
+/**
+ * Sends the configured triggers, swallowing failures.
+ *
+ * Deliberately does not throw. By the time this runs the alert state is already
+ * committed, and a retried job re-reads that state and finds nothing to do, so
+ * throwing would fail the job without ever redelivering the message. Delivery
+ * needs its own durable record to retry properly; that is what the P2 event bus
+ * is for.
+ */
+async function notifyQuietly(
+  activeAlert: MonitorAlertV2Record,
+  config: MonitorAlertConfigRecord,
+  templateSiteVars: SiteDataForNotification,
+  monitorTag: string,
+): Promise<void> {
+  try {
+    await sendAlertNotifications(activeAlert, config, templateSiteVars, monitorTag);
+  } catch (error) {
+    console.error("Error sending alert notifications:", error);
+  }
+}
+
 const addWorker = () => {
   if (worker) return worker;
 
+  // Error handling here is deliberately not uniform, so read before widening a
+  // catch. This queue is created with attempts: 3 and exponential backoff, and
+  // wrapping the whole body in one catch (as it used to be) made every one of
+  // those retries dead code: a transient database failure silently dropped an
+  // alert. What throws and what does not:
+  //
+  //   evaluation    swallowed - a malformed config is permanent, and retrying
+  //                 it three times only delays the same failure
+  //   persistence   THROWS    - exactly what the retries exist for
+  //   notification  swallowed - see notifyQuietly
+  //
+  // Anything added here that must not be lost (the P2 outbox emit, in
+  // particular) belongs in the persistence section, unguarded.
   worker = q.createWorker(getQueue(), async (job: Job): Promise<void> => {
-    const { monitor_name, monitor_tag, numerator, denominator, status, monitor_alerts_configured } =
-      job.data as JobData;
+    const jobData = job.data as JobData;
+    const { monitor_name, monitor_tag, monitor_alerts_configured } = jobData;
     const siteData = await GetAllSiteData();
     const templateSiteVars = siteDataToVariables(siteData);
-    try {
-      const typeOfConfig = monitor_alerts_configured.alert_for;
-      const alertValue = monitor_alerts_configured.alert_value;
-      const failureThreshold = monitor_alerts_configured.failure_threshold;
-      const successThreshold = monitor_alerts_configured.success_threshold;
 
-      // Determine if monitor is affected based on alert type
-      let isAffected = false;
-      let isUp = false;
-      if (typeOfConfig === GC.STATUS) {
-        //alertValue can be DOWN or DEGRADED
-        isAffected = await db.consecutivelyStatusFor(monitor_tag, alertValue, failureThreshold);
-      } else if (typeOfConfig === GC.LATENCY) {
-        isAffected = await db.consecutivelyLatencyGreaterThan(monitor_tag, parseFloat(alertValue), failureThreshold);
-      } else if (typeOfConfig === GC.UPTIME) {
-        isAffected = await IsUptimeLessThanXPercent(
-          monitor_tag,
-          parseFloat(alertValue),
-          failureThreshold,
-          numerator,
-          denominator,
-        );
-      } else {
+    // ---- Evaluation ----------------------------------------------------
+    let isAffected: boolean | null;
+    try {
+      isAffected = await evaluateIsAffected(jobData, monitor_alerts_configured.failure_threshold);
+    } catch (error) {
+      console.error("Error evaluating alert condition:", error);
+      return;
+    }
+    if (isAffected === null) {
+      return;
+    }
+
+    // ---- State and persistence -----------------------------------------
+    // No try/catch by design. A throw fails the job and BullMQ retries it.
+    const alertsExisting = await GetMonitorAlertsV2({
+      config_id: monitor_alerts_configured.id,
+      monitor_tag: monitor_tag,
+      alert_status: GC.TRIGGERED,
+    });
+    let activeAlert: MonitorAlertV2Record | null = alertsExisting.length > 0 ? alertsExisting[0] : null;
+
+    if (isAffected) {
+      // Already alerting for this monitor and config; nothing to do.
+      if (activeAlert) {
         return;
       }
 
-      // Get existing alerts for this specific monitor + config combination
-      let alertsExisting = await GetMonitorAlertsV2({
-        config_id: monitor_alerts_configured.id,
-        monitor_tag: monitor_tag,
-        alert_status: GC.TRIGGERED,
-      });
-      let activeAlert = null;
-      if (alertsExisting.length > 0) {
-        activeAlert = alertsExisting[0];
-      }
-
-      if (isAffected) {
-        // Trigger alert if not already active for this monitor
-        if (!activeAlert) {
-          activeAlert = await CreateMonitorAlertV2(monitor_alerts_configured.id, monitor_tag);
-          if (monitor_alerts_configured.create_incident === GC.YES) {
-            let newIncidentNumber = await createNewIncident(
-              activeAlert,
-              monitor_alerts_configured,
-              monitor_name,
-              monitor_tag,
-            );
-            //update alert with incident number
-            if (newIncidentNumber && newIncidentNumber.incident_id > 0) {
-              activeAlert = await AddIncidentToAlert(activeAlert.id, newIncidentNumber.incident_id);
-            }
-          }
-          // Send triggered alert notifications
-          await sendAlertNotifications(activeAlert, monitor_alerts_configured, templateSiteVars, monitor_tag);
-        }
-      } else {
-        // Resolve any existing alert
-        if (activeAlert) {
-          if (typeOfConfig === GC.STATUS) {
-            isUp = await db.consecutivelyStatusFor(monitor_tag, GC.UP, successThreshold);
-          } else if (typeOfConfig === GC.LATENCY) {
-            isUp = await db.consecutivelyLatencyLessThan(monitor_tag, parseFloat(alertValue), successThreshold);
-          } else if (typeOfConfig === GC.UPTIME) {
-            isUp = await IsUptimeGreaterThanXPercent(
-              monitor_tag,
-              parseFloat(alertValue),
-              successThreshold,
-              numerator,
-              denominator,
-            );
-          } else {
-            isUp = false;
-          }
-
-          if (!isUp) {
-            // Not yet recovered
-            return;
-          }
-
-          //resolve the alert
-          activeAlert = await UpdateMonitorAlertV2Status(activeAlert.id, GC.RESOLVED);
-
-          // If alert has an incident, add closure comment
-          if (activeAlert.incident_id) {
-            await closeIncident(activeAlert, monitor_alerts_configured, monitor_name, monitor_tag);
-          }
-
-          // Send resolution notifications
-          await sendAlertNotifications(activeAlert, monitor_alerts_configured, templateSiteVars, monitor_tag);
+      activeAlert = await CreateMonitorAlertV2(monitor_alerts_configured.id, monitor_tag);
+      if (monitor_alerts_configured.create_incident === GC.YES) {
+        const newIncidentNumber = await createNewIncident(
+          activeAlert,
+          monitor_alerts_configured,
+          monitor_name,
+          monitor_tag,
+        );
+        //update alert with incident number
+        if (newIncidentNumber && newIncidentNumber.incident_id > 0) {
+          activeAlert = await AddIncidentToAlert(activeAlert.id, newIncidentNumber.incident_id);
         }
       }
-    } catch (error) {
-      console.error("Error processing alerting job:", error);
+
+      await notifyQuietly(activeAlert, monitor_alerts_configured, templateSiteVars, monitor_tag);
+      return;
     }
 
-    // return { monitor_tag, monitor_settings_json, ts, status };
+    // Not affected, and nothing outstanding to resolve.
+    if (!activeAlert) {
+      return;
+    }
+
+    let isUp: boolean;
+    try {
+      isUp = await evaluateIsRecovered(jobData, monitor_alerts_configured.success_threshold);
+    } catch (error) {
+      console.error("Error evaluating alert recovery:", error);
+      return;
+    }
+    if (!isUp) {
+      // Not yet recovered
+      return;
+    }
+
+    //resolve the alert
+    activeAlert = await UpdateMonitorAlertV2Status(activeAlert.id, GC.RESOLVED);
+
+    // If alert has an incident, add closure comment
+    if (activeAlert.incident_id) {
+      await closeIncident(activeAlert, monitor_alerts_configured, monitor_name, monitor_tag);
+    }
+
+    await notifyQuietly(activeAlert, monitor_alerts_configured, templateSiteVars, monitor_tag);
   });
 
   worker.on("completed", (job: Job, returnvalue: any) => {
