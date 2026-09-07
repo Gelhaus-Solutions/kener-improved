@@ -39,8 +39,9 @@ check-output.txt
 translation-report.json
 
 # AI workflow docs (not version-controlled)
+# docs/adr/ is deliberately NOT here: src/ cites ADRs in load-bearing comments,
+# so those files have to be readable in a checkout. See docs/adr/README.md.
 CONTEXT.md
-docs/adr/
 docs/superpowers/
 .superpowers/
 # Wayfinder scratch (local only)
