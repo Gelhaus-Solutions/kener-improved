@@ -1,4 +1,5 @@
 import db from "../db/db.js";
+import { GetSiteDataCached, InvalidateSiteDataCache } from "../cache/siteDataCache.js";
 import { siteDataKeys } from "./siteDataKeys.js";
 import type { Cookies } from "@sveltejs/kit";
 import type {
@@ -70,7 +71,7 @@ export interface SiteDataTransformed {
   globalMaintenanceNotificationSettings?: GlobalMaintenanceNotificationSettings;
 }
 
-export function InsertKeyValue(key: string, value: string): Promise<number[]> {
+export async function InsertKeyValue(key: string, value: string): Promise<number[]> {
   let f = siteDataKeys.find((k) => k.key === key);
   if (!f) {
     console.trace(`Invalid key: ${key}`);
@@ -80,10 +81,15 @@ export function InsertKeyValue(key: string, value: string): Promise<number[]> {
     console.trace(`Invalid value for key: ${key}`);
     throw new Error(`Invalid value for key: ${key}`);
   }
-  return db.insertOrUpdateSiteData(key, value, f.data_type);
+  const result = await db.insertOrUpdateSiteData(key, value, f.data_type);
+  // Not the only writer: the v4 config API validates differently and calls
+  // db.insertOrUpdateSiteData directly, so it invalidates for itself.
+  await InvalidateSiteDataCache();
+  return result;
 }
 
-export async function GetAllSiteData(): Promise<SiteDataTransformed> {
+/** Reads and transforms every site_data row. Uncached; go through GetAllSiteData. */
+async function LoadAllSiteData(): Promise<SiteDataTransformed> {
   let data = await db.getAllSiteData();
   //return all data as key value pairs, transform using data_type
   const transformedData: Record<string, unknown> = {};
@@ -95,6 +101,10 @@ export async function GetAllSiteData(): Promise<SiteDataTransformed> {
     }
   }
   return transformedData as unknown as SiteDataTransformed;
+}
+
+export async function GetAllSiteData(): Promise<SiteDataTransformed> {
+  return await GetSiteDataCached(LoadAllSiteData);
 }
 
 export const GetLocaleFromCookie = (site: SiteDataTransformed, cookies: Cookies): string => {
@@ -179,10 +189,9 @@ export const IsSetupComplete = async (): Promise<boolean> => {
   if (!HasRequiredEnv()) {
     return false;
   }
-  let data = await db.getAllSiteData();
-
-  if (!data) {
-    return false;
-  }
-  return data.length > 0;
+  // Goes through the cache rather than issuing a second full read of site_data;
+  // one key per row, so a non-empty object means a non-empty table. Same check
+  // GetLayoutServerData already does inline against the site data it fetched.
+  const siteData = await GetAllSiteData();
+  return Object.keys(siteData).length > 0;
 };
