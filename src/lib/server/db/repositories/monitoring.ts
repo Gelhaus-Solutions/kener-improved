@@ -1,5 +1,6 @@
 import type { Knex as KnexType } from "knex";
 import { BaseRepository } from "./base.js";
+import { hasFloorFunction } from "../capabilities.js";
 import GC from "../../../global-constants.js";
 import type { MonitoringStatus } from "../../../types/status.js";
 import { GetMinuteStartNowTimestampUTC } from "../../tool.js";
@@ -520,15 +521,9 @@ export class MonitoringRepository extends BaseRepository {
 
     // Determine database client to use appropriate timestamp arithmetic
     // SQLite uses CAST(... as INT), others (PG, MySQL) use FLOOR()
-    const client = (this.knex.client as any).config.client;
-    const isSQLite = client === "better-sqlite3" || client === "sqlite3";
-
-    let tsExpression = "";
-    if (isSQLite) {
-      tsExpression = `CAST((timestamp - ?) / ? AS INT) * ? + ?`;
-    } else {
-      tsExpression = `FLOOR((timestamp - ?) / ?) * ? + ?`;
-    }
+    const tsExpression = hasFloorFunction(this.knex)
+      ? `FLOOR((timestamp - ?) / ?) * ? + ?`
+      : `CAST((timestamp - ?) / ? AS INT) * ? + ?`;
 
     // Handle single tag or array of tags
     const isArray = Array.isArray(monitorTag);
@@ -609,10 +604,10 @@ export class MonitoringRepository extends BaseRepository {
 
     const endTimestamp = startTimestamp + numberOfPoints * intervalInSeconds;
 
-    const client = (this.knex.client as any).config.client;
-    const isSQLite = client === "better-sqlite3" || client === "sqlite3";
-
-    const tsExpression = isSQLite ? `CAST((timestamp - ?) / ? AS INT) * ? + ?` : `FLOOR((timestamp - ?) / ?) * ? + ?`;
+    // SQLite has no FLOOR(); CAST(... AS INT) truncates the same way.
+    const tsExpression = hasFloorFunction(this.knex)
+      ? `FLOOR((timestamp - ?) / ?) * ? + ?`
+      : `CAST((timestamp - ?) / ? AS INT) * ? + ?`;
 
     const sql = `
       SELECT

@@ -24,12 +24,58 @@ After completing the code, ask the user if they want a playground link. Only cal
 
 ## Database compatibility rule
 
-All database operations — migrations, queries, and repository functions — **MUST** work across all three supported databases: **SQLite**, **PostgreSQL**, and **MySQL**. Use Knex.js schema builder and query builder abstractions; avoid raw SQL unless wrapped in dialect-safe helpers or guarded with `try/catch`. When writing migrations:
+Kener supports **SQLite**, **PostgreSQL** and **MySQL**, but not equally. Database
+work falls into two tiers.
 
-- Use `knex.schema.hasColumn` / `knex.schema.hasTable` guards for idempotency.
-- Use Knex column types (`.string()`, `.integer()`, `.text()`, etc.) — never raw `ALTER TABLE` unless necessary.
-- For data-seeding inside migrations, use standard Knex query builder (`.insert()`, `.update()`, `.orderBy()`, `.first()`).
-- Test that `defaultTo()` values and `notNullable()` constraints work on all three engines.
+### Tier 1 - core
+
+The schema every install needs, and all CRUD on it. **Must work on all three
+dialects** via the Knex schema and query builders. Avoid raw SQL unless it is
+wrapped in a dialect-safe helper.
+
+- Use `knex.schema.hasTable` / `knex.schema.hasColumn` guards for idempotency.
+- Use Knex column types (`.string()`, `.integer()`, `.text()`), not raw `ALTER TABLE`.
+- Seed data inside migrations with the query builder (`.insert()`, `.update()`, `.first()`).
+- Check that `defaultTo()` values and `notNullable()` constraints behave on all three.
+
+### Tier 2 - advanced
+
+Rollups, partitioning, full-text search, reporting and row-level security.
+**PostgreSQL is the reference implementation.** SQLite and MySQL get either a
+correct-but-slower fallback or the feature disabled at runtime. Do not cripple
+the Postgres path to reach the lowest common denominator.
+
+### Migrations must not fail, but may do less
+
+A migration is allowed to skip work on a dialect. It is not allowed to crash on
+one. SQLite implements several structural changes by rebuilding the whole table,
+so `dropUnique`, `.alter()` to `notNullable`, and adding a foreign key all need a
+dialect guard. **Skipping a constraint is acceptable; crashing is not.** Log what
+was skipped so the gap is visible in the migration output rather than only in the
+schema.
+
+A migration that is meaningful only on Postgres early-returns as a no-op
+elsewhere. The precedent is
+[`migrations/20260831120000_monitoring_data_autovacuum.ts`](migrations/20260831120000_monitoring_data_autovacuum.ts),
+which returns immediately when `knex.client.config.client !== "pg"`.
+
+### Capability checks live in one file
+
+Every dialect-gated behaviour carries a one-line comment naming what the other
+dialects get instead.
+
+Outside migrations, **never test the client string in application code**. Ask
+[`src/lib/server/db/capabilities.ts`](src/lib/server/db/capabilities.ts) for a
+capability: `hasDeclarativePartitioning()`, `hasFullTextSearch()`,
+`supportsInsertReturning()`, `hasRowLevelSecurity()`, `hasFloorFunction()`. Add a
+new named capability there rather than a `client === "pg"` check in a repository.
+Migrations are the one exception and check the client directly.
+
+Twelve inherited call sites still branch on `GetDbType() === "postgresql"` in the
+repositories. Every one of them is the insert-returning pattern, and
+`supportsInsertReturning()` deliberately answers the same way. Fold them in as
+you touch those functions; do not do a sweep for its own sake, because each one
+is a merge conflict on the next upstream sync.
 
 ## Documentation writing skill
 
