@@ -21,14 +21,21 @@ const MISSING = Symbol("missing")
 /**
  * Keys the fork owns outright. Our value always wins, and upstream edits to
  * them are dropped silently rather than reported as a conflict.
+ *
+ * `version` is here because the fork does not adopt upstream releases. It runs
+ * its own release pipeline (.github/workflows/create-release.yml, adapted from
+ * upstream's) and numbers independently, so an upstream version bump must never
+ * move ours.
  */
-const FORK_OWNED_KEYS = ["repository", "bugs", "homepage", "funding"]
+const FORK_OWNED_KEYS = ["repository", "bugs", "homepage", "funding", "version"]
 
 /**
- * Keys where upstream is authoritative. Notably `version`: the fork tracks
- * upstream release numbers, so a version bump on both sides is not a conflict.
+ * Keys where upstream is authoritative. Empty: there are none left. `version`
+ * used to be here, back when the fork tracked upstream release numbers. The
+ * mechanism is kept because the asymmetry may be wanted again for some other
+ * key, not because anything uses it today.
  */
-const UPSTREAM_OWNED_KEYS = ["version"]
+const UPSTREAM_OWNED_KEYS = []
 
 function readStage(stage) {
 	try {
@@ -131,7 +138,7 @@ const base = baseRaw === MISSING ? {} : baseRaw
 /**
  * Copy `key` from `src` onto `dest` (deleting it when `src` lacks it), so that
  * an owned key looks unchanged to the structural merge below. Deciding
- * ownership up front — rather than overwriting the merge result afterwards —
+ * ownership up front - rather than overwriting the merge result afterwards -
  * keeps the key in its original position instead of shuffling it to the end of
  * the file on every sync.
  */

@@ -69,11 +69,11 @@ three conflict stages out of the git index and merges them per key instead of
 per line, so a dependency bump upstream and a dependency addition here no longer
 collide:
 
-- **Fork-owned keys** (`repository`, `bugs`, `homepage`, `funding`) - our value
-  always wins, silently.
-- **Upstream-owned keys** (`version`) - upstream's value always wins. The fork
-  tracks upstream release numbers, so a version bump on both sides is not a
-  conflict.
+- **Fork-owned keys** (`repository`, `bugs`, `homepage`, `funding`, `version`) -
+  our value always wins, silently. `version` is fork-owned because the fork does
+  not adopt upstream releases; see [Releases](#releases).
+- **Upstream-owned keys** - none. The mechanism still exists in the script, but
+  nothing uses it.
 - **Everything else** - a real three-way merge. If only one side changed a key,
   that change is taken. If both sides changed it identically, fine. Arrays of
   strings (`keywords`) are union-merged, honouring removals from either side.
@@ -131,6 +131,7 @@ git push
 | Area                       | Divergence                                                            |
 | -------------------------- | --------------------------------------------------------------------- |
 | `package.json`             | `repository`, `homepage`, `bugs` point here; `sync:upstream` script    |
+| `package.json` `version`   | Fork-owned; the fork releases on its own schedule and numbers          |
 | `README.md`                | Fork notice at the top; upstream content otherwise                     |
 | `.github/FUNDING.yml`      | Emptied - sponsor upstream directly, not this fork                     |
 | `.github/workflows/publish-*.yml` | Publish to GHCR only; no Docker Hub, no cosign signing         |
@@ -163,6 +164,30 @@ Neither is required; the sync works without both.
   `ghcr.io/gelhaus-solutions/kener-improved` using the built-in `GITHUB_TOKEN`.
   New packages default to private; make them public in the repo's *Packages*
   settings if you want to pull without authenticating.
+
+## Releases
+
+**The fork does not adopt upstream releases.** Upstream tagging 4.2.0 is not an
+event here: no version bump, no release, nothing to do. The code from that
+release arrives the same way every other upstream change does, through the next
+sync PR, and lands under whatever version this fork is on.
+
+What the fork took from upstream is the release *machinery*, not the releases.
+[`.github/workflows/create-release.yml`](.github/workflows/create-release.yml)
+is adapted from upstream's: a manual **Actions -> Create Release -> Run
+workflow** with an explicit version, which bumps `package.json`, tags, and cuts
+the GitHub release. The fork numbers on its own schedule.
+
+Two consequences worth stating plainly, because both used to be the other way
+round:
+
+- `version` in `package.json` is **fork-owned** in the sync merge. An upstream
+  version bump never moves ours.
+- The fork's version number carries **no relationship** to upstream's. Do not
+  read it as "based on upstream 4.1.5", and do not bump it to match upstream.
+
+The older release pipeline this fork inherited is fully resolved and gone; the
+workflow above is the only one.
 
 ## Nothing is contributed back
 

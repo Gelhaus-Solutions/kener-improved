@@ -139,6 +139,10 @@ Practical rules when working here:
 - **Fix things here, not upstream.** Nothing is contributed back; the sync is
   one-directional. An upstream bug this fork also carries may be *reported*
   upstream, but the fix still lands here first.
+- **Upstream releases are not adopted.** An upstream tag is not an event here.
+  The fork runs its own release pipeline (`create-release.yml`, adapted from
+  upstream's) and numbers independently, so `version` is fork-owned in the sync
+  merge. Never bump the version to match upstream.
 - **Never `git merge upstream/main` directly.** Use `npm run sync:upstream`. The
   `merge=ours` driver that `.gitattributes` relies on is registered by that
   script; a plain merge silently ignores it.
