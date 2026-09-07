@@ -91,6 +91,7 @@ class DbImpl {
   // ============ Alerts ============
   insertAlert!: AlertsRepository["insertAlert"];
   alertExistsIncident!: AlertsRepository["alertExistsIncident"];
+  alertExistsForIncidents!: AlertsRepository["alertExistsForIncidents"];
   alertExists!: AlertsRepository["alertExists"];
   getActiveAlertIncident!: AlertsRepository["getActiveAlertIncident"];
   getAllActiveAlertIncidents!: AlertsRepository["getAllActiveAlertIncidents"];
@@ -209,6 +210,7 @@ class DbImpl {
   // ============ Incident Monitors ============
   insertIncidentMonitor!: IncidentsRepository["insertIncidentMonitor"];
   getIncidentMonitorsByIncidentID!: IncidentsRepository["getIncidentMonitorsByIncidentID"];
+  getIncidentMonitorsByIncidentIDs!: IncidentsRepository["getIncidentMonitorsByIncidentIDs"];
   getMonitorsByIncidentId!: IncidentsRepository["getMonitorsByIncidentId"];
   removeIncidentMonitor!: IncidentsRepository["removeIncidentMonitor"];
   insertIncidentMonitorWithMerge!: IncidentsRepository["insertIncidentMonitorWithMerge"];
@@ -472,6 +474,7 @@ class DbImpl {
   private bindAlertsMethods(): void {
     this.insertAlert = this.alerts.insertAlert.bind(this.alerts);
     this.alertExistsIncident = this.alerts.alertExistsIncident.bind(this.alerts);
+    this.alertExistsForIncidents = this.alerts.alertExistsForIncidents.bind(this.alerts);
     this.alertExists = this.alerts.alertExists.bind(this.alerts);
     this.getActiveAlertIncident = this.alerts.getActiveAlertIncident.bind(this.alerts);
     this.getAllActiveAlertIncidents = this.alerts.getAllActiveAlertIncidents.bind(this.alerts);
@@ -596,6 +599,7 @@ class DbImpl {
       this.incidents.getIncidentsCountByTypeAndDateRangeAndMonitorTags.bind(this.incidents);
     this.insertIncidentMonitor = this.incidents.insertIncidentMonitor.bind(this.incidents);
     this.getIncidentMonitorsByIncidentID = this.incidents.getIncidentMonitorsByIncidentID.bind(this.incidents);
+    this.getIncidentMonitorsByIncidentIDs = this.incidents.getIncidentMonitorsByIncidentIDs.bind(this.incidents);
     this.getMonitorsByIncidentId = this.incidents.getMonitorsByIncidentId.bind(this.incidents);
     this.removeIncidentMonitor = this.incidents.removeIncidentMonitor.bind(this.incidents);
     this.insertIncidentMonitorWithMerge = this.incidents.insertIncidentMonitorWithMerge.bind(this.incidents);

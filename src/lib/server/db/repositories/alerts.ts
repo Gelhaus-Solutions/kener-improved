@@ -24,6 +24,23 @@ export class AlertsRepository extends BaseRepository {
     return Number(result?.count) > 0;
   }
 
+  /**
+   * Of `incident_numbers`, the ones that have at least one v1 alert row, meaning
+   * the incident was created automatically rather than by a person.
+   *
+   * Batched form of alertExistsIncident, which the incidents dashboard called
+   * once per row. This remains the only live reader of the v1 monitor_alerts
+   * table, which is why that table cannot be dropped yet; when it is re-pointed
+   * at monitor_alerts_v2.incident_id, this is the one query to change.
+   */
+  async alertExistsForIncidents(incident_numbers: number[]): Promise<number[]> {
+    if (incident_numbers.length === 0) return [];
+    const rows = await this.knex("monitor_alerts")
+      .distinct("incident_number")
+      .whereIn("incident_number", incident_numbers);
+    return rows.map((row: { incident_number: number }) => Number(row.incident_number));
+  }
+
   async alertExists(monitor_tag: string, monitor_status: string, alert_status: string): Promise<boolean> {
     const result = await this.knex("monitor_alerts")
       .count("* as count")

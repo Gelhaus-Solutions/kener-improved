@@ -708,6 +708,22 @@ export class IncidentsRepository extends BaseRepository {
       .where("incident_id", incident_id);
   }
 
+  /**
+   * Monitors for several incidents in one query.
+   *
+   * The dashboard used to call getIncidentMonitorsByIncidentID per row; this is
+   * the same data with a constant query count. Rows carry incident_id so the
+   * caller can group them.
+   */
+  async getIncidentMonitorsByIncidentIDs(
+    incident_ids: number[],
+  ): Promise<Array<{ incident_id: number; monitor_tag: string; monitor_impact: string | null }>> {
+    if (incident_ids.length === 0) return [];
+    return await this.knex("incident_monitors")
+      .select("incident_id", "monitor_tag", "monitor_impact")
+      .whereIn("incident_id", incident_ids);
+  }
+
   async getIncidentMonitors(filter?: { incident_id?: number; monitor_tag?: string }): Promise<IncidentMonitorRecord[]> {
     let query = this.knex("incident_monitors").select("*");
 

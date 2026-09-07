@@ -135,9 +135,26 @@ export const GetIncidentsDashboard = async (
   let totalResult = await db.getIncidentsCount(filter);
   let total = totalResult ? Number(totalResult.count) : 0;
 
-  for (let i = 0; i < incidents.length; i++) {
-    incidents[i].monitors = await GetIncidentMonitors(incidents[i].id);
-    incidents[i].isAutoCreated = await db.alertExistsIncident(incidents[i].id);
+  // Two batched queries for the whole page instead of two per row. The
+  // per-incident helpers also re-checked that the incident existed, which these
+  // rows demonstrably do, so that read disappears as well.
+  const incidentIds = incidents.map((incident) => incident.id);
+  const [monitorRows, autoCreatedIds] = await Promise.all([
+    db.getIncidentMonitorsByIncidentIDs(incidentIds),
+    db.alertExistsForIncidents(incidentIds),
+  ]);
+
+  const monitorsByIncidentId = new Map<number, Array<{ monitor_tag: string; monitor_impact: string | null }>>();
+  for (const row of monitorRows) {
+    const existing = monitorsByIncidentId.get(row.incident_id) || [];
+    existing.push({ monitor_tag: row.monitor_tag, monitor_impact: row.monitor_impact });
+    monitorsByIncidentId.set(row.incident_id, existing);
+  }
+  const autoCreated = new Set<number>(autoCreatedIds);
+
+  for (const incident of incidents) {
+    incident.monitors = monitorsByIncidentId.get(incident.id) || [];
+    incident.isAutoCreated = autoCreated.has(incident.id);
   }
 
   return {
