@@ -251,7 +251,8 @@
     recovery_total: number;
     recovery_unused: number;
     policy: string;
-    applies: boolean;
+    /** The policy requires a factor of this user. Not the same as "may enrol". */
+    mandatory: boolean;
   }
 
   let mfa = $state<MfaStatus | null>(null);
@@ -548,11 +549,22 @@
         {/if}
       </form>
 
-      <!-- Two-factor authentication -->
-      {#if mfa?.applies}
+      <!-- Two-factor authentication.
+           Shown to everyone. It used to be hidden for any user the policy
+           exempted, which meant the setting deciding who was *forced* also
+           decided who was *allowed*: under `none` nobody could enrol at all, and
+           an SSO user who wanted a Kener factor as well could not have one. -->
+      {#if mfa}
         <div class="flex flex-col gap-3 border-t pt-4">
           <div class="flex items-center justify-between">
             <Label>Two-factor authentication</Label>
+            {#if mfa.mandatory && !mfa.enabled}
+              <span
+                class="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-900 dark:bg-amber-900 dark:text-amber-200"
+              >
+                Required by this site
+              </span>
+            {/if}
             {#if mfa.enabled}
               <span
                 class="rounded bg-emerald-100 px-1.5 py-0.5 text-xs text-emerald-800 dark:bg-emerald-900 dark:text-emerald-300"
@@ -661,7 +673,11 @@
                     {#if mfaBusy}<LoaderIcon class="size-4 animate-spin" />{/if}
                     New recovery codes
                   </Button>
-                  <Button type="button" variant="ghost" size="sm" onclick={() => (showDisable = true)}>Turn off</Button>
+                  {#if !mfa.mandatory}
+                    <Button type="button" variant="ghost" size="sm" onclick={() => (showDisable = true)}>
+                      Turn off
+                    </Button>
+                  {/if}
                 </div>
               </form>
             {/if}

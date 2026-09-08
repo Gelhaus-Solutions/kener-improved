@@ -1,5 +1,6 @@
 import bcrypt from "bcrypt";
 import db from "$lib/server/db/db.js";
+import { PasswordlessEnrolmentAllowed } from "$lib/server/controllers/mfaController.js";
 import { ActionError } from "../../types.js";
 
 /**
@@ -12,8 +13,22 @@ import { ActionError } from "../../types.js";
  *
  * The comparison is always performed, even when the user has no password, so the
  * response time does not reveal which accounts are SSO-only.
+ *
+ * **One account shape is exempt: an OIDC user with no password hash at all.**
+ * For them this is not a check they fail, it is a check they cannot take, and
+ * under `mfaPolicy = all` (A2b) that turns "you must enrol" into a hard lockout
+ * with no way out but an operator editing `site_data` by hand. Their live SSO
+ * session is the only proof of presence that exists for the account, and it is
+ * the same proof the identity provider accepted moments ago. Nothing changes for
+ * a local user, who always has a hash.
  */
-export async function requireFreshPassword(userId: number, password: unknown): Promise<void> {
+export async function requireFreshPassword(
+  userId: number,
+  password: unknown,
+  authProvider?: string | null,
+): Promise<void> {
+  if (await PasswordlessEnrolmentAllowed(userId, authProvider)) return;
+
   const supplied = typeof password === "string" ? password : "";
   const stored = await db.getUserPasswordHashById(userId);
   const hash = stored?.password_hash || "";

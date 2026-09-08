@@ -18,13 +18,9 @@ const MERGED_ROUTE_PERMISSION_MAP: Record<string, string | null> = {
 };
 
 import { resolve } from "$app/paths";
-import {
-  GetAllSiteData,
-  IsSetupComplete,
-  GetLoggedInSession,
-  GetLocaleFromCookie,
-} from "$lib/server/controllers/controller.js";
-import { GetUserPermissions } from "$lib/server/controllers/userController.js";
+import { GetAllSiteData, IsSetupComplete, GetLocaleFromCookie } from "$lib/server/controllers/controller.js";
+import { GetUserPermissions, GetLoggedInSessionFull } from "$lib/server/controllers/userController.js";
+import { RequiresMfaEnrolment } from "$lib/server/controllers/mfaController.js";
 
 export const load: LayoutServerLoad = async ({ cookies, route }) => {
   let isSetupComplete = await IsSetupComplete();
@@ -32,11 +28,26 @@ export const load: LayoutServerLoad = async ({ cookies, route }) => {
     throw redirect(302, serverResolve(`/account/signin`));
   }
 
-  let loggedInUser = await GetLoggedInSession(cookies);
+  const resolvedSession = await GetLoggedInSessionFull(cookies);
+  let loggedInUser = resolvedSession?.user ?? null;
 
   //if user not set throw redirect to signin
   if (!loggedInUser) {
     throw redirect(302, serverResolve("/account/signin"));
+  }
+
+  // A2b: the instance's MFA policy, made binding.
+  //
+  // Everything under (manage) is behind this, and the enrolment page is
+  // deliberately NOT under (manage) - it lives in the (account) group, which has
+  // no such guard, so it cannot redirect to itself. `/account/logout` is in the
+  // same group for the same reason: a user who cannot enrol must still be able
+  // to leave.
+  //
+  // This covers page loads only. `/manage/api` never runs a layout, so it has
+  // its own copy of the check in the action pipeline; see requireMfa.ts.
+  if (await RequiresMfaEnrolment(loggedInUser.auth_provider, loggedInUser.id, resolvedSession?.session.mfa_level)) {
+    throw redirect(302, serverResolve("/account/mfa-setup"));
   }
 
   const siteData = await GetAllSiteData();

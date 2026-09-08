@@ -19,6 +19,7 @@
   import ArrowRightIcon from "@lucide/svelte/icons/arrow-right";
   import CheckCheckIcon from "@lucide/svelte/icons/check-check";
   import MailWarningIcon from "@lucide/svelte/icons/mail-warning";
+  import ShieldCheckIcon from "@lucide/svelte/icons/shield-check";
   import ChevronLeftIcon from "@lucide/svelte/icons/chevron-left";
   import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
   import EyeClosedIcon from "@lucide/svelte/icons/eye-closed";
@@ -370,10 +371,32 @@
     }
   }
 
+  // A2b: which users hold a second factor. A separate call rather than a field on
+  // getUsers, so upstream's users action stays untouched and merges cleanly.
+  let mfaCoveredIds = $state<Set<number>>(new Set());
+
+  async function fetchMfaCoverage() {
+    try {
+      const res = await fetch(clientResolver(resolve, "/manage/api"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "getMfaCoverage", data: {} })
+      });
+      const result = await res.json();
+      if (!result.error) mfaCoveredIds = new Set<number>(result.covered_user_ids ?? []);
+    } catch (error) {
+      // A missing column is a worse outcome than a silent one here: the rest of
+      // the screen is still useful, and the policy card is the authoritative
+      // place this number is reported.
+      console.error("Error fetching MFA coverage:", error);
+    }
+  }
+
   // Initial load
   onMount(() => {
     fetchUsers();
     fetchRoles();
+    fetchMfaCoverage();
   });
 </script>
 
@@ -435,6 +458,7 @@
           <Table.Head>Email</Table.Head>
           <Table.Head class="text-center">Auth</Table.Head>
           <Table.Head class="text-center">Verified</Table.Head>
+          <Table.Head class="text-center">2FA</Table.Head>
           <Table.Head>Role</Table.Head>
           <Table.Head>Status</Table.Head>
           <Table.Head class="w-20 text-center">Actions</Table.Head>
@@ -443,7 +467,7 @@
       <Table.Body>
         {#if loading && users.length === 0}
           <Table.Row>
-            <Table.Cell colspan={7} class="py-8 text-center">
+            <Table.Cell colspan={8} class="py-8 text-center">
               <div class="flex items-center justify-center gap-2">
                 <Spinner class="size-4" />
                 <span class="text-muted-foreground text-sm">Loading users...</span>
@@ -452,7 +476,7 @@
           </Table.Row>
         {:else if users.length === 0}
           <Table.Row>
-            <Table.Cell colspan={7} class="text-muted-foreground py-8 text-center">No users found.</Table.Cell>
+            <Table.Cell colspan={8} class="text-muted-foreground py-8 text-center">No users found.</Table.Cell>
           </Table.Row>
         {:else}
           {#each users as user (user.id)}
@@ -472,6 +496,15 @@
                   <CheckCheckIcon class="mx-auto h-4 w-4 text-blue-500" />
                 {:else}
                   <MailWarningIcon class="mx-auto h-4 w-4 text-yellow-500" />
+                {/if}
+              </Table.Cell>
+              <Table.Cell class="text-center">
+                <!-- A confirmed factor only. A half-finished enrolment reads as
+                     "none", because that is what it protects against. -->
+                {#if mfaCoveredIds.has(user.id)}
+                  <ShieldCheckIcon class="mx-auto h-4 w-4 text-green-600" />
+                {:else}
+                  <span class="text-muted-foreground text-xs">None</span>
                 {/if}
               </Table.Cell>
               <Table.Cell>

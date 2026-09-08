@@ -6,6 +6,7 @@ import type { ActionContext } from "./types.js";
 import { authenticate } from "./middleware/authenticate.js";
 import { requireOrg } from "./middleware/requireOrg.js";
 import { authorize, isKnownAction } from "./middleware/authorize.js";
+import { requireMfaEnrolment } from "./middleware/requireMfa.js";
 import { rateLimit } from "./middleware/rateLimit.js";
 import { auditBefore, auditDiff, auditWrite, auditOutcomeOnly } from "./middleware/audit.js";
 import { emitActionEvent } from "./middleware/events.js";
@@ -16,7 +17,7 @@ import { runWithEventContext, DEFAULT_ORG_ID } from "$lib/server/events/eventCon
  *
  * Order is load-bearing, not stylistic:
  *
- *   requestId -> authenticate -> requireOrg -> authorize -> rateLimit
+ *   requestId -> authenticate -> requireMfa -> requireOrg -> authorize -> rateLimit
  *             -> validate -> audit:before -> handler -> audit:diff
  *             -> events -> audit:write -> errors
  *
@@ -63,16 +64,23 @@ export async function runAction(event: RequestEvent): Promise<Response> {
   let ctx: ActionContext | null = null;
 
   try {
-    const { user, permissions } = await authenticate(event.cookies);
+    const { user, permissions, session } = await authenticate(event.cookies);
 
     ctx = {
       user,
       permissions,
+      session,
       requestId,
       cookies: event.cookies,
       ip: safeClientAddress(event),
       userAgent: event.request.headers.get("user-agent"),
     };
+
+    // Before requireOrg and before authorize: a user who owes the instance a
+    // second factor is stopped whatever else is true of them, and telling them
+    // about a missing permission first would send them off to fix the wrong
+    // thing. See requireMfa.ts for why the admin API needs its own guard at all.
+    await requireMfaEnrolment(action, ctx);
 
     await requireOrg(ctx);
 

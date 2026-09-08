@@ -1,5 +1,5 @@
 import type { Cookies } from "@sveltejs/kit";
-import type { UserRecordPublic } from "$lib/server/types/db";
+import type { SessionRecord, UserRecordPublic } from "$lib/server/types/db";
 
 /**
  * Everything a handler is allowed to know about the caller.
@@ -13,6 +13,13 @@ export interface ActionContext {
   user: UserRecordPublic;
   /** The user's permission ids, fetched once per request. */
   permissions: Set<string>;
+  /**
+   * The session row the caller presented, resolved once by `authenticate`.
+   *
+   * Carries `mfa_level` (which A2b's enrolment guard reads) and the id, which is
+   * how an action spares the caller's own session when revoking the others.
+   */
+  session: SessionRecord;
   /** Correlates this call with logs and, from P1's audit log, with audit rows. */
   requestId: string;
   /**

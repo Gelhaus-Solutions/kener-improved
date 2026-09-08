@@ -23,6 +23,7 @@
   import { resolve } from "$app/paths";
   import clientResolver from "$lib/client/resolver.js";
   import type { OidcSettings } from "$lib/types/site.js";
+  import MfaPolicyCard from "$lib/components/manage/MfaPolicyCard.svelte";
 
   // ============ Types ============
 
@@ -271,6 +272,12 @@
       <Spinner class="h-6 w-6" />
     </div>
   {:else}
+    <!-- A2b. Sits with OIDC rather than on the generic settings screen because
+         it is an authentication policy, and because the `local_only` option is
+         only meaningful next to the SSO configuration it exempts. It loads its
+         own data, so it is unaffected by the OIDC page's loading state. -->
+    <MfaPolicyCard />
+
     <!-- ============ OIDC Settings Card ============ -->
     <Card.Root>
       <Card.Header>

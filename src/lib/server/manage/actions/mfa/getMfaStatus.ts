@@ -16,9 +16,16 @@ export default {
     return {
       ...status,
       policy: await GetMfaPolicy(),
-      // False for an SSO user under the default policy: their factors are the
-      // identity provider's business, so the UI should not offer to enrol one.
-      applies: await MfaAppliesTo(ctx.user.auth_provider),
+      // **Whether the policy *requires* a factor of this user, not whether they
+      // are allowed one.** A2b split those apart. They were one flag, which
+      // meant loosening the policy silently removed two-factor authentication
+      // from the people it exempted: an SSO user who wanted a Kener factor as
+      // well could not have one, and under `none` nobody could enrol at all.
+      //
+      // Enrolment is now offered to everyone, always. This only drives the
+      // "required by this site" marker, and the refusal to turn a mandatory
+      // factor back off.
+      mandatory: await MfaAppliesTo(ctx.user.auth_provider),
     };
   },
 } satisfies ActionDefinition;

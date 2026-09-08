@@ -104,6 +104,12 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   confirmMfaEnrolment: null,
   disableMfa: null,
   regenerateRecoveryCodes: null,
+
+  // A2b. Unlike the five above these are *not* self-scoped: they read and change
+  // what the whole instance requires, so both carry a real permission. Coverage
+  // is a property of the user list, and the policy is a site setting.
+  getMfaCoverage: "users.read",
+  setMfaPolicy: "settings.write",
 };
 
 /**

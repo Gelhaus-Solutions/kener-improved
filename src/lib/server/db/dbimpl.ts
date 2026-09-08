@@ -375,6 +375,7 @@ class DbImpl {
   useRecoveryCode!: MfaRepository["useRecoveryCode"];
   countRecoveryCodes!: MfaRepository["countRecoveryCodes"];
   deleteRecoveryCodes!: MfaRepository["deleteRecoveryCodes"];
+  getUserIdsWithConfirmedTotp!: MfaRepository["getUserIdsWithConfirmedTotp"];
 
   // ============ Sessions (A9) ============
   createSession!: SessionsRepository["createSession"];
@@ -1103,6 +1104,7 @@ class DbImpl {
     this.useRecoveryCode = this.mfa.useRecoveryCode.bind(this.mfa);
     this.countRecoveryCodes = this.mfa.countRecoveryCodes.bind(this.mfa);
     this.deleteRecoveryCodes = this.mfa.deleteRecoveryCodes.bind(this.mfa);
+    this.getUserIdsWithConfirmedTotp = this.mfa.getUserIdsWithConfirmedTotp.bind(this.mfa);
   }
 
   private bindSessionsMethods(): void {

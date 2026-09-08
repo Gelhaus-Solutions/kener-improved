@@ -107,6 +107,25 @@ export class MfaRepository extends BaseRepository {
     await this.knex("user_mfa_recovery_codes").where("user_id", userId).del();
   }
 
+  /**
+   * The ids of every user holding a *confirmed* factor.
+   *
+   * Unconfirmed rows are excluded deliberately: a half-finished enrolment is
+   * exactly the state the coverage screen must report as "not covered", and
+   * counting it would tell an operator they are protected when they are not.
+   *
+   * Returned as a list rather than a count because both callers need it - the
+   * settings screen counts it, and the users screen marks individual rows - and
+   * the number of admin users is small enough that one query beats two.
+   */
+  async getUserIdsWithConfirmedTotp(): Promise<number[]> {
+    const rows = (await this.knex("user_mfa_totp").select("user_id").whereNotNull("confirmed_at")) as Record<
+      string,
+      unknown
+    >[];
+    return rows.map((r) => Number(r.user_id));
+  }
+
   private mapTotp(row: Record<string, unknown>): MfaTotpRecord {
     return {
       user_id: Number(row.user_id),

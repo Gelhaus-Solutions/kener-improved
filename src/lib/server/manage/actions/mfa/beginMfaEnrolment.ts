@@ -24,7 +24,7 @@ export default {
   permission: null,
   audit: false,
   handler: async (data: Payload, ctx: ActionContext) => {
-    await requireFreshPassword(ctx.user.id, data.password);
+    await requireFreshPassword(ctx.user.id, data.password, ctx.user.auth_provider);
 
     const siteName = (await GetSiteDataByKey("siteName")) || "Kener";
     return await BeginMfaEnrolment(ctx.user.id, ctx.user.email, String(siteName));

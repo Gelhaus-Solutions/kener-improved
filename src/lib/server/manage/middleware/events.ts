@@ -66,6 +66,7 @@ const ACTION_EVENT_MAP: Record<string, EventType | EventResolver> = {
 
   // Instance configuration.
   storeSiteData: "site_settings.updated",
+  setMfaPolicy: "site_settings.updated",
   updateSubscriptionsConfig: "site_settings.updated",
 
   // Access control. Only the permission change: creating or renaming a role

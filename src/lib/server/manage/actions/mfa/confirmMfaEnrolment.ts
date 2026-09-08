@@ -1,5 +1,5 @@
 import { ConfirmMfaEnrolment } from "$lib/server/controllers/mfaController.js";
-import { ResolveSession, setSessionMfa } from "$lib/server/controllers/sessionController.js";
+import { setSessionMfa } from "$lib/server/controllers/sessionController.js";
 import { ActionError } from "../../types.js";
 import type { ActionDefinition, ActionContext } from "../../types.js";
 
@@ -26,16 +26,17 @@ export default {
     const code = String(data.code ?? "").trim();
     if (!code) throw new ActionError(400, "Enter the code from your authenticator app");
 
-    const current = await ResolveSession(ctx.cookies);
-
+    // The session comes from the context now: `authenticate` already resolved it
+    // for A2b's enrolment guard, so re-resolving it here would be a second read
+    // of the same row within one request.
     let recoveryCodes: string[];
     try {
-      ({ recoveryCodes } = await ConfirmMfaEnrolment(ctx.user.id, code, current?.session.id));
+      ({ recoveryCodes } = await ConfirmMfaEnrolment(ctx.user.id, code, ctx.session.id));
     } catch (error) {
       throw new ActionError(400, error instanceof Error ? error.message : "Could not confirm enrolment");
     }
 
-    if (current) await setSessionMfa(current.session.id, "totp");
+    await setSessionMfa(ctx.session.id, "totp");
 
     // Shown once and never retrievable: they are stored only as bcrypt hashes.
     return { success: true, recoveryCodes };

@@ -298,3 +298,95 @@ export async function DisableMfa(userId: number): Promise<void> {
 export function challengeNonce(): string {
   return randomBytes(16).toString("hex");
 }
+
+/**
+ * Whether this user must enrol a factor before doing anything else.
+ *
+ * A2 shipped the policy and used it to decide who was *offered* enrolment. This
+ * is the half that makes it binding.
+ *
+ * Three ways to be satisfied, and the middle one is the important one:
+ *
+ *   - the policy does not apply to this user at all (`none`, or `local_only`
+ *     and they authenticate at an IdP);
+ *   - **the session already cleared a factor at the identity provider**
+ *     (`mfa_level = "idp"`). They have done the thing the policy is asking for,
+ *     just not at Kener, and demanding a second one on top is the friction that
+ *     gets MFA switched off entirely;
+ *   - they hold a confirmed Kener factor.
+ *
+ * Everything else is required to enrol. Note that an *unconfirmed* secret does
+ * not count: an abandoned enrolment must not satisfy the requirement, or the
+ * way around the policy is to start enrolling and walk away.
+ */
+export async function RequiresMfaEnrolment(
+  authProvider: string | null | undefined,
+  userId: number,
+  sessionMfaLevel: string | null | undefined,
+): Promise<boolean> {
+  if (!(await MfaAppliesTo(authProvider))) return false;
+  if (sessionMfaLevel === "idp") return false;
+  return !(await RequiresMfa(userId));
+}
+
+/**
+ * Whether enrolment may proceed without the account password.
+ *
+ * `requireFreshPassword` exists to stop somebody at an unlocked, signed-in
+ * browser from enrolling their own authenticator. That protection is real, but
+ * an OIDC user has no password at all, so under `mfaPolicy = all` demanding one
+ * is not a check they fail - it is a check they cannot take, and the result is a
+ * hard lockout with no way out but an operator editing `site_data` by hand.
+ *
+ * For those accounts the live SSO session is the only proof of presence that
+ * exists, and it is the same proof the IdP just accepted. Deliberately keyed on
+ * the absence of a password hash rather than on `auth_provider` alone: the
+ * provider column is what the account *says*, the missing hash is what actually
+ * makes the check impossible.
+ */
+export async function PasswordlessEnrolmentAllowed(
+  userId: number,
+  authProvider: string | null | undefined,
+): Promise<boolean> {
+  if (authProvider !== "oidc") return false;
+  const stored = await db.getUserPasswordHashById(userId);
+  return !stored?.password_hash;
+}
+
+export interface MfaCoverage {
+  policy: MfaPolicy;
+  /** Active users only: a deactivated account cannot sign in, so it cannot be locked out. */
+  total: number;
+  covered: number;
+  uncovered: number;
+  /** Ids of users holding a confirmed factor, for the per-row marker on the users screen. */
+  covered_user_ids: number[];
+  /** Whether the caller themselves holds one. The switch to `all` turns on this. */
+  caller_covered: boolean;
+}
+
+/**
+ * Who is covered, for the settings screen and the users list.
+ *
+ * "Which of my users would this stop" is the question a policy change is made in
+ * response to, and before this there was no way to ask it.
+ */
+export async function GetMfaCoverage(callerId: number): Promise<MfaCoverage> {
+  const [policy, users, coveredIds] = await Promise.all([
+    GetMfaPolicy(),
+    db.getAllUsers(),
+    db.getUserIdsWithConfirmedTotp(),
+  ]);
+
+  const covered = new Set(coveredIds);
+  const active = users.filter((u) => u.is_active);
+
+  return {
+    policy,
+    total: active.length,
+    covered: active.filter((u) => covered.has(u.id)).length,
+    uncovered: active.filter((u) => !covered.has(u.id)).length,
+    covered_user_ids: [...covered],
+    caller_covered: covered.has(callerId),
+  };
+}

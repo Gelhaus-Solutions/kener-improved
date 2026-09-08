@@ -18,7 +18,7 @@ export default {
   permission: null,
   audit: { targetType: "user_mfa" },
   handler: async (data: Payload, ctx: ActionContext) => {
-    await requireFreshPassword(ctx.user.id, data.password);
+    await requireFreshPassword(ctx.user.id, data.password, ctx.user.auth_provider);
 
     const status = await GetMfaStatus(ctx.user.id);
     if (!status.enabled) {
