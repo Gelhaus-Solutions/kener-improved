@@ -155,7 +155,7 @@
             </Table.Row>
             {#if expanded === row.id}
               <Table.Row>
-                <Table.Cell colspan={6}>
+                <Table.Cell colspan={6} class="whitespace-normal">
                   <div class="bg-muted/40 grid gap-3 rounded p-3 text-xs md:grid-cols-2">
                     {#if row.before_json}
                       <div>

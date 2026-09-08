@@ -202,68 +202,68 @@
       {#if loading}
         <div class="flex justify-center p-6"><Spinner /></div>
       {:else}
-        <Table.Root>
-          <Table.Header>
-            <Table.Row>
-              <Table.Head>Consumer</Table.Head>
-              <Table.Head>Mode</Table.Head>
-              <Table.Head>Deliveries</Table.Head>
-              <Table.Head class="w-56">Change to</Table.Head>
-            </Table.Row>
-          </Table.Header>
-          <Table.Body>
-            {#each consumers as consumer (consumer.name)}
-              <Table.Row>
-                <Table.Cell class="align-top whitespace-normal">
-                  <div class="font-medium">{consumer.name}</div>
-                  <div class="text-muted-foreground max-w-md text-xs">{consumer.description}</div>
-                  {#if consumer.legacy_consumer}
-                    <div class="text-muted-foreground mt-1 text-xs">
-                      Compared against <span class="font-mono">{consumer.legacy_consumer}</span>
-                    </div>
-                  {/if}
-                </Table.Cell>
-                <Table.Cell class="align-top whitespace-normal">
-                  <Badge variant={modeVariant(consumer.effective_mode)}>{consumer.effective_mode}</Badge>
-                  <div class="text-muted-foreground mt-1 max-w-xs text-xs">
-                    {MODE_HELP[consumer.effective_mode]}
-                  </div>
-                  {#if consumer.configured_mode === null}
-                    <div class="text-muted-foreground mt-1 text-xs">Not configured; using the built-in default.</div>
-                  {/if}
-                </Table.Cell>
-                <Table.Cell class="align-top whitespace-normal">
-                  {#if Object.keys(consumer.counts).length === 0}
-                    <span class="text-muted-foreground text-xs">None yet</span>
-                  {:else}
-                    <div class="flex flex-wrap gap-1">
-                      {#each Object.entries(consumer.counts) as [status, count] (status)}
-                        <Badge variant="outline" class="text-xs">{status} {count}</Badge>
-                      {/each}
-                    </div>
-                  {/if}
-                </Table.Cell>
-                <Table.Cell class="align-top whitespace-normal">
-                  <select
-                    class="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
-                    value={consumer.effective_mode}
-                    disabled={saving === consumer.name}
-                    onchange={(e) => setMode(consumer.name, e.currentTarget.value as ConsumerMode)}
-                  >
-                    {#each MODES as mode (mode)}
-                      <option value={mode}>{mode}</option>
-                    {/each}
-                  </select>
-                  {#if consumer.declared_mode === "shadow"}
-                    <div class="text-muted-foreground mt-1 text-xs">
-                      Cannot be set live here: the existing send path is still running, so every message would go twice.
-                    </div>
-                  {/if}
-                </Table.Cell>
-              </Table.Row>
-            {/each}
-          </Table.Body>
-        </Table.Root>
+        <!--
+          A card per consumer, not a table row. Three of the four columns carried
+          a paragraph, and `Table.Cell` is `whitespace-nowrap`, so the prose ran
+          straight into the next column. Cards give the text somewhere to go and
+          put the control next to the thing it changes.
+        -->
+        <div class="grid gap-4 lg:grid-cols-2">
+          {#each consumers as consumer (consumer.name)}
+            <div class="bg-card flex flex-col gap-3 rounded-lg border p-4">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <div class="font-medium break-words">{consumer.name}</div>
+                  <p class="text-muted-foreground mt-1 text-xs">{consumer.description}</p>
+                </div>
+                <Badge variant={modeVariant(consumer.effective_mode)}>{consumer.effective_mode}</Badge>
+              </div>
+
+              <p class="text-muted-foreground text-xs">
+                {MODE_HELP[consumer.effective_mode]}
+                {#if consumer.configured_mode === null}
+                  <span class="mt-1 block">Not configured; using the built-in default.</span>
+                {/if}
+                {#if consumer.legacy_consumer}
+                  <span class="mt-1 block">
+                    Compared against <span class="font-mono">{consumer.legacy_consumer}</span>
+                  </span>
+                {/if}
+              </p>
+
+              <div class="flex flex-wrap items-center gap-1">
+                <span class="text-muted-foreground mr-1 text-xs">Deliveries</span>
+                {#if Object.keys(consumer.counts).length === 0}
+                  <span class="text-muted-foreground text-xs">None yet</span>
+                {:else}
+                  {#each Object.entries(consumer.counts) as [status, count] (status)}
+                    <Badge variant="outline" class="text-xs">{status} {count}</Badge>
+                  {/each}
+                {/if}
+              </div>
+
+              <div class="mt-auto flex flex-col gap-1">
+                <Label for={`mode-${consumer.name}`} class="text-xs">Change to</Label>
+                <select
+                  id={`mode-${consumer.name}`}
+                  class="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
+                  value={consumer.effective_mode}
+                  disabled={saving === consumer.name}
+                  onchange={(e) => setMode(consumer.name, e.currentTarget.value as ConsumerMode)}
+                >
+                  {#each MODES as mode (mode)}
+                    <option value={mode}>{mode}</option>
+                  {/each}
+                </select>
+                {#if consumer.declared_mode === "shadow"}
+                  <p class="text-muted-foreground text-xs">
+                    Cannot be set live here: the existing send path is still running, so every message would go twice.
+                  </p>
+                {/if}
+              </div>
+            </div>
+          {/each}
+        </div>
       {/if}
     </Card.Content>
   </Card.Root>
@@ -356,7 +356,7 @@
                 <Table.Cell class="text-xs">
                   <span class="font-mono">{row.target_type} {row.target_id}</span>
                 </Table.Cell>
-                <Table.Cell>
+                <Table.Cell class="align-top whitespace-normal">
                   <Badge variant={verdictVariant(row.verdict)}>{row.verdict}</Badge>
                   <div class="text-muted-foreground mt-1 max-w-xs text-xs">{VERDICT_HELP[row.verdict]}</div>
                   {#if row.differing_fields.length > 0}
@@ -377,7 +377,7 @@
               </Table.Row>
               {#if expanded === rowKey(row)}
                 <Table.Row>
-                  <Table.Cell colspan={5}>
+                  <Table.Cell colspan={5} class="whitespace-normal">
                     <div class="grid gap-4 md:grid-cols-2">
                       <div>
                         <div class="mb-1 text-xs font-medium">Rehearsal ({row.consumer})</div>

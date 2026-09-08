@@ -392,7 +392,7 @@
             {#each apiKeys as apiKey (apiKey.id)}
               {@const replacement = replacementOf(apiKey)}
               <Table.Row class={apiKey.revoked_at ? "opacity-60" : ""}>
-                <Table.Cell class="pl-4">
+                <Table.Cell class="pl-4 align-top whitespace-normal">
                   <div class="font-medium">{apiKey.name}</div>
                   <code class="text-muted-foreground text-xs">
                     {apiKey.key_prefix ? `${apiKey.key_prefix}…` : ""}{apiKey.masked_key.slice(-8)}

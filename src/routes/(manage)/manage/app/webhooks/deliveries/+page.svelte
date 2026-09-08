@@ -266,7 +266,7 @@
             </Table.Row>
             {#if expanded === row.id}
               <Table.Row>
-                <Table.Cell colspan={7}>
+                <Table.Cell colspan={7} class="whitespace-normal">
                   <div class="bg-muted/40 grid gap-3 rounded p-3 text-xs md:grid-cols-2">
                     {#if row.error}
                       <div class="text-destructive md:col-span-2">
