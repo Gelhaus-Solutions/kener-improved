@@ -1,4 +1,5 @@
 import { ACTION_PERMISSION_MAP } from "$lib/allPerms.js";
+import { ORG_ACTION_PERMISSION_MAP } from "$lib/orgPerms.js";
 import { RequirePermission } from "$lib/server/controllers/userController.js";
 import { ActionError } from "../types.js";
 import type { AnyActionDefinition } from "../types.js";
@@ -17,7 +18,7 @@ import type { AnyActionDefinition } from "../types.js";
  */
 const MERGED_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   ...ACTION_PERMISSION_MAP,
-  // P1/Z11 adds: ...ORG_ACTION_PERMISSION_MAP
+  ...ORG_ACTION_PERMISSION_MAP,
 };
 
 /** Whether any layer knows this action string at all. */

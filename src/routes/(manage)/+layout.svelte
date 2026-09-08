@@ -34,6 +34,16 @@
   import { Toaster } from "$lib/components/ui/sonner/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { ROUTE_PERMISSION_MAP } from "$lib/allPerms.js";
+  import { ORG_ROUTE_PERMISSION_MAP } from "$lib/orgPerms.js";
+
+  // Upstream's route map merged with the fork's. `allPerms.ts` stays
+  // byte-identical to upstream, so fork routes are declared in `orgPerms.ts`
+  // instead; see the comment there.
+  const MERGED_ROUTE_PERMISSION_MAP: Record<string, string | null> = {
+    ...ROUTE_PERMISSION_MAP,
+    ...ORG_ROUTE_PERMISSION_MAP,
+  };
+
 
   let { children, data } = $props();
 
@@ -64,7 +74,7 @@
   const navItems = allNavItems
     .filter((item) => {
       const routeId = `/(manage)${item.url}`;
-      const requiredPermission = ROUTE_PERMISSION_MAP[routeId];
+      const requiredPermission = MERGED_ROUTE_PERMISSION_MAP[routeId];
       if (requiredPermission === undefined) return false;
       if (requiredPermission === null) return true;
       return (data.userPermissions ?? []).includes(requiredPermission);

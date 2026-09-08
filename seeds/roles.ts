@@ -1,5 +1,6 @@
 import type { Knex } from "knex";
 import { permissions } from "../src/lib/allPerms.ts";
+import { orgPermissions, orgPermissionIds } from "../src/lib/orgPerms.ts";
 
 /**
  * Seeds the three readonly roles (admin, editor, member),
@@ -22,8 +23,15 @@ const readonlyRoles = [
 const allPermissionIds = permissions.map((p) => p.id);
 const readPermissionIds = allPermissionIds.filter((id) => id.endsWith(".read"));
 
+// Fork permissions (orgPerms.ts) are granted to `admin` only, and deliberately
+// NOT fanned out by the ".read goes to member" rule that applies to upstream's.
+// `audit.read` would otherwise reach every member purely because of how it is
+// spelled, which is a real decision about who can see who did what, and it
+// should be made by an operator rather than by a naming coincidence.
+const orgIds = orgPermissions.map((p) => p.id);
+
 const rolePermissions: Record<string, string[]> = {
-  admin: allPermissionIds,
+  admin: [...allPermissionIds, ...orgIds],
   editor: allPermissionIds.filter((id) => id !== "api_keys.delete"),
   member: readPermissionIds,
 };
@@ -71,9 +79,17 @@ export async function seed(knex: Knex): Promise<void> {
       }
     }
 
-    // Remove permissions no longer assigned to this role
+    // Remove permissions no longer assigned to this role.
+    //
+    // Fork permissions are exempt. Seeds re-run on every boot, so without this
+    // an operator granting `audit.read` to `editor` would have it stripped at
+    // the next restart, with no error and no way to make it stick. Upstream
+    // permissions keep their existing reconcile-to-the-seed behaviour, so this
+    // changes nothing about how upstream's roles are managed.
     const desiredSet = new Set(validPermissionIds);
-    const toRemove = existingPerms.filter((e) => !desiredSet.has(e.permissions_id)).map((e) => e.permissions_id);
+    const toRemove = existingPerms
+      .filter((e) => !desiredSet.has(e.permissions_id) && !orgPermissionIds.has(e.permissions_id))
+      .map((e) => e.permissions_id);
     if (toRemove.length > 0) {
       await knex("roles_permissions").where("roles_id", roleId).whereIn("permissions_id", toRemove).del();
     }
