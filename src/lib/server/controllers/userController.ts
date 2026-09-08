@@ -95,8 +95,21 @@ export const GetAllUsers = async () => {
   return await db.getAllUsers();
 };
 
+/**
+ * How many users the **instance** has.
+ *
+ * Kept instance-wide deliberately: the sign-in screen and the public layout use
+ * it to decide whether the install has been set up at all, and an org with no
+ * members of its own must not make the instance look empty. The admin users
+ * list wants the org's count instead - see `GetOrgUsersCount`.
+ */
 export const GetUsersCount = async (filter?: { is_active?: number }) => {
   return await db.getTotalUsers(filter);
+};
+
+/** How many users the current org has, for the admin list's pagination. */
+export const GetOrgUsersCount = async (filter?: { is_active?: number }) => {
+  return await db.getOrgUsersCount(filter);
 };
 
 export const GetUserPasswordHashById = async (id: number) => {

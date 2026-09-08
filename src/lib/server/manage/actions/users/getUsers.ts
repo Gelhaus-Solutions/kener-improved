@@ -1,8 +1,13 @@
-import { GetAllUsersPaginatedDashboard, GetUsersCount } from "$lib/server/controllers/controller.js";
+import { GetAllUsersPaginatedDashboard, GetOrgUsersCount } from "$lib/server/controllers/controller.js";
 import type { ActionDefinition, LegacyPayload } from "../../types.js";
 
 /**
- * Transcribed from the inherited action chain; behaviour unchanged.
+ * Transcribed from the inherited action chain.
+ *
+ * The one change: the total counts the current org's members rather than every
+ * user on the instance, so it agrees with the rows the same call returns.
+ * `GetUsersCount` stays instance-wide for the sign-in screen; see the comment on
+ * it.
  */
 export default {
   action: "getUsers",
@@ -17,7 +22,7 @@ export default {
     }
     const hasFilter = Object.keys(filter).length > 0 ? filter : undefined;
     const users = await GetAllUsersPaginatedDashboard({ page, limit }, hasFilter);
-    const totalResult = await GetUsersCount(hasFilter);
+    const totalResult = await GetOrgUsersCount(hasFilter);
     const total = totalResult ? Number(totalResult.count) : 0;
     resp = { users, total };
     return resp;

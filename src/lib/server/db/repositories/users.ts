@@ -1,5 +1,6 @@
+import type { Knex as KnexType } from "knex";
 import { BaseRepository, type CountResult } from "./base.js";
-import { currentOrgIdOrDefault } from "../orgContext.js";
+import { currentOrgIdOrDefault, requireOrgId } from "../orgContext.js";
 import type {
   UserRecordInsert,
   UserRecordPublic,
@@ -22,6 +23,49 @@ export class UsersRepository extends BaseRepository {
 
   async getUsersCount(): Promise<CountResult | undefined> {
     return await this.table("users").count("* as count").first<CountResult>();
+  }
+
+  /**
+   * Restricts a `users` query to the members of the current organisation.
+   *
+   * `users` is an instance table on purpose - a person is one identity across
+   * every org they belong to, which is what makes `users.email` globally unique
+   * and what lets the org switcher exist at all. The consequence, until I3f, was
+   * that the admin's Users screen listed *every* user on the instance: an
+   * administrator of one tenant read the names and email addresses of every
+   * other tenant's people. `org_members` is where access lives, so it is what
+   * the listing screens filter on.
+   *
+   * A `whereIn` sub-select rather than a join, because `users` and `org_members`
+   * share `created_at` and `updated_at`: a join would make the unqualified column
+   * list ambiguous, and qualifying it would be one more thing to keep in step
+   * with upstream's.
+   *
+   * Under `runAcrossOrgs` the org is null and nothing is applied, which is what
+   * that function is for: a caller that genuinely wants every user on the
+   * instance says so. With no context at all this throws, by the same rule every
+   * scoped query follows.
+   */
+  private restrictToOrgMembers(query: KnexType.QueryBuilder): KnexType.QueryBuilder {
+    const orgId = requireOrgId("users");
+    if (orgId === null) return query;
+    return query.whereIn("users.id", this.knexUnscoped("org_members").where("org_id", orgId).select("user_id"));
+  }
+
+  /**
+   * How many users the current org has, for the admin list's pagination.
+   *
+   * Deliberately separate from `getTotalUsers`, which stays instance-wide: the
+   * sign-in screen and the public layout use it to ask "has this install got any
+   * users at all", and scoping that would make an org with no members of its own
+   * report the instance as un-set-up.
+   */
+  async getOrgUsersCount(filter?: { is_active?: number }): Promise<CountResult | undefined> {
+    const query = this.restrictToOrgMembers(this.table("users").count("* as count"));
+    if (filter?.is_active !== undefined) {
+      query.where("is_active", filter.is_active);
+    }
+    return await query.first<CountResult>();
   }
 
   private readonly userColumns = [
@@ -151,18 +195,22 @@ export class UsersRepository extends BaseRepository {
   }
 
   async getAllUsers(): Promise<UserRecordPublic[]> {
-    const rows = await this.table("users")
-      .select(...this.userColumns)
-      .orderBy("created_at", "desc");
+    const rows = await this.restrictToOrgMembers(
+      this.table("users")
+        .select(...this.userColumns)
+        .orderBy("created_at", "desc"),
+    );
     return await this.enrichManyWithRoleIds(rows);
   }
 
   async getUsersPaginated(page: number, limit: number, filter?: { is_active?: number }): Promise<UserRecordPublic[]> {
-    const query = this.table("users")
-      .select(...this.userColumns)
-      .orderBy("created_at", "desc")
-      .limit(limit)
-      .offset((page - 1) * limit);
+    const query = this.restrictToOrgMembers(
+      this.table("users")
+        .select(...this.userColumns)
+        .orderBy("created_at", "desc")
+        .limit(limit)
+        .offset((page - 1) * limit),
+    );
     if (filter?.is_active !== undefined) {
       query.where("is_active", filter.is_active);
     }
