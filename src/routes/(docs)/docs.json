@@ -226,6 +226,10 @@
                       "content": "v4/event-webhooks"
                     },
                     {
+                      "title": "Event Bus",
+                      "content": "v4/event-bus"
+                    },
+                    {
                       "title": "RSS Feed",
                       "content": "v4/rss-feed"
                     },

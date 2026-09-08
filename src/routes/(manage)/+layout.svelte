@@ -23,6 +23,7 @@
   import KeyIcon from "@lucide/svelte/icons/key";
   import ScrollTextIcon from "@lucide/svelte/icons/scroll-text";
   import SendIcon from "@lucide/svelte/icons/send";
+  import RadioTowerIcon from "@lucide/svelte/icons/radio-tower";
   import WebhookIcon from "@lucide/svelte/icons/webhook";
   import UsersIcon from "@lucide/svelte/icons/users";
   import ShieldIcon from "@lucide/svelte/icons/shield";
@@ -73,7 +74,8 @@
     { title: "API Keys", url: "/manage/app/api-keys", icon: KeyIcon },
     { title: "Webhooks", url: "/manage/app/webhooks", icon: WebhookIcon },
     { title: "Audit Log", url: "/manage/app/audit", icon: ScrollTextIcon },
-    { title: "Delivery Log", url: "/manage/app/deliveries", icon: SendIcon }
+    { title: "Delivery Log", url: "/manage/app/deliveries", icon: SendIcon },
+    { title: "Event Bus", url: "/manage/app/event-consumers", icon: RadioTowerIcon }
   ];
 
   const navItems = allNavItems

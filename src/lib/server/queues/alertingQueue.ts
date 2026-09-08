@@ -39,6 +39,8 @@ import sendDiscord from "$lib/server/notification/discord_notification.js";
 import type { SiteDataForNotification } from "../notification/types.js";
 import { emit } from "../events/emit.js";
 import { currentOrgId } from "../events/eventContext.js";
+import { recordLegacyDelivery } from "../events/legacyDeliveries.js";
+import { ALERT_TRIGGER_CONSUMER } from "../events/consumers/alertTrigger.js";
 let alertingQueue: Queue | null = null;
 
 let worker: Worker | null = null;
@@ -117,53 +119,116 @@ async function sendAlertNotifications(
   monitor_alerts_configured: MonitorAlertConfigRecord,
   templateSiteVars: SiteDataForNotification,
   monitorTag?: string,
+  /**
+   * The alert event these notifications belong to, when the caller has one.
+   *
+   * Optional so the trigger test path and anything else that calls this without
+   * an event keeps working. When it is present, each trigger gets a delivery row
+   * and a failure becomes visible on the delivery log instead of being swallowed
+   * along with everything else `notifyQuietly` catches.
+   */
+  eventId?: string,
 ): Promise<void> {
   const templateAlertVars = alertToVariables(monitor_alerts_configured, activeAlert, templateSiteVars, monitorTag);
   const triggers = await GetTriggersByMonitorAlertConfigId(monitor_alerts_configured.id);
+  const orgId = currentOrgId();
 
   for (let i = 0; i < triggers.length; i++) {
     const trigger = triggers[i];
 
     // Fetch trigger template
     const triggerMetaParsed = JSON.parse(trigger.trigger_meta) as TriggerMeta;
-    // Handle only email for now
-    if (trigger.trigger_type === "email") {
-      const toAddresses = triggerMetaParsed.to
-        .trim()
-        .split(",")
-        .map((addr) => addr.trim())
-        .filter((addr) => addr.length > 0);
-      if (toAddresses.length === 0) {
-        continue;
+
+    // Recorded per trigger rather than per alert. One dead Discord webhook among
+    // four healthy destinations is the case that matters, and an alert-level row
+    // would report that as a single ambiguous outcome.
+    const started = Date.now();
+    let failure: string | null = null;
+    let sent = false;
+    let requestHeaders: Record<string, string> | null = null;
+
+    try {
+      // Handle only email for now
+      if (trigger.trigger_type === "email") {
+        const toAddresses = triggerMetaParsed.to
+          .trim()
+          .split(",")
+          .map((addr) => addr.trim())
+          .filter((addr) => addr.length > 0);
+        if (toAddresses.length === 0) {
+          continue;
+        }
+        requestHeaders = { to: toAddresses.join(", ") };
+        await sendEmail(
+          triggerMetaParsed.email_body,
+          triggerMetaParsed.email_subject,
+          { ...templateAlertVars, ...templateSiteVars },
+          toAddresses,
+          triggerMetaParsed.from,
+        );
+        sent = true;
+      } else if (trigger.trigger_type === "webhook") {
+        requestHeaders = { url: triggerMetaParsed.url };
+        const result = await sendWebhook(
+          triggerMetaParsed.webhook_body,
+          { ...templateAlertVars, ...templateSiteVars },
+          triggerMetaParsed.url,
+          JSON.stringify(triggerMetaParsed.headers),
+        );
+        // These senders report a failure by returning `{ error }` rather than by
+        // throwing, so a try/catch alone would record every one of them as a
+        // success.
+        failure = result?.error ?? null;
+        sent = !failure;
+      } else if (trigger.trigger_type === "discord") {
+        requestHeaders = { url: triggerMetaParsed.url };
+        const result = await sendDiscord(
+          triggerMetaParsed.discord_body,
+          { ...templateAlertVars, ...templateSiteVars },
+          triggerMetaParsed.url,
+        );
+        failure = result?.error ?? null;
+        sent = !failure;
+      } else if (trigger.trigger_type === "slack") {
+        requestHeaders = { url: triggerMetaParsed.url };
+        const result = await sendSlack(
+          triggerMetaParsed.slack_body,
+          { ...templateAlertVars, ...templateSiteVars },
+          triggerMetaParsed.url,
+        );
+        failure = result?.error ?? null;
+        sent = !failure;
+      } else {
+        throw new Error("Unsupported trigger type for testing");
       }
-      await sendEmail(
-        triggerMetaParsed.email_body,
-        triggerMetaParsed.email_subject,
-        { ...templateAlertVars, ...templateSiteVars },
-        toAddresses,
-        triggerMetaParsed.from,
-      );
-    } else if (trigger.trigger_type === "webhook") {
-      await sendWebhook(
-        triggerMetaParsed.webhook_body,
-        { ...templateAlertVars, ...templateSiteVars },
-        triggerMetaParsed.url,
-        JSON.stringify(triggerMetaParsed.headers),
-      );
-    } else if (trigger.trigger_type === "discord") {
-      await sendDiscord(
-        triggerMetaParsed.discord_body,
-        { ...templateAlertVars, ...templateSiteVars },
-        triggerMetaParsed.url,
-      );
-    } else if (trigger.trigger_type === "slack") {
-      await sendSlack(
-        triggerMetaParsed.slack_body,
-        { ...templateAlertVars, ...templateSiteVars },
-        triggerMetaParsed.url,
-      );
-    } else {
-      throw new Error("Unsupported trigger type for testing");
+    } catch (error) {
+      failure = error instanceof Error ? error.message : String(error);
+    }
+
+    if (eventId) {
+      // The rendered body is deliberately not stored. The senders render it
+      // internally after substituting `$env` secrets, so capturing what actually
+      // went out would put credentials in the delivery log; the `triggers`
+      // consumer's shadow row carries the rendered body with those secrets left
+      // unresolved, which is the readable half of the pair.
+      await recordLegacyDelivery({
+        event_id: eventId,
+        org_id: orgId,
+        consumer: ALERT_TRIGGER_CONSUMER,
+        target_type: "trigger",
+        target_id: String(trigger.id),
+        ok: sent,
+        error: failure,
+        request_headers: requestHeaders,
+        duration_ms: Date.now() - started,
+      });
+    }
+
+    // Preserved from before the delivery log existed: one bad trigger must not
+    // stop the ones after it. The row above is what makes that survivable rather
+    // than silent.
+    if (failure) {
+      console.error(`Trigger ${trigger.id} (${trigger.trigger_type}) failed for alert ${activeAlert.id}: ${failure}`);
     }
   }
 }
@@ -229,9 +294,10 @@ async function notifyQuietly(
   config: MonitorAlertConfigRecord,
   templateSiteVars: SiteDataForNotification,
   monitorTag: string,
+  eventId?: string,
 ): Promise<void> {
   try {
-    await sendAlertNotifications(activeAlert, config, templateSiteVars, monitorTag);
+    await sendAlertNotifications(activeAlert, config, templateSiteVars, monitorTag, eventId);
   } catch (error) {
     console.error("Error sending alert notifications:", error);
   }
@@ -290,9 +356,10 @@ const addWorker = () => {
       // between the two loses the event permanently: the retried job finds the
       // alert already TRIGGERED and returns early, so nothing ever emits it.
       // This is the persistence section, so a throw here is a retry, by design.
+      let triggeredEventId: string | undefined;
       activeAlert = await db.withTransaction(async () => {
         const created = await CreateMonitorAlertV2(monitor_alerts_configured.id, monitor_tag);
-        await emit({
+        const emitted = await emit({
           org_id: currentOrgId(),
           type: "monitor.alert_triggered",
           aggregate_id: created.id,
@@ -309,6 +376,7 @@ const addWorker = () => {
             failure_threshold: monitor_alerts_configured.failure_threshold,
           },
         });
+        triggeredEventId = emitted.event_id;
         return created;
       });
 
@@ -325,7 +393,7 @@ const addWorker = () => {
         }
       }
 
-      await notifyQuietly(activeAlert, monitor_alerts_configured, templateSiteVars, monitor_tag);
+      await notifyQuietly(activeAlert, monitor_alerts_configured, templateSiteVars, monitor_tag, triggeredEventId);
       return;
     }
 
@@ -348,9 +416,10 @@ const addWorker = () => {
 
     //resolve the alert
     const alertToResolve = activeAlert;
+    let resolvedEventId: string | undefined;
     activeAlert = await db.withTransaction(async () => {
       const resolved = await UpdateMonitorAlertV2Status(alertToResolve.id, GC.RESOLVED);
-      await emit({
+      const emitted = await emit({
         org_id: currentOrgId(),
         type: "monitor.alert_resolved",
         aggregate_id: resolved.id,
@@ -367,6 +436,7 @@ const addWorker = () => {
           success_threshold: monitor_alerts_configured.success_threshold,
         },
       });
+      resolvedEventId = emitted.event_id;
       return resolved;
     });
 
@@ -375,7 +445,7 @@ const addWorker = () => {
       await closeIncident(activeAlert, monitor_alerts_configured, monitor_name, monitor_tag);
     }
 
-    await notifyQuietly(activeAlert, monitor_alerts_configured, templateSiteVars, monitor_tag);
+    await notifyQuietly(activeAlert, monitor_alerts_configured, templateSiteVars, monitor_tag, resolvedEventId);
   });
 
   worker.on("completed", (job: Job, returnvalue: any) => {

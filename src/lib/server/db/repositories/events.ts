@@ -429,6 +429,74 @@ export class EventsRepository extends BaseRepository {
     return updated > 0;
   }
 
+  /**
+   * Delivery counts per consumer per status, for the consumers screen.
+   *
+   * Grouped in the database rather than counted per consumer per status in the
+   * application, which would be six scans of the largest table in the schema to
+   * render one page.
+   */
+  async getDeliveryCountsByConsumer(orgId: number): Promise<Record<string, Record<string, number>>> {
+    const rows = (await this.knex("event_deliveries")
+      .select("consumer", "status")
+      .count("* as count")
+      .where("org_id", orgId)
+      .groupBy("consumer", "status")) as Record<string, unknown>[];
+
+    const out: Record<string, Record<string, number>> = {};
+    for (const row of rows) {
+      const consumer = String(row.consumer);
+      out[consumer] ??= {};
+      out[consumer][String(row.status)] = Number(row.count);
+    }
+    return out;
+  }
+
+  /**
+   * Events that either side of a shadow pair produced a delivery for, newest
+   * first.
+   *
+   * Both sides, not just the rehearsing consumer. An event the rehearsal skipped
+   * entirely and the live path did not is the single finding that would block a
+   * cutover, and a query over shadow rows alone is a query that structurally
+   * cannot return it.
+   *
+   * Ordered by the outbox id, which is the durable publish order, rather than by
+   * `occurred_at`, which ties at one-second resolution.
+   */
+  private shadowDiffEventQuery(orgId: number, shadowConsumer: string, legacyConsumer: string) {
+    return this.knex("event_deliveries as d")
+      .join("event_outbox as e", "e.event_id", "d.event_id")
+      .where("d.org_id", orgId)
+      .whereIn("d.consumer", [shadowConsumer, legacyConsumer]);
+  }
+
+  async getShadowDiffEventIds(
+    orgId: number,
+    shadowConsumer: string,
+    legacyConsumer: string,
+    page: number,
+    limit: number,
+  ): Promise<string[]> {
+    const rows = (await this.shadowDiffEventQuery(orgId, shadowConsumer, legacyConsumer)
+      .select("d.event_id")
+      // Aggregated so an event fanned out to fifty recipients counts once, and
+      // so a page is a page of events rather than of rows.
+      .max("e.id as seq")
+      .groupBy("d.event_id")
+      .orderBy("seq", "desc")
+      .limit(limit)
+      .offset((page - 1) * limit)) as Record<string, unknown>[];
+    return rows.map((r) => String(r.event_id));
+  }
+
+  async getShadowDiffEventCount(orgId: number, shadowConsumer: string, legacyConsumer: string): Promise<number> {
+    const row = await this.shadowDiffEventQuery(orgId, shadowConsumer, legacyConsumer)
+      .countDistinct("d.event_id as count")
+      .first<CountResult>();
+    return Number(row?.count ?? 0);
+  }
+
   async pruneDeliveries(cutoffTs: number): Promise<number> {
     // DEAD rows survive retention: they are the record of what never reached its
     // destination, and that is worth more than the bytes it costs.

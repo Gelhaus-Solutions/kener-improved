@@ -94,7 +94,7 @@ async function deliveriesFor(event: OutboxEvent, now: number): Promise<EventDeli
   if (event.suppress) return [];
 
   const rows: EventDeliveryInsert[] = [];
-  for (const consumer of activeConsumers()) {
+  for (const { consumer, mode } of await activeConsumers()) {
     let targets;
     try {
       targets = await consumer.targets(event);
@@ -105,6 +105,25 @@ async function deliveriesFor(event: OutboxEvent, now: number): Promise<EventDeli
       console.error(`event relay: consumer "${consumer.name}" failed to resolve targets:`, error);
       continue;
     }
+
+    // What the mode buys, and what it costs:
+    //
+    //   legacy  a terminal SKIPPED row. The target list is the evidence; nothing
+    //           is ever dispatched, so this cannot send and cannot render.
+    //   shadow  dispatched like a live delivery when the consumer can dry-run,
+    //           so the row ends up carrying the *rendered* request. Without
+    //           dry-run support there is nothing safe to dispatch, so the row
+    //           goes straight to SHADOW carrying only the resolved target.
+    //   live    the ordinary path.
+    //
+    // The shadow-with-dry-run row is deliberately created PENDING and due now.
+    // It travels the real dispatch path - the same claim, the same ordering
+    // guard, the same worker - and only the outbound call is suppressed, which
+    // is what makes the rehearsal worth anything. A row that took a different
+    // route through the system would be rehearsing the wrong thing.
+    const dispatchable = mode === "live" || (mode === "shadow" && consumer.supportsDryRun === true);
+    const terminalStatus = mode === "legacy" ? "SKIPPED" : "SHADOW";
+
     for (const target of targets) {
       rows.push({
         event_id: event.event_id,
@@ -112,12 +131,9 @@ async function deliveriesFor(event: OutboxEvent, now: number): Promise<EventDeli
         consumer: consumer.name,
         target_type: target.target_type,
         target_id: target.target_id,
-        // A shadow consumer's row is created and then deliberately left alone.
-        // That is the point: the row is the evidence of what *would* have been
-        // sent, which is what the P6 cutover diffs against the live path.
-        status: consumer.mode === "shadow" ? "SHADOW" : "PENDING",
+        status: dispatchable ? "PENDING" : terminalStatus,
         attempts: 0,
-        next_attempt_at: consumer.mode === "shadow" ? null : now,
+        next_attempt_at: dispatchable ? now : null,
         last_attempt_at: null,
         response_code: null,
         response_body: null,

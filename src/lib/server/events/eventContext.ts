@@ -34,6 +34,26 @@ export interface EventContext extends EventActor {
    */
   correlation_id?: string | null;
   org_id?: number;
+
+  /**
+   * Event ids emitted while this context was ambient, appended by `emit()`.
+   *
+   * This exists so the admin pipeline can answer one question after the handler
+   * returns: did this action put anything on the bus? If it did, the audit
+   * consumer writes the audit row and the pipeline must not write a second one.
+   *
+   * Collected ambiently rather than declared per action, and that is the point.
+   * A declaration would be a list to keep in step with which handlers reach an
+   * emitting controller, and the failure mode of that list falling behind is a
+   * duplicated audit row or a missing one - neither of which anybody notices
+   * until they are reading the log for a reason. Observing what actually
+   * happened cannot drift.
+   *
+   * Only present where somebody is asking. `emit()` appends when the array
+   * exists and does nothing when it does not, so a scheduler or a queue worker
+   * pays nothing for this.
+   */
+  emitted?: string[];
 }
 
 const storage = new AsyncLocalStorage<EventContext>();
@@ -54,6 +74,14 @@ export function runWithEventContext<T>(context: EventContext, fn: () => Promise<
 
 export function getEventContext(): EventContext | undefined {
   return storage.getStore();
+}
+
+/**
+ * Records that an event was emitted under the current context, if anybody is
+ * collecting. Called by `emit()`; nothing else should call it.
+ */
+export function noteEmittedEvent(eventId: string): void {
+  storage.getStore()?.emitted?.push(eventId);
 }
 
 /**

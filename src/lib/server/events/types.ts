@@ -176,25 +176,60 @@ export interface DeliveryResult {
 }
 
 /**
+ * What a consumer is allowed to do right now. See events/consumerModes.ts for
+ * why there are four of these and what each one is for.
+ */
+export type ConsumerMode = "off" | "legacy" | "shadow" | "live";
+
+/** Options for one delivery attempt. */
+export interface DeliveryOptions {
+  /**
+   * Build everything, send nothing.
+   *
+   * A consumer that sets `supportsDryRun` must, when this is true, do every
+   * lookup and every render it would do for a real send and then return the
+   * request it *would* have made without performing any outbound I/O. That
+   * recorded request is the whole value of a shadow period: comparing recipient
+   * lists catches a broken filter, but only comparing rendered bodies catches a
+   * template variable that silently stopped resolving.
+   */
+  dryRun?: boolean;
+}
+
+/**
  * A consumer of the bus.
  *
- * P2 ships with none of these registered. The interface exists now so E10
- * (webhooks) and H8c (audit, subscribers, triggers) are a registration rather
- * than a redesign.
+ * A consumer declares what it wants and how to deliver it; whether it is
+ * actually allowed to deliver is an operator's decision, read per event from
+ * `site_data`. That split is what lets a channel be moved onto the bus and moved
+ * back off it without touching this file.
  */
 export interface EventConsumer {
   /** Stable identifier, stored in event_deliveries.consumer. Never rename it. */
   name: string;
 
   /**
-   * live    deliveries happen
-   * shadow  deliveries are computed and recorded as SHADOW, and nothing is sent
-   * off     no delivery rows at all
+   * The mode this consumer runs in when `site_data.eventBusConsumers` says
+   * nothing about it: on a fresh install, or after this consumer is added to a
+   * build whose flag row predates it.
    *
-   * Shadow is how P6 flips notifications over without a silent gap: run the new
-   * path beside the old one, diff what each would have sent, and only then flip.
+   * **The effective mode is not this field.** Read it with
+   * `effectiveMode(consumer)`, never directly: the operator's setting wins, and
+   * code that reads `mode` straight off the object is code that ignores the
+   * switch the whole strangler design rests on.
    */
-  mode: "live" | "shadow" | "off";
+  mode: ConsumerMode;
+
+  /**
+   * True when `deliver()` honours `dryRun`.
+   *
+   * Opt-in rather than assumed, and the asymmetry is on purpose: a consumer that
+   * ignored the flag would send a real notification during what an operator was
+   * told is a rehearsal. The default has to be the one that cannot do that, so a
+   * shadow consumer without this records its resolved targets and never runs
+   * `deliver()` at all.
+   */
+  supportsDryRun?: boolean;
 
   /**
    * Per-aggregate FIFO. Costs a Redis lock per delivery, so it is opt-in.
@@ -210,5 +245,5 @@ export interface EventConsumer {
   targets(event: OutboxEvent): Promise<DeliveryTarget[]> | DeliveryTarget[];
 
   /** One attempt. Throwing is treated as a retryable failure. */
-  deliver(event: OutboxEvent, target: DeliveryTarget): Promise<DeliveryResult>;
+  deliver(event: OutboxEvent, target: DeliveryTarget, options?: DeliveryOptions): Promise<DeliveryResult>;
 }

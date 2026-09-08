@@ -1,19 +1,12 @@
-import type { EventConsumer } from "./types.js";
+import { consumerMode } from "./consumerModes.js";
+import type { ConsumerMode, EventConsumer } from "./types.js";
 
 // The consumer registry.
 //
-// **It is deliberately empty.** H8 ships the bus with nothing on it: events are
-// recorded, the relay publishes them, delivery rows are created for nobody, and
-// not one byte leaves the process differently than it did before. That is the
-// whole safety property of this phase - the outbox can be watched in production
-// for as long as it takes to trust it, and if it is wrong the blast radius is
-// rows in a table.
-//
-// Consumers arrive later and each is a registration, not a redesign:
-//
-//   E10 (P2)  incident-lifecycle webhooks, signed and retried
-//   H8c (P2)  audit live; subscribers and triggers in *shadow*
-//   E-cut1/2  the shadow-to-live flip, once a shadow diff shows no loss
+// H8c filled it: `audit` and `webhook` live, `subscribers` and `triggers` in
+// shadow until the P6 cutover. What each consumer is allowed to do is not
+// decided here - it is read per event from `site_data.eventBusConsumers`, so a
+// channel can be moved onto the bus and moved back without a deploy.
 //
 // Ordering, honestly: `ordered: true` buys per-aggregate FIFO at the cost of a
 // lock per delivery. Use it where order carries meaning (audit, page status) and
@@ -35,9 +28,36 @@ export function registerConsumer(consumer: EventConsumer): void {
   registry.set(consumer.name, consumer);
 }
 
-/** Every consumer that is not `off`. */
-export function activeConsumers(): EventConsumer[] {
-  return [...registry.values()].filter((c) => c.mode !== "off");
+/**
+ * The mode this consumer is actually running in.
+ *
+ * Always go through here. `consumer.mode` is only the declared default, and the
+ * operator's setting in `site_data` is what decides whether anything is sent.
+ */
+export async function effectiveMode(consumer: EventConsumer): Promise<ConsumerMode> {
+  return await consumerMode(consumer.name, consumer.mode);
+}
+
+/** Every registered consumer, whatever mode it is in. Used by the admin screen. */
+export function allConsumers(): EventConsumer[] {
+  return [...registry.values()];
+}
+
+/**
+ * Every consumer that is doing something, paired with the mode it is doing it
+ * in.
+ *
+ * `off` consumers are dropped here rather than in the relay so that the relay
+ * never has to think about the flag at all: it asks what is active and gets an
+ * answer that already accounts for the operator's setting.
+ */
+export async function activeConsumers(): Promise<{ consumer: EventConsumer; mode: ConsumerMode }[]> {
+  const out: { consumer: EventConsumer; mode: ConsumerMode }[] = [];
+  for (const consumer of registry.values()) {
+    const mode = await effectiveMode(consumer);
+    if (mode !== "off") out.push({ consumer, mode });
+  }
+  return out;
 }
 
 export function getConsumer(name: string): EventConsumer | undefined {

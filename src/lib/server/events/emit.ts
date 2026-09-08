@@ -1,7 +1,7 @@
 import db from "../db/db.js";
 import { afterCommit } from "../db/trxContext.js";
 import { ulid } from "./ulid.js";
-import { currentActor, currentCorrelationId } from "./eventContext.js";
+import { currentActor, currentCorrelationId, noteEmittedEvent } from "./eventContext.js";
 import { EVENT_AGGREGATE_TYPE } from "$lib/event-taxonomy.js";
 import type { EventInput } from "./types.js";
 
@@ -106,6 +106,13 @@ export async function emit(input: EventInput): Promise<EmitResult> {
   // row once Redis returns. Imported lazily so merely emitting an event does not
   // drag BullMQ into a request path that may never need it.
   if (inserted && !(input.suppress ?? false)) {
+    // Tells the admin pipeline that this action reached the bus, so the audit
+    // row comes from the audit consumer instead of from the middleware. Both
+    // conditions matter: a suppressed event is never delivered to any consumer,
+    // and an idempotency collision inserted nothing, so in either case no
+    // consumer will write an audit row and the middleware must still do it.
+    noteEmittedEvent(event_id);
+
     afterCommit(async () => {
       const { nudge } = await import("../queues/eventRelayQueue.js");
       await nudge();

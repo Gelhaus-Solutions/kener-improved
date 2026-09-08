@@ -4,9 +4,7 @@ import mainScheduler from "./schedulers/appScheduler.js";
 import maintenanceScheduler from "./schedulers/maintenanceScheduler.js";
 import dailyCleanupScheduler from "./schedulers/dailyCleanup.js";
 import eventRelayQueue from "./queues/eventRelayQueue.js";
-import { registerConsumer } from "./events/consumers.js";
-import webhookConsumer from "./events/consumers/webhooks.js";
-import emailConsumer from "./events/consumers/email.js";
+import { registerAllConsumers } from "./events/consumers/index.js";
 import { InstallEnvProxy } from "./proxy.js";
 import { InvalidateSiteDataCache } from "./cache/siteDataCache.js";
 
@@ -25,11 +23,10 @@ async function Startup(): Promise<void> {
   await dailyCleanupScheduler.start();
   // Consumers must be registered before the relay starts, or the first pass
   // publishes events with no delivery rows and they are never reconsidered.
-  registerConsumer(webhookConsumer);
-  // Registered so an emailed delivery can be retried from the delivery log. It
-  // routes nothing on its own; subscriberQueue still owns the send. See the
-  // header of events/consumers/email.ts.
-  registerConsumer(emailConsumer);
+  // What each one is allowed to do is not decided here: it is read per event
+  // from `site_data.eventBusConsumers`, so an operator can pull a consumer back
+  // to shadow without a deploy. See events/consumerModes.ts.
+  registerAllConsumers();
 
   // Last of the schedulers, and only in this process: the relay and its dispatch
   // worker belong together, and the web process must never become one.

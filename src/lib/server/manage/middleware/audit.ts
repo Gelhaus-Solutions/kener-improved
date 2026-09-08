@@ -4,6 +4,7 @@ import { record } from "$lib/server/audit/writer.js";
 import { diffSnapshots, redact, toJsonColumn } from "$lib/server/audit/redact.js";
 import { GetNowTimestampUTC } from "$lib/server/tool.js";
 import type { AuditOutcome } from "$lib/server/types/db.js";
+import type { ActionDiff } from "./events.js";
 
 /**
  * Audit capture, driven entirely by the registry entry.
@@ -90,45 +91,75 @@ export async function auditBefore(
 }
 
 /**
- * Writes the row, and returns the before/after it computed.
+ * Runs the after-snapshot and returns the before/after it computed.
  *
- * The return value exists so the event middleware can reuse the diff instead of
- * running the after-snapshot a second time: those snapshots are database reads,
- * and doing them twice per write action to produce the same answer is a cost
- * nobody would accept if it were visible.
+ * Split from the write so the pipeline can hand this diff to the event
+ * middleware *before* deciding whether to write an audit row at all: the emit
+ * has to happen first, because whether it happened is what the decision turns
+ * on. Computing it once also keeps the snapshot to one pair of database reads
+ * per action rather than two.
  *
  * Never throws: auditing must not be able to fail a request.
  */
-export async function auditAfter(
+export async function auditDiff(
   auditRecord: AuditRecord | null,
-  def: AnyActionDefinition | undefined,
   data: Record<string, unknown>,
   outcome: AuditOutcome,
-  statusCode: number,
-): Promise<{ before: Record<string, unknown>; after: Record<string, unknown> } | null> {
-  if (!auditRecord) return null;
-
-  let computedDiff: { before: Record<string, unknown>; after: Record<string, unknown> } | null = null;
+): Promise<ActionDiff | null> {
+  if (!auditRecord || !auditRecord.snapshot || outcome !== "ok") return null;
 
   try {
-    let beforeJson: string | null = null;
-    let afterJson: string | null = null;
-
-    if (auditRecord.snapshot && outcome === "ok") {
-      let after: unknown;
-      try {
-        after = await auditRecord.snapshot(data);
-      } catch (error) {
-        console.error(`audit: after-snapshot failed for ${auditRecord.action}:`, error);
-      }
-      const diff = diffSnapshots(auditRecord.before, after);
-      if (diff) {
-        computedDiff = diff as { before: Record<string, unknown>; after: Record<string, unknown> };
-        beforeJson = toJsonColumn(diff.before);
-        afterJson = toJsonColumn(diff.after);
-      }
+    let after: unknown;
+    try {
+      after = await auditRecord.snapshot(data);
+    } catch (error) {
+      console.error(`audit: after-snapshot failed for ${auditRecord.action}:`, error);
     }
+    const diff = diffSnapshots(auditRecord.before, after);
+    return diff ? (diff as ActionDiff) : null;
+  } catch (error) {
+    console.error("audit: failed to diff", auditRecord.action, error);
+    return null;
+  }
+}
 
+/**
+ * Writes the audit row for a completed action, unless the bus already owns it.
+ *
+ * **`emittedEventIds` is what makes the event bus the audit log's writer rather
+ * than a second one.** An action that emitted an event has an audit row coming
+ * from the audit consumer, built from that event; writing one here as well would
+ * put the same change in the log twice, once under the action name and once
+ * under the event type. So the middleware writes exactly the actions the bus
+ * does not carry, which today is most of them, and stands down for the ones it
+ * does.
+ *
+ * The observation is made rather than declared. The alternative was a list of
+ * action names known to emit, and that list would have to include every action
+ * whose *handler* reaches an emitting controller several layers down - a
+ * relationship nothing checks and nobody would notice going stale.
+ *
+ * What this costs, stated plainly: for an action that emits, the audit row now
+ * arrives through the relay instead of through the 500ms buffer, so it is
+ * slower and it depends on the bus working. It is also, for the same reason,
+ * more durable than the buffer it replaced - the outbox row commits with the
+ * change itself and the delivery is retried for six hours, where a buffered row
+ * is lost on a hard kill.
+ *
+ * Never throws.
+ */
+export function auditWrite(
+  auditRecord: AuditRecord | null,
+  data: Record<string, unknown>,
+  diff: ActionDiff | null,
+  outcome: AuditOutcome,
+  statusCode: number,
+  emittedEventIds: readonly string[],
+): void {
+  if (!auditRecord) return;
+  if (emittedEventIds.length > 0) return;
+
+  try {
     record({
       // P4 fills this from the org context established by requireOrg.
       org_id: null,
@@ -145,8 +176,8 @@ export async function auditAfter(
       status_code: statusCode,
       ip: auditRecord.ip,
       user_agent: auditRecord.userAgent,
-      before_json: beforeJson,
-      after_json: afterJson,
+      before_json: diff ? toJsonColumn(diff.before) : null,
+      after_json: diff ? toJsonColumn(diff.after) : null,
       // The payload identifies what was acted on even without a snapshot, so a
       // redacted copy is kept for the actions that have not opted into one.
       meta_json: auditRecord.snapshot ? null : toJsonColumn(redact(data)),
@@ -154,8 +185,6 @@ export async function auditAfter(
   } catch (error) {
     console.error("audit: failed to record", auditRecord.action, error);
   }
-
-  return computedDiff;
 }
 
 /**

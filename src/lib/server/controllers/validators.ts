@@ -122,3 +122,31 @@ export function IsValidColors(colors: string): boolean {
   }
   return true;
 }
+
+/**
+ * The event bus consumer mode map: `{ "<consumer>": "off|legacy|shadow|live" }`.
+ *
+ * Rejected at the write rather than tolerated and dropped at the read. The read
+ * path in `events/consumerModes.ts` deliberately ignores a mode it does not
+ * recognise and falls back to the consumer's declared default, which is the
+ * right behaviour there - guessing would mean either starting to send from a
+ * typo or silently stopping a channel that was working. But that also means a
+ * bad value written here would take effect as "no change", with nothing to say
+ * so. Failing the write is what turns that into a visible error.
+ */
+export function IsValidConsumerModes(value: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return false;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+
+  const modes = new Set(["off", "legacy", "shadow", "live"]);
+  for (const [name, mode] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof name !== "string" || name.length === 0) return false;
+    if (typeof mode !== "string" || !modes.has(mode)) return false;
+  }
+  return true;
+}

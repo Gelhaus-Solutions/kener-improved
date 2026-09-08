@@ -31,6 +31,13 @@ export const orgPermissions: Array<{ id: string; permission_name: string }> = [
   { id: "webhooks.read", permission_name: "View outbound webhooks and their delivery log" },
   { id: "webhooks.write", permission_name: "Create, update, and delete outbound webhooks" },
 
+  // Event bus consumers (H8c). Separate from `webhooks.*` on purpose: reading
+  // the delivery log is an everyday operational act, while changing what a
+  // consumer is allowed to do decides whether customer notifications are sent at
+  // all. Those do not belong to the same person by default.
+  { id: "eventbus.read", permission_name: "View event bus consumers and the shadow diff" },
+  { id: "eventbus.write", permission_name: "Change what event bus consumers are allowed to do" },
+
   // Organisations (P4)
   { id: "orgs.read", permission_name: "View organisation settings" },
   { id: "orgs.write", permission_name: "Create and update organisations" },
@@ -64,6 +71,12 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   getEventDeliveries: "webhooks.read",
   retryEventDelivery: "webhooks.write",
   retryDeliveriesForTarget: "webhooks.write",
+
+  // Event bus consumers (H8c). The diff is a read of what would have been sent;
+  // the mode is the switch that decides whether anything is sent at all.
+  getEventConsumers: "eventbus.read",
+  getShadowDiff: "eventbus.read",
+  setEventConsumerMode: "eventbus.write",
 };
 
 /**
@@ -77,6 +90,9 @@ export const ORG_ROUTE_PERMISSION_MAP: Record<string, string | null> = {
   // Reading the list is enough to reach the screen; every button on it is
   // separately gated on webhooks.write by its action.
   "/(manage)/manage/app/webhooks": "webhooks.read",
+  // Same shape: the screen opens on read, and the mode control on it is gated
+  // on eventbus.write by its own action.
+  "/(manage)/manage/app/event-consumers": "eventbus.read",
 };
 
 /** Permission ids the fork owns. Used by the seeds to tell them from upstream's. */

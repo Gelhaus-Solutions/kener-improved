@@ -1,5 +1,6 @@
 import {
   IsValidAnalytics,
+  IsValidConsumerModes,
   IsValidColors,
   IsValidHero,
   IsValidI18n,
@@ -325,6 +326,19 @@ export const siteDataKeys: SiteDataKey[] = [
   {
     key: "oidcSettings",
     isValid: IsValidJSONString,
+    data_type: "object",
+  },
+  {
+    // What each event bus consumer is allowed to do. See
+    // server/events/consumerModes.ts; written by the event consumers screen.
+    //
+    // Validated harder than the JSON-shaped keys around it, and deliberately so.
+    // Every other key here decides how the site looks; this one decides whether
+    // customer notifications are sent at all, and an unrecognised mode written
+    // by hand would be dropped silently at read time. Rejecting it at the write
+    // is the difference between a clear error and a channel that quietly stopped.
+    key: "eventBusConsumers",
+    isValid: IsValidConsumerModes,
     data_type: "object",
   },
 ];

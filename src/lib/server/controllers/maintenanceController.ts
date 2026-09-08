@@ -43,13 +43,23 @@ import type { EventType } from "$lib/event-taxonomy.js";
  * between updating the status and pushing the notification lost the
  * notification permanently.
  */
+/**
+ * Emits one maintenance transition and returns the event id.
+ *
+ * The id is returned so the subscriber notification that follows can be tied
+ * back to the event that caused it. Without that link the maintenance emails
+ * write no `event_deliveries` rows at all, and the H8c shadow diff has a
+ * rehearsal on one side and nothing on the other, which is unreadable: an empty
+ * live side looks identical whether the old path sent nothing or simply never
+ * recorded what it sent.
+ */
 async function emitMaintenanceTransition(
   type: EventType,
   event: Pick<MaintenanceEventRecord, "id" | "maintenance_id" | "start_date_time" | "end_date_time" | "status">,
   transitionSeq: number,
   extra: Record<string, unknown> = {},
-): Promise<void> {
-  await emit({
+): Promise<string> {
+  const { event_id } = await emit({
     org_id: currentOrgId(),
     type,
     aggregate_id: event.id,
@@ -64,6 +74,7 @@ async function emitMaintenanceTransition(
       ...extra,
     },
   });
+  return event_id;
 }
 
 /**
@@ -180,7 +191,7 @@ export const CreateMaintenanceEventWithNotification = async (
     siteData.globalMaintenanceNotificationSettings || seedSiteData.globalMaintenanceNotificationSettings;
   const reminderBufferSeconds = notificationSettings.reminder_buffer_hours * 3600;
 
-  const event = await db.withTransaction(async () => {
+  const { event, eventId } = await db.withTransaction(async () => {
     const created = await db.createMaintenanceEvent({
       maintenance_id,
       start_date_time,
@@ -188,8 +199,8 @@ export const CreateMaintenanceEventWithNotification = async (
       status: determineEventStatus(start_date_time, end_date_time, reminderBufferSeconds),
     });
     // transition_seq 0: the row was born at this status and has not transitioned.
-    await emitMaintenanceTransition("maintenance.scheduled", created, 0, { title });
-    return created;
+    const id = await emitMaintenanceTransition("maintenance.scheduled", created, 0, { title });
+    return { event: created, eventId: id };
   });
 
   try {
@@ -217,7 +228,7 @@ export const CreateMaintenanceEventWithNotification = async (
         "Maintenance Created",
         siteUrl,
       );
-      await subscriberQueue.push(update);
+      await subscriberQueue.push(update, undefined, { event_id: eventId, org_id: currentOrgId() });
     }
   } catch (err) {
     console.error(`Error sending created notification for maintenance event ${event.id}:`, err);
@@ -612,7 +623,7 @@ export const UpdateMaintenanceEventStatus = async (id: number, status: string): 
   // The status write and the event are one transaction: before the outbox, a
   // crash between updating the status and pushing the notification lost the
   // notification with no trace. Now either both land or neither does.
-  const updated = await db.withTransaction(async () => {
+  const { updated, eventId } = await db.withTransaction(async () => {
     if (existing.status === GC.ONGOING) {
       // Ended now, but never before its first minute nor after its planned end
       const endDateTime = Math.min(
@@ -629,13 +640,13 @@ export const UpdateMaintenanceEventStatus = async (id: number, status: string): 
       throw new Error(`Maintenance event with id ${id} does not exist`);
     }
 
-    await emitMaintenanceTransition(
+    const id2 = await emitMaintenanceTransition(
       targetStatus === GC.COMPLETED ? "maintenance.completed" : "maintenance.cancelled",
       row,
       row.transition_seq,
       { previous_status: existing.status },
     );
-    return row;
+    return { updated: row, eventId: id2 };
   });
 
   try {
@@ -661,7 +672,7 @@ export const UpdateMaintenanceEventStatus = async (id: number, status: string): 
         targetStatus === GC.COMPLETED ? "Maintenance Completed" : "Maintenance Cancelled",
         siteUrl,
       );
-      await subscriberQueue.push(update);
+      await subscriberQueue.push(update, undefined, { event_id: eventId, org_id: currentOrgId() });
     }
   } catch (err) {
     console.error(`Error sending ${targetStatus} notification for maintenance event ${id}:`, err);
@@ -819,9 +830,9 @@ export const UpdateMaintenanceEventStatuses = async (): Promise<void> => {
     for (const event of scheduledEvents) {
       // Status and event together; the subscriber push stays outside, because a
       // job enqueued inside a transaction can be picked up before it commits.
-      await db.withTransaction(async () => {
+      const reminderEventId = await db.withTransaction(async () => {
         const seq = await db.updateMaintenanceEventStatus(event.id, GC.READY);
-        await emitMaintenanceTransition("maintenance.reminder", { ...event, status: "READY" }, seq, {
+        return await emitMaintenanceTransition("maintenance.reminder", { ...event, status: "READY" }, seq, {
           previous_status: event.status,
         });
       });
@@ -841,16 +852,16 @@ export const UpdateMaintenanceEventStatuses = async (): Promise<void> => {
           "Maintenance Starting Soon",
           siteUrl,
         );
-        await subscriberQueue.push(update);
+        await subscriberQueue.push(update, undefined, { event_id: reminderEventId, org_id: currentOrgId() });
       }
     }
 
     // 2. Catch-up: SCHEDULED events that missed the READY window and already started → ONGOING
     const scheduledStartedEvents = await db.getScheduledEventsAlreadyStarted(currentTimestamp);
     for (const event of scheduledStartedEvents) {
-      await db.withTransaction(async () => {
+      const catchUpEventId = await db.withTransaction(async () => {
         const seq = await db.updateMaintenanceEventStatus(event.id, GC.ONGOING);
-        await emitMaintenanceTransition("maintenance.started", { ...event, status: "ONGOING" }, seq, {
+        return await emitMaintenanceTransition("maintenance.started", { ...event, status: "ONGOING" }, seq, {
           previous_status: event.status,
           // Recorded because it means the READY window was missed, which is the
           // signature of a scheduler that was down or a clock that jumped.
@@ -870,16 +881,16 @@ export const UpdateMaintenanceEventStatuses = async (): Promise<void> => {
           "Maintenance In Progress",
           siteUrl,
         );
-        await subscriberQueue.push(update);
+        await subscriberQueue.push(update, undefined, { event_id: catchUpEventId, org_id: currentOrgId() });
       }
     }
 
     // 3. Mark READY events that are now in progress as ONGOING
     const readyEvents = await db.getReadyEventsInProgress(currentTimestamp);
     for (const event of readyEvents) {
-      await db.withTransaction(async () => {
+      const startedEventId = await db.withTransaction(async () => {
         const seq = await db.updateMaintenanceEventStatus(event.id, GC.ONGOING);
-        await emitMaintenanceTransition("maintenance.started", { ...event, status: "ONGOING" }, seq, {
+        return await emitMaintenanceTransition("maintenance.started", { ...event, status: "ONGOING" }, seq, {
           previous_status: event.status,
           catch_up: false,
         });
@@ -897,16 +908,16 @@ export const UpdateMaintenanceEventStatuses = async (): Promise<void> => {
           "Maintenance In Progress",
           siteUrl,
         );
-        await subscriberQueue.push(update);
+        await subscriberQueue.push(update, undefined, { event_id: startedEventId, org_id: currentOrgId() });
       }
     }
 
     // 4. Mark ONGOING events that have ended as COMPLETED
     const ongoingEvents = await db.getOngoingEventsCompleted(currentTimestamp);
     for (const event of ongoingEvents) {
-      await db.withTransaction(async () => {
+      const completedEventId = await db.withTransaction(async () => {
         const seq = await db.updateMaintenanceEventStatus(event.id, GC.COMPLETED);
-        await emitMaintenanceTransition("maintenance.completed", { ...event, status: "COMPLETED" }, seq, {
+        return await emitMaintenanceTransition("maintenance.completed", { ...event, status: "COMPLETED" }, seq, {
           previous_status: event.status,
         });
       });
@@ -923,7 +934,7 @@ export const UpdateMaintenanceEventStatuses = async (): Promise<void> => {
           "Maintenance Completed",
           siteUrl,
         );
-        await subscriberQueue.push(update);
+        await subscriberQueue.push(update, undefined, { event_id: completedEventId, org_id: currentOrgId() });
       }
     }
   } catch (error) {

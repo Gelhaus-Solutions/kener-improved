@@ -1,7 +1,7 @@
 import db from "../db/db.js";
 import { redisConnection } from "../redisConnector.js";
 import { randomBytes } from "node:crypto";
-import { getConsumer } from "./consumers.js";
+import { effectiveMode, getConsumer } from "./consumers.js";
 import { nextAttemptAt, MAX_DELIVERY_ATTEMPTS } from "./retry.js";
 import type { DeliveryResult, EventDeliveryRecord } from "./types.js";
 
@@ -140,12 +140,26 @@ export async function runDelivery(deliveryId: number): Promise<DispatchOutcome> 
     return "dead";
   }
 
-  if (consumer.mode !== "live") {
-    // A consumer flipped to shadow or off after its rows were created. Record
-    // the row's real fate rather than delivering against the current setting.
-    await db.setEventDeliveryStatus(delivery.id, consumer.mode === "shadow" ? "SHADOW" : "SKIPPED", now);
+  // Read now, not when the row was created. A row enqueued while the consumer
+  // was live and dispatched a second later, after an operator pulled it back to
+  // shadow, must respect the setting that is true at the moment of sending. The
+  // whole value of a switch measured in seconds is that it applies to work
+  // already in flight.
+  const mode = await effectiveMode(consumer);
+  if (mode === "off" || mode === "legacy") {
+    // Nothing to send and nothing to render. `legacy` reaches here only when a
+    // consumer was demoted after its row was created; the relay writes SKIPPED
+    // directly for rows born that way.
+    await db.setEventDeliveryStatus(delivery.id, "SKIPPED", now);
     return "skipped";
   }
+  if (mode === "shadow" && consumer.supportsDryRun !== true) {
+    // Shadow without a dry-run implementation has nothing safe to run: calling
+    // deliver() would send for real during what is supposed to be a rehearsal.
+    await db.setEventDeliveryStatus(delivery.id, "SHADOW", now);
+    return "skipped";
+  }
+  const dryRun = mode === "shadow";
 
   const event = await db.getEventByEventId(delivery.event_id);
   if (!event) {
@@ -185,11 +199,34 @@ export async function runDelivery(deliveryId: number): Promise<DispatchOutcome> 
 
     let result: DeliveryResult;
     try {
-      result = await consumer.deliver(event, { target_type: delivery.target_type, target_id: delivery.target_id });
+      result = await consumer.deliver(
+        event,
+        { target_type: delivery.target_type, target_id: delivery.target_id },
+        { dryRun },
+      );
     } catch (error) {
       // A thrown consumer is a retryable failure, not a permanent one: the
       // common causes are a timeout and a DNS blip.
       result = { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+
+    if (dryRun) {
+      // Terminal either way. A rehearsal that failed to render is worth
+      // recording - a consumer that cannot build its message is exactly the
+      // finding a shadow period exists to surface - but it is not worth
+      // retrying, because nobody is waiting on it and the next event will
+      // rehearse again in a moment.
+      await db.completeEventDeliveryAttempt(delivery.id, {
+        status: "SHADOW",
+        attempts: delivery.attempts + 1,
+        next_attempt_at: null,
+        response_code: null,
+        response_body: truncate(result.response_body),
+        error: result.ok ? null : (truncate(result.error) ?? "dry run failed"),
+        ...requestColumns(result),
+        updated_at: nowSeconds(),
+      });
+      return "skipped";
     }
 
     if (result.ok) {
