@@ -1,7 +1,7 @@
 import Knex from "knex";
 import type { Knex as KnexType } from "knex";
 import { runWithWorkerKnex, getWorkerKnex } from "./poolContext.js";
-import { runInTrx, getTrx } from "./trxContext.js";
+import { runInTrx, getTrx, collectAfterCommitHooks, runAfterCommitHooks, type AfterCommitHook } from "./trxContext.js";
 
 // A transaction open longer than this is almost always doing non-database work
 // inside the body. Warned about in development only.
@@ -19,6 +19,7 @@ import { PagesRepository } from "./repositories/pages.js";
 import { MaintenancesRepository } from "./repositories/maintenances.js";
 import { MonitorAlertConfigRepository } from "./repositories/monitorAlertConfig.js";
 import { AuditRepository } from "./repositories/audit.js";
+import { EventsRepository } from "./repositories/events.js";
 import { SubscriptionSystemRepository } from "./repositories/subscriptionSystem.js";
 import { EmailTemplateConfigRepository } from "./repositories/emailTemplateConfig.js";
 
@@ -52,6 +53,7 @@ class DbImpl {
   private maintenances!: MaintenancesRepository;
   private monitorAlertConfig!: MonitorAlertConfigRepository;
   private audit!: AuditRepository;
+  private events!: EventsRepository;
   private subscriptionSystem!: SubscriptionSystemRepository;
   private emailTemplateConfig!: EmailTemplateConfigRepository;
 
@@ -320,6 +322,31 @@ class DbImpl {
   getAuditLogCount!: AuditRepository["getAuditLogCount"];
   getAuditLogByRequestId!: AuditRepository["getAuditLogByRequestId"];
   pruneAuditLog!: AuditRepository["prune"];
+
+  // Event bus. See events/emit.ts for the write side and events/relay.ts for the
+  // read side; nothing outside those two files should need these directly.
+  insertEvent!: EventsRepository["insertEvent"];
+  claimUnpublishedEvents!: EventsRepository["claimUnpublished"];
+  markEventsPublished!: EventsRepository["markPublished"];
+  getEventByEventId!: EventsRepository["getEventByEventId"];
+  getEventsPaginated!: EventsRepository["getEventsPaginated"];
+  getEventsCount!: EventsRepository["getEventsCount"];
+  getUnpublishedEventCount!: EventsRepository["getUnpublishedCount"];
+  pruneEvents!: EventsRepository["pruneEvents"];
+  insertEventDeliveries!: EventsRepository["insertDeliveries"];
+  getPendingDeliveriesForEvents!: EventsRepository["getPendingDeliveriesForEvents"];
+  hasEarlierIncompleteDelivery!: EventsRepository["hasEarlierIncompleteDelivery"];
+  getDueDeliveries!: EventsRepository["getDueDeliveries"];
+  beginEventDeliveryAttempt!: EventsRepository["beginDeliveryAttempt"];
+  completeEventDeliveryAttempt!: EventsRepository["completeDeliveryAttempt"];
+  setEventDeliveryStatus!: EventsRepository["setDeliveryStatus"];
+  reviveStuckDeliveries!: EventsRepository["reviveStuckDeliveries"];
+  getEventDeliveryById!: EventsRepository["getDeliveryById"];
+  getEventDeliveriesByEventId!: EventsRepository["getDeliveriesByEventId"];
+  getEventDeliveriesPaginated!: EventsRepository["getDeliveriesPaginated"];
+  getEventDeliveriesCount!: EventsRepository["getDeliveriesCount"];
+  resetEventDeliveryForRetry!: EventsRepository["resetDeliveryForRetry"];
+  pruneEventDeliveries!: EventsRepository["pruneDeliveries"];
   getActiveMonitorAlertConfigs!: MonitorAlertConfigRepository["getActiveMonitorAlertConfigs"];
   getMonitorTagsWithActiveAlertConfigs!: MonitorAlertConfigRepository["getMonitorTagsWithActiveAlertConfigs"];
   getActiveMonitorAlertConfigsByMonitorTag!: MonitorAlertConfigRepository["getActiveMonitorAlertConfigsByMonitorTag"];
@@ -421,6 +448,7 @@ class DbImpl {
     this.maintenances = new MaintenancesRepository(this.knex);
     this.monitorAlertConfig = new MonitorAlertConfigRepository(this.knex);
     this.audit = new AuditRepository(this.knex);
+    this.events = new EventsRepository(this.knex);
     this.subscriptionSystem = new SubscriptionSystemRepository(this.knex);
     this.emailTemplateConfig = new EmailTemplateConfigRepository(this.knex);
 
@@ -437,6 +465,7 @@ class DbImpl {
     this.bindMonitorAlertConfigMethods();
     this.bindSubscriptionSystemMethods();
     this.bindEmailTemplateConfigMethods();
+    this.bindEventsMethods();
 
     this.init();
   }
@@ -739,8 +768,9 @@ class DbImpl {
     this.getAuditLogCount = this.audit.getAuditLogCount.bind(this.audit);
     this.getAuditLogByRequestId = this.audit.getAuditLogByRequestId.bind(this.audit);
     this.pruneAuditLog = this.audit.prune.bind(this.audit);
-    this.getMonitorTagsWithActiveAlertConfigs =
-      this.monitorAlertConfig.getMonitorTagsWithActiveAlertConfigs.bind(this.monitorAlertConfig);
+    this.getMonitorTagsWithActiveAlertConfigs = this.monitorAlertConfig.getMonitorTagsWithActiveAlertConfigs.bind(
+      this.monitorAlertConfig,
+    );
     this.getActiveMonitorAlertConfigsByMonitorTag =
       this.monitorAlertConfig.getActiveMonitorAlertConfigsByMonitorTag.bind(this.monitorAlertConfig);
     this.deleteMonitorAlertConfig = this.monitorAlertConfig.deleteMonitorAlertConfig.bind(this.monitorAlertConfig);
@@ -926,6 +956,10 @@ class DbImpl {
    * transaction. Compute, notify and enqueue after it commits, since work
    * enqueued inside a transaction can be picked up by a worker before the
    * transaction commits, and then it reads state that does not exist yet.
+   *
+   * When the code that knows work is needed is itself inside the body, use
+   * `afterCommit(fn)` from trxContext: it defers `fn` to just after the commit,
+   * and drops it entirely on a rollback.
    */
   async withTransaction<T>(fn: () => Promise<T>): Promise<T> {
     const existing = getTrx();
@@ -938,12 +972,24 @@ class DbImpl {
 
     const knex = getWorkerKnex() ?? this.knex;
     const startedAt = Date.now();
+    // Work registered with `afterCommit` inside the body lands here and runs
+    // below, once the commit has actually happened. A rollback throws before
+    // that point, so the hooks are dropped with the transaction, which is the
+    // entire reason they are deferred rather than run inline.
+    const hooks: AfterCommitHook[] = [];
+    let elapsed = 0;
     try {
-      return await knex.transaction((trx) => runInTrx(trx, fn));
+      const result = await knex.transaction((trx) => runInTrx(trx, () => collectAfterCommitHooks(hooks, fn)));
+      // Measured before the hooks run: they are deliberately outside the
+      // transaction, so counting them would report a slow transaction that was
+      // never actually held open.
+      elapsed = Date.now() - startedAt;
+      await runAfterCommitHooks(hooks);
+      return result;
     } finally {
       // Dev-only, because the cost of a long transaction is invisible until it
       // is someone else's timeout. See the SQLite note above.
-      const elapsed = Date.now() - startedAt;
+      if (elapsed === 0) elapsed = Date.now() - startedAt;
       if (elapsed > SLOW_TRANSACTION_MS && process.env.NODE_ENV !== "production") {
         console.warn(
           `Slow transaction: held for ${elapsed}ms. Transaction bodies should do database work only; ` +
@@ -951,6 +997,31 @@ class DbImpl {
         );
       }
     }
+  }
+
+  private bindEventsMethods(): void {
+    this.insertEvent = this.events.insertEvent.bind(this.events);
+    this.claimUnpublishedEvents = this.events.claimUnpublished.bind(this.events);
+    this.markEventsPublished = this.events.markPublished.bind(this.events);
+    this.getEventByEventId = this.events.getEventByEventId.bind(this.events);
+    this.getEventsPaginated = this.events.getEventsPaginated.bind(this.events);
+    this.getEventsCount = this.events.getEventsCount.bind(this.events);
+    this.getUnpublishedEventCount = this.events.getUnpublishedCount.bind(this.events);
+    this.pruneEvents = this.events.pruneEvents.bind(this.events);
+    this.insertEventDeliveries = this.events.insertDeliveries.bind(this.events);
+    this.getPendingDeliveriesForEvents = this.events.getPendingDeliveriesForEvents.bind(this.events);
+    this.hasEarlierIncompleteDelivery = this.events.hasEarlierIncompleteDelivery.bind(this.events);
+    this.getDueDeliveries = this.events.getDueDeliveries.bind(this.events);
+    this.beginEventDeliveryAttempt = this.events.beginDeliveryAttempt.bind(this.events);
+    this.completeEventDeliveryAttempt = this.events.completeDeliveryAttempt.bind(this.events);
+    this.setEventDeliveryStatus = this.events.setDeliveryStatus.bind(this.events);
+    this.reviveStuckDeliveries = this.events.reviveStuckDeliveries.bind(this.events);
+    this.getEventDeliveryById = this.events.getDeliveryById.bind(this.events);
+    this.getEventDeliveriesByEventId = this.events.getDeliveriesByEventId.bind(this.events);
+    this.getEventDeliveriesPaginated = this.events.getDeliveriesPaginated.bind(this.events);
+    this.getEventDeliveriesCount = this.events.getDeliveriesCount.bind(this.events);
+    this.resetEventDeliveryForRetry = this.events.resetDeliveryForRetry.bind(this.events);
+    this.pruneEventDeliveries = this.events.pruneDeliveries.bind(this.events);
   }
 
   /** Probes database connectivity with a trivial query. Never throws. */

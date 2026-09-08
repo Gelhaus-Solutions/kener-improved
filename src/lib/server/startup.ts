@@ -3,6 +3,7 @@ import version from "../version.js";
 import mainScheduler from "./schedulers/appScheduler.js";
 import maintenanceScheduler from "./schedulers/maintenanceScheduler.js";
 import dailyCleanupScheduler from "./schedulers/dailyCleanup.js";
+import eventRelayQueue from "./queues/eventRelayQueue.js";
 import { InstallEnvProxy } from "./proxy.js";
 import { InvalidateSiteDataCache } from "./cache/siteDataCache.js";
 
@@ -19,6 +20,10 @@ async function Startup(): Promise<void> {
   await mainScheduler.start();
   await maintenanceScheduler.start();
   await dailyCleanupScheduler.start();
+  // Last of the schedulers, and only in this process: the relay and its dispatch
+  // worker belong together, and the web process must never become one. It ships
+  // with no consumers registered, so it publishes events and delivers to nobody.
+  await eventRelayQueue.start();
 
   const runtimeVersion = version();
 

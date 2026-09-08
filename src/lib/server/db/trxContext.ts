@@ -35,3 +35,57 @@ export function runInTrx<T>(trx: KnexType.Transaction, fn: () => Promise<T>): Pr
 export function getTrx(): KnexType.Transaction | undefined {
   return trxStorage.getStore();
 }
+
+// ---------------------------------------------------------------------------
+// After-commit hooks.
+//
+// The rule that transaction bodies must not enqueue work is not a style
+// preference: a BullMQ job added inside a transaction can be picked up by a
+// worker before the transaction commits, and that worker then reads state which
+// does not exist yet. But the code that knows work is needed is usually the code
+// inside the transaction, and asking every caller to thread a "and afterwards do
+// this" value back out to its caller is exactly the plumbing ambient
+// transactions exist to avoid.
+//
+// So a hook registered here runs once the outermost transaction has committed,
+// and not at all if it rolls back. Outside a transaction it runs immediately,
+// which makes `afterCommit(...)` correct to call unconditionally.
+
+export type AfterCommitHook = () => void | Promise<void>;
+
+const hookStorage = new AsyncLocalStorage<AfterCommitHook[]>();
+
+/**
+ * Registers `fn` to run after the current transaction commits, or immediately if
+ * there is no transaction.
+ *
+ * A hook that throws is logged and otherwise ignored: the transaction is already
+ * committed by the time it runs, so there is nothing left to undo and failing
+ * the caller would misreport durable work as lost.
+ */
+export function afterCommit(fn: AfterCommitHook): void {
+  const hooks = hookStorage.getStore();
+  if (!hooks) {
+    void Promise.resolve()
+      .then(fn)
+      .catch((error) => console.error("afterCommit hook failed:", error));
+    return;
+  }
+  hooks.push(fn);
+}
+
+/** Runs every hook `fn` registered, in registration order. Never throws. */
+export async function runAfterCommitHooks(hooks: AfterCommitHook[]): Promise<void> {
+  for (const hook of hooks) {
+    try {
+      await hook();
+    } catch (error) {
+      console.error("afterCommit hook failed:", error);
+    }
+  }
+}
+
+/** Wraps `fn` so `afterCommit` inside it collects into `hooks`. */
+export function collectAfterCommitHooks<T>(hooks: AfterCommitHook[], fn: () => Promise<T>): Promise<T> {
+  return hookStorage.run(hooks, fn);
+}
