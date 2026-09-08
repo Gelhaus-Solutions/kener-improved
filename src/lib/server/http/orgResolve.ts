@@ -37,8 +37,9 @@ import { orgPrefixOf, orgSlugOf } from "$lib/orgPath";
  * restructured around a closure.
  *
  * Admin routes are a third case again: the org comes from the session, not the
- * host, and `requireOrg` in the action pipeline re-enters for that. Nested
- * `runWithOrg` is fine; the inner one wins.
+ * host. `sessionOrgHandle` re-enters for `/manage` page loads and `requireOrg`
+ * in the action pipeline re-enters for `/manage/api`. Nested `runWithOrg` is
+ * fine; the inner one wins.
  *
  * Lives in `$lib/server/http/` so the fork's footprint in upstream's
  * `hooks.server.ts` stays one import plus one name in `sequence(...)`.
