@@ -1,5 +1,6 @@
 import type { SiteDataTransformed } from "../controllers/siteDataController.js";
 import { getCache, setCache, deleteCache } from "./cache.js";
+import { currentOrgIdOrDefault } from "../db/orgContext.js";
 
 // Cache for the whole transformed site_data table.
 //
@@ -28,15 +29,27 @@ const REDIS_TTL_SECONDS = 300;
 const REDIS_DEADLINE_MS = 1_000;
 
 /**
- * The cache key. A function rather than a constant because P4 makes site_data
- * org-scoped, at which point this becomes `site_data:all:${orgId}` and every
- * call site keeps working.
+ * The cache key, per organisation.
+ *
+ * **This is the fix for a real cross-tenant leak**, not a precaution. Until I3d
+ * the key was the constant `site_data:all`, so the first org to load a page
+ * populated a cache that every other org then read from: a second tenant's
+ * status page rendered with the first tenant's site name, logo, colours and
+ * links, for up to five minutes. Caught by driving two orgs through the running
+ * app, and invisible to every test that used one.
  */
-export function siteDataCacheKey(): string {
-  return "site_data:all";
+export function siteDataCacheKey(orgId: number): string {
+  return `site_data:all:${orgId}`;
 }
 
-let memo: { value: SiteDataTransformed; expiresAt: number } | null = null;
+/**
+ * The in-process layer, per org.
+ *
+ * A single slot would have had the same bug as the shared Redis key, just with a
+ * five-second window instead of five minutes. Bounded by the number of orgs the
+ * process serves, and each entry expires on its own.
+ */
+const memo = new Map<number, { value: SiteDataTransformed; expiresAt: number }>();
 
 // Redis being down should produce one line a minute, not one line per request.
 let lastWarnAt = 0;
@@ -50,7 +63,10 @@ function warnThrottled(action: string, err: unknown): void {
 function withDeadline<T>(work: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
   const deadline = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`redis did not answer within ${REDIS_DEADLINE_MS}ms`)), REDIS_DEADLINE_MS);
+    timer = setTimeout(
+      () => reject(new Error(`redis did not answer within ${REDIS_DEADLINE_MS}ms`)),
+      REDIS_DEADLINE_MS,
+    );
   });
   return Promise.race([work, deadline]).finally(() => clearTimeout(timer)) as Promise<T>;
 }
@@ -64,14 +80,17 @@ function withDeadline<T>(work: Promise<T>): Promise<T> {
  * than taking the site down.
  */
 export async function GetSiteDataCached(load: () => Promise<SiteDataTransformed>): Promise<SiteDataTransformed> {
-  if (memo && memo.expiresAt > Date.now()) {
-    return memo.value;
+  const orgId = currentOrgIdOrDefault();
+
+  const hit = memo.get(orgId);
+  if (hit && hit.expiresAt > Date.now()) {
+    return hit.value;
   }
 
   try {
-    const cached = await withDeadline(getCache<SiteDataTransformed>(siteDataCacheKey()));
+    const cached = await withDeadline(getCache<SiteDataTransformed>(siteDataCacheKey(orgId)));
     if (cached) {
-      memo = { value: cached, expiresAt: Date.now() + MEMO_TTL_MS };
+      memo.set(orgId, { value: cached, expiresAt: Date.now() + MEMO_TTL_MS });
       return cached;
     }
   } catch (err) {
@@ -81,14 +100,14 @@ export async function GetSiteDataCached(load: () => Promise<SiteDataTransformed>
   const fresh = await load();
 
   try {
-    await withDeadline(setCache<SiteDataTransformed>(siteDataCacheKey(), fresh, REDIS_TTL_SECONDS));
+    await withDeadline(setCache<SiteDataTransformed>(siteDataCacheKey(orgId), fresh, REDIS_TTL_SECONDS));
   } catch (err) {
     warnThrottled("write", err);
   }
 
   // Memoise even when Redis is unavailable: 5 seconds of in-process caching is
   // exactly when it is most worth having.
-  memo = { value: fresh, expiresAt: Date.now() + MEMO_TTL_MS };
+  memo.set(orgId, { value: fresh, expiresAt: Date.now() + MEMO_TTL_MS });
   return fresh;
 }
 
@@ -99,9 +118,10 @@ export async function GetSiteDataCached(load: () => Promise<SiteDataTransformed>
  * TTL, which must not turn a settings save into an error response.
  */
 export async function InvalidateSiteDataCache(): Promise<void> {
-  memo = null;
+  const orgId = currentOrgIdOrDefault();
+  memo.delete(orgId);
   try {
-    await withDeadline(deleteCache(siteDataCacheKey()));
+    await withDeadline(deleteCache(siteDataCacheKey(orgId)));
   } catch (err) {
     console.warn("site data cache: invalidation failed, config may be stale until the TTL expires:", err);
   }

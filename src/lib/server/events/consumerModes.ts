@@ -1,3 +1,4 @@
+import { currentOrgIdOrDefault } from "../db/orgContext.js";
 import { GetSiteDataByKey } from "../controllers/siteDataController.js";
 import type { ConsumerMode } from "./types.js";
 
@@ -49,7 +50,7 @@ const CACHE_TTL_MS = 10_000;
 
 const VALID_MODES: ReadonlySet<string> = new Set<ConsumerMode>(["off", "legacy", "shadow", "live"]);
 
-let cache: { value: Record<string, ConsumerMode>; expiresAt: number } | null = null;
+const cache = new Map<number, { value: Record<string, ConsumerMode>; expiresAt: number }>();
 
 function parseModes(raw: unknown): Record<string, ConsumerMode> {
   if (!raw || typeof raw !== "object") return {};
@@ -70,7 +71,15 @@ function parseModes(raw: unknown): Record<string, ConsumerMode> {
 }
 
 async function load(): Promise<Record<string, ConsumerMode>> {
-  if (cache && cache.expiresAt > Date.now()) return cache.value;
+  // Keyed by org (I3d). `eventBusConsumers` is a `site_data` row and `site_data`
+  // is per-org as of I3b, so a single cache slot would hand one tenant's mode
+  // decisions to every other - and these decide whether customer notifications
+  // are sent at all. Exactly the leak `siteDataCache.ts` had, in a file that is
+  // read on every relay tick rather than every page load.
+  const orgId = currentOrgIdOrDefault();
+
+  const hit = cache.get(orgId);
+  if (hit && hit.expiresAt > Date.now()) return hit.value;
 
   let value: Record<string, ConsumerMode>;
   try {
@@ -84,7 +93,7 @@ async function load(): Promise<Record<string, ConsumerMode>> {
     value = {};
   }
 
-  cache = { value, expiresAt: Date.now() + CACHE_TTL_MS };
+  cache.set(orgId, { value, expiresAt: Date.now() + CACHE_TTL_MS });
   return value;
 }
 
@@ -114,7 +123,11 @@ export async function configuredModes(): Promise<Record<string, ConsumerMode>> {
  * is only a courtesy.
  */
 export function invalidateConsumerModes(): void {
-  cache = null;
+  // Every org, not just the current one. This is a courtesy path rather than the
+  // contract - the TTL is - and clearing one entry while leaving the others
+  // would make the staleness inconsistent between tenants, which is harder to
+  // reason about than clearing the lot.
+  cache.clear();
 }
 
 export { SITE_DATA_KEY as CONSUMER_MODES_KEY };
