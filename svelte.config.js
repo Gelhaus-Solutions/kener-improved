@@ -15,10 +15,19 @@ const config = {
   kit: {
     adapter: adapter(),
     output: {
-      bundleStrategy: 'single'
+      bundleStrategy: "single",
     },
     paths: {
       base: basePath,
+      // I3e: absolute, not relative.
+      //
+      // SvelteKit's default emits links relative to the routed path, which broke
+      // the `/o/<slug>/` organisation prefix: the depth came from the real URL
+      // while the target came from the rerouted one, so every link on a prefixed
+      // page climbed out of the organisation it belonged to. Absolute paths make
+      // a link a fact rather than an arithmetic result, and the prefix is put
+      // back by the two URL resolvers (`$lib/client/resolver`, `$lib/server/resolver`).
+      relative: false,
     },
     csrf: {
       trustedOrigins: ["*"],

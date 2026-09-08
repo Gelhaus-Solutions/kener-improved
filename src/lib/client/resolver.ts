@@ -1,3 +1,7 @@
+import { base } from "$app/paths";
+import { page } from "$app/state";
+import { isStaticAssetPath, orgPrefixOf } from "$lib/orgPath";
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ResolveFn = (...args: any[]) => string;
 
@@ -26,10 +30,48 @@ export default function urlResolve(resolve: ResolveFn, path: string, params?: Re
     return path;
   }
 
-  if (params) {
-    return resolve(path, params);
+  const resolved = params ? resolve(path, params) : resolve(path);
+  return withOrgPrefix(resolved);
+}
+
+/**
+ * Keeps a link inside the `/o/<slug>/` organisation prefix the page is under (I3e).
+ *
+ * `paths.relative` is off, so `resolve()` returns an absolute, base-prefixed
+ * path with no idea that organisations exist. Without this, every link on an
+ * org-prefixed page would point at the default organisation - which is exactly
+ * what happened before the prefix was made explicit.
+ *
+ * The prefix is read from the URL the browser is actually on rather than passed
+ * in, so none of the eighty-odd call sites change. `page` is read defensively:
+ * it is only guaranteed during component rendering, and a couple of client-only
+ * modules call this outside one, where `location` is the same truth.
+ *
+ * A no-op for every install that does not use the prefix, which is all of them
+ * that give a tenant its own hostname.
+ */
+function withOrgPrefix(resolvedPath: string): string {
+  if (!resolvedPath.startsWith("/")) return resolvedPath;
+
+  let pathname: string | undefined;
+  try {
+    pathname = page.url?.pathname;
+  } catch {
+    // Not during component rendering.
   }
-  return resolve(path);
+  if (!pathname && typeof location !== "undefined") pathname = location.pathname;
+  if (!pathname) return resolvedPath;
+
+  const prefix = orgPrefixOf(pathname.slice(base.length));
+  if (!prefix) return resolvedPath;
+
+  // `resolve()` has already applied the base path, so the org prefix belongs
+  // between the base and the route.
+  const withoutBase = resolvedPath.slice(base.length);
+  if (orgPrefixOf(withoutBase)) return resolvedPath;
+  // A file on disk, served before the router ever sees it.
+  if (isStaticAssetPath(withoutBase)) return resolvedPath;
+  return `${base}${prefix}${withoutBase}`;
 }
 
 /**
@@ -51,7 +93,7 @@ export function absoluteResolve(
   resolve: ResolveFn,
   siteUrl: string,
   path: string,
-  params?: Record<string, string>
+  params?: Record<string, string>,
 ): string {
   // Normalize relative paths like "./assets/..." to "/assets/..." so the
   // final URL doesn't contain "/./" segments (crawlers don't normalize these)

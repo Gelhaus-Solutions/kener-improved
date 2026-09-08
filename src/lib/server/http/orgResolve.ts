@@ -2,6 +2,7 @@ import type { Handle } from "@sveltejs/kit";
 import db from "$lib/server/db/db";
 import { runWithOrg, runAcrossOrgs, DEFAULT_ORG_ID } from "$lib/server/db/orgContext";
 import { AuthenticateAPIKey } from "$lib/server/controllers/apiController";
+import { orgPrefixOf, orgSlugOf } from "$lib/orgPath";
 
 /**
  * Establishes the organisation for the whole of a request (I3d).
@@ -42,9 +43,6 @@ import { AuthenticateAPIKey } from "$lib/server/controllers/apiController";
  * Lives in `$lib/server/http/` so the fork's footprint in upstream's
  * `hooks.server.ts` stays one import plus one name in `sequence(...)`.
  */
-
-/** Matches `/o/<slug>` at the start of a path, after any base path has been stripped. */
-const ORG_SLUG_PREFIX = /^\/o\/([A-Za-z0-9][A-Za-z0-9_-]{0,62})(?:\/|$)/;
 
 const BASE = (process.env.KENER_BASE_PATH || "").replace(/\/+$/, "");
 
@@ -101,13 +99,18 @@ export const orgResolveHandle: Handle = async ({ event, resolve }) => {
     orgId = await orgForHost(host.replace(/:\d+$/, ""));
   }
 
-  if (orgId === null) {
-    const match = pathname.match(ORG_SLUG_PREFIX);
-    if (match) {
-      const org = await runAcrossOrgs(() => db.getOrgBySlug(match[1]));
-      if (org && org.status === "ACTIVE") orgId = org.id;
-    }
+  // 3. An `/o/<slug>/` prefix. `reroute` has already stripped it for routing;
+  //    this reads the untouched URL, which is what `event.url` still is.
+  const slug = orgSlugOf(pathname);
+  let pathPrefix = "";
+  if (slug) {
+    const org = await runAcrossOrgs(() => db.getOrgBySlug(slug));
+    // The prefix is kept even when the slug matches nothing, so a typo shows the
+    // default org's content under the URL that was asked for rather than
+    // silently rewriting every link on the page to drop the prefix.
+    pathPrefix = orgPrefixOf(pathname);
+    if (orgId === null && org && org.status === "ACTIVE") orgId = org.id;
   }
 
-  return runWithOrg(orgId ?? DEFAULT_ORG_ID, async () => await resolve(event));
+  return runWithOrg(orgId ?? DEFAULT_ORG_ID, async () => await resolve(event), pathPrefix);
 };

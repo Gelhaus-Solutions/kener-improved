@@ -32,8 +32,17 @@ export class MissingOrgContextError extends Error {
 interface OrgContext {
   /** The org, or null when running deliberately across every org. */
   orgId: number | null;
-  /** True only inside `runAsSystem`, so a null org reads as intentional. */
+  /** True only inside `runAcrossOrgs`, so a null org reads as intentional. */
   system: boolean;
+  /**
+   * The `/o/<slug>` prefix this request arrived under, or `""` (I3e).
+   *
+   * Carried here rather than passed around because `serverResolve` is called
+   * from everywhere and has no request of its own. Empty for host-routed
+   * traffic, for the default org, and for every background job - which is
+   * correct: a link built by the scheduler belongs to no browsing session.
+   */
+  pathPrefix?: string;
 }
 
 const storage = new AsyncLocalStorage<OrgContext>();
@@ -45,9 +54,16 @@ const storage = new AsyncLocalStorage<OrgContext>();
  */
 export const DEFAULT_ORG_ID = 1;
 
-/** Runs `fn` with `orgId` as the ambient organisation. Nests; the innermost wins. */
-export function runWithOrg<T>(orgId: number, fn: () => Promise<T>): Promise<T> {
-  return storage.run({ orgId, system: false }, fn);
+/**
+ * Runs `fn` with `orgId` as the ambient organisation. Nests; the innermost wins.
+ *
+ * `pathPrefix` is the `/o/<slug>` the request came in under, and is inherited by
+ * a nested call that does not name one - so `requireOrg` switching to the
+ * session's org does not throw away the prefix the visitor is browsing under.
+ */
+export function runWithOrg<T>(orgId: number, fn: () => Promise<T>, pathPrefix?: string): Promise<T> {
+  const inherited = pathPrefix ?? storage.getStore()?.pathPrefix ?? "";
+  return storage.run({ orgId, system: false, pathPrefix: inherited }, fn);
 }
 
 /**
@@ -86,7 +102,7 @@ export function runAcrossOrgs<T>(fn: () => Promise<T>): Promise<T> {
  * processing jobs for several tenants, say - because there the bleed is the bug.
  */
 export function enterOrg(orgId: number): void {
-  storage.enterWith({ orgId, system: false });
+  storage.enterWith({ orgId, system: false, pathPrefix: storage.getStore()?.pathPrefix ?? "" });
 }
 
 /** The current context, or undefined when none is established. */
@@ -110,4 +126,9 @@ export function requireOrgId(table: string): number | null {
  */
 export function currentOrgIdOrDefault(): number {
   return storage.getStore()?.orgId ?? DEFAULT_ORG_ID;
+}
+
+/** The `/o/<slug>` prefix the current request arrived under, or `""`. */
+export function currentOrgPathPrefix(): string {
+  return storage.getStore()?.pathPrefix ?? "";
 }

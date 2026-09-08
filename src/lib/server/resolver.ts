@@ -1,3 +1,6 @@
+import { currentOrgPathPrefix } from "./db/orgContext.js";
+import { isStaticAssetPath } from "../orgPath.js";
+
 /**
  * Server-side URL resolver that uses KENER_BASE_PATH environment variable
  * Works in both SvelteKit and Node scheduler contexts
@@ -43,9 +46,18 @@ function serverResolve(path: string, params?: Record<string, string>): string {
     resolvedPath = "/" + resolvedPath;
   }
 
+  // I3e: keep the visitor inside the organisation prefix they arrived under.
+  //
+  // Empty for host-routed traffic, for the default org and for anything running
+  // outside a request, so this is a no-op for every install that does not use
+  // the `/o/<slug>/` form.
+  // Static assets are files on disk, served before the router runs and shared by
+  // every org, so they never take the prefix. See `isStaticAssetPath`.
+  const orgPrefix = isStaticAssetPath(resolvedPath) ? "" : currentOrgPathPrefix();
+
   // Combine base path with resolved path
   // Ensure no double slashes
-  const fullPath = basePath + resolvedPath;
+  const fullPath = basePath + orgPrefix + resolvedPath;
   return fullPath.replace(/\/+/g, "/");
 }
 
