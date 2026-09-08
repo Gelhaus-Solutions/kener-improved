@@ -1,5 +1,6 @@
 import type { Handle } from "@sveltejs/kit";
-import { runWithEventContext, DEFAULT_ORG_ID } from "$lib/server/events/eventContext.js";
+import { runWithEventContext } from "$lib/server/events/eventContext.js";
+import { currentOrgIdOrDefault } from "$lib/server/db/orgContext.js";
 import type { EventActorType } from "$lib/server/events/types.js";
 
 /**
@@ -39,9 +40,14 @@ export const eventContextHandle: Handle = async ({ event, resolve }) => {
     {
       actor_type,
       correlation_id: requestId,
-      // P4's orgResolveHandle replaces this with the org the hostname or path
-      // resolved to. Until then every request belongs to the only org there is.
-      org_id: DEFAULT_ORG_ID,
+      // The org `orgResolveHandle` already established, not a fresh default.
+      //
+      // This handle runs after it, and `runWithEventContext` enters the org
+      // context whenever it carries one - so passing `DEFAULT_ORG_ID` here
+      // silently overrode the hostname's org on every single request, sending a
+      // second tenant's traffic to the default org's data. Caught by asking two
+      // hostnames for their site name and getting the same answer twice.
+      org_id: currentOrgIdOrDefault(),
     },
     async () => await resolve(event),
   );
