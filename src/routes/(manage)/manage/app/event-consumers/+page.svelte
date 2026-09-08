@@ -214,7 +214,7 @@
           <Table.Body>
             {#each consumers as consumer (consumer.name)}
               <Table.Row>
-                <Table.Cell class="align-top">
+                <Table.Cell class="align-top whitespace-normal">
                   <div class="font-medium">{consumer.name}</div>
                   <div class="text-muted-foreground max-w-md text-xs">{consumer.description}</div>
                   {#if consumer.legacy_consumer}
@@ -223,7 +223,7 @@
                     </div>
                   {/if}
                 </Table.Cell>
-                <Table.Cell class="align-top">
+                <Table.Cell class="align-top whitespace-normal">
                   <Badge variant={modeVariant(consumer.effective_mode)}>{consumer.effective_mode}</Badge>
                   <div class="text-muted-foreground mt-1 max-w-xs text-xs">
                     {MODE_HELP[consumer.effective_mode]}
@@ -232,7 +232,7 @@
                     <div class="text-muted-foreground mt-1 text-xs">Not configured; using the built-in default.</div>
                   {/if}
                 </Table.Cell>
-                <Table.Cell class="align-top">
+                <Table.Cell class="align-top whitespace-normal">
                   {#if Object.keys(consumer.counts).length === 0}
                     <span class="text-muted-foreground text-xs">None yet</span>
                   {:else}
@@ -243,7 +243,7 @@
                     </div>
                   {/if}
                 </Table.Cell>
-                <Table.Cell class="align-top">
+                <Table.Cell class="align-top whitespace-normal">
                   <select
                     class="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
                     value={consumer.effective_mode}
