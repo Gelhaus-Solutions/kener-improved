@@ -16,6 +16,11 @@ declare global {
       maintenance?: import("$lib/server/types/db").MaintenanceRecord;
       // Set by hooks.server.ts for /api/pages/:page_path/* routes
       page?: import("$lib/server/types/db").PageRecord;
+      // The API key behind a bearer-authenticated /api/* request, with the
+      // scopes it was granted. Set by hooks.server.ts once the key resolves,
+      // and the thing route handlers should consult rather than re-reading the
+      // Authorization header.
+      apiKey?: import("$lib/server/controllers/apiController").ApiKeyPrincipal;
     }
 
     interface PageData {

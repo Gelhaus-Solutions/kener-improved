@@ -108,6 +108,11 @@ export const ADMIN_EVENTS = [
   "apikey.created",
   "apikey.updated",
   "apikey.deleted",
+  // Rotation and revocation are separate types rather than `apikey.updated`
+  // because they are the two an incident review looks for, and folding them into
+  // a generic update makes them invisible in a feed.
+  "apikey.rotated",
+  "apikey.revoked",
   "site_settings.updated",
   "role.permissions_changed",
 ] as const;
@@ -188,6 +193,8 @@ export const EVENT_AGGREGATE_TYPE: Record<EventType, string> = {
   "apikey.created": "api_key",
   "apikey.updated": "api_key",
   "apikey.deleted": "api_key",
+  "apikey.rotated": "api_key",
+  "apikey.revoked": "api_key",
   "site_settings.updated": "site_settings",
   "role.permissions_changed": "role",
 };

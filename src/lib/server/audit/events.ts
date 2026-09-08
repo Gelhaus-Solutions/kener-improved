@@ -131,3 +131,44 @@ export function auditApiKeyAuthFailure(source: Parameters<typeof bitsOf>[0], rea
     meta_json: JSON.stringify({ reason, path }),
   });
 }
+
+/**
+ * A key that authenticated but was not allowed to do what it asked.
+ *
+ * Distinct from an auth failure, and worth its own row: an unknown key is
+ * usually a stale config, whereas a known key reaching for a scope it was not
+ * granted is either a misconfigured integration or somebody probing what a
+ * leaked key can reach. Unlike the auth failure, the key is identified here,
+ * because knowing *which* key is the entire value of the row and the id is not
+ * a secret.
+ */
+export function auditApiKeyScopeDenied(
+  source: Parameters<typeof bitsOf>[0],
+  key: { id: number; name: string },
+  required: string | undefined,
+  path: string,
+  method: string,
+): void {
+  const bits = bitsOf(source);
+  record({
+    org_id: null,
+    ts: GetNowTimestampUTC(),
+    request_id: bits.requestId,
+    actor_type: "api_key",
+    actor_id: String(key.id),
+    actor_label: key.name,
+    action: "authz.apiKey",
+    permission: required ?? null,
+    target_type: null,
+    target_id: null,
+    outcome: "denied",
+    status_code: 403,
+    ip: bits.ip,
+    user_agent: bits.userAgent,
+    before_json: null,
+    after_json: null,
+    // `required: null` is the unmapped-route case, which is the one an operator
+    // most needs to be able to tell apart from an ordinary scope miss.
+    meta_json: JSON.stringify({ required: required ?? null, path, method }),
+  });
+}

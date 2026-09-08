@@ -2,10 +2,11 @@ import { json, type Handle } from "@sveltejs/kit";
 import { sequence } from "@sveltejs/kit/hooks";
 import { requestIdHandle } from "$lib/server/http/requestId";
 import { eventContextHandle } from "$lib/server/http/eventContext";
-import { auditApiKeyAuthFailure } from "$lib/server/audit/events";
-import { VerifyAPIKey } from "$lib/server/controllers/apiController";
+import { auditApiKeyAuthFailure, auditApiKeyScopeDenied } from "$lib/server/audit/events";
+import { AuthenticateAPIKey, ApiKeyHasScope, TouchAPIKey } from "$lib/server/controllers/apiController";
+import { requiredScopeForRoute } from "$lib/server/api/routeScopes";
 import db from "$lib/server/db/db";
-import type { UnauthorizedResponse, NotFoundResponse } from "$lib/types/api";
+import type { UnauthorizedResponse, ForbiddenResponse, NotFoundResponse } from "$lib/types/api";
 import { GetMonitorsParsed } from "$lib/server/controllers/monitorsController";
 import GC from "$lib/global-constants";
 import { InstallEnvProxy } from "$lib/server/proxy";
@@ -117,8 +118,8 @@ const apiAuthHandle: Handle = async ({ event, resolve }) => {
       return json(errorResponse, { status: 401 });
     }
 
-    const isValidKey = await VerifyAPIKey(token);
-    if (!isValidKey) {
+    const principal = await AuthenticateAPIKey(token);
+    if (!principal) {
       const errorResponse: UnauthorizedResponse = {
         error: {
           code: "UNAUTHORIZED",
@@ -132,6 +133,35 @@ const apiAuthHandle: Handle = async ({ event, resolve }) => {
       return json(errorResponse, { status: 401 });
     }
 
+    // Everything below this line runs as an identified caller. The order of the
+    // four steps that follow is the security-relevant part of this handler, and
+    // it changed deliberately in A10:
+    //
+    //   1. establish the key's org context,
+    //   2. reject a path that matches no route,
+    //   3. check the key's scope,
+    //   4. only then pre-resolve the entities named in the path.
+    //
+    // It used to pre-resolve first, and that is an existence oracle. A key with
+    // no monitor scope could tell a real monitor tag from a fake one by whether
+    // it got a 404 or a 200, and once P4 makes keys org-scoped the same lookup
+    // would answer "does org B have a monitor called X" for a key belonging to
+    // org A. Resolving *after* the scope check means a key that may not read
+    // monitors gets an identical 403 either way.
+    event.locals.apiKey = principal;
+
+    // P4: enter the org this key belongs to, so every query below (and every
+    // query in the route handler) is scoped to it. `principal.orgId` is already
+    // carried for that purpose and is NULL on every key today, meaning the
+    // single implicit org. This is the chokepoint the tenancy work fills in;
+    // it sits here, above the pre-resolution, for the reason spelled out above.
+
+    // Record the use before deciding whether the request is allowed. "Last used"
+    // means "last presented a valid secret", which is the question being asked
+    // when somebody is working out whether a key is still live or which key a
+    // misbehaving integration holds. Throttled to one write a minute per key.
+    await TouchAPIKey(principal, event.getClientAddress?.() ?? null);
+
     // API consumers must always get JSON; without this, an /api/ path with no
     // matching route falls through to SvelteKit's HTML error page
     if (event.route.id === null) {
@@ -142,6 +172,25 @@ const apiAuthHandle: Handle = async ({ event, resolve }) => {
         },
       };
       return json(errorResponse, { status: 404 });
+    }
+
+    // The scope check. `requiredScopeForRoute` returns undefined for a route or
+    // method it does not know, and that is a denial rather than a pass: an
+    // unmapped route is one nobody has decided is safe. Keys holding `*` skip
+    // the map entirely, which is what keeps every key minted before scoping
+    // existed working exactly as it did.
+    const required = requiredScopeForRoute(event.route.id, event.request.method);
+    if (!required || !ApiKeyHasScope(principal, required)) {
+      const errorResponse: ForbiddenResponse = {
+        error: {
+          code: "FORBIDDEN",
+          message: required
+            ? `This API key does not have the '${required}' scope`
+            : "This API key is not permitted to use this endpoint",
+        },
+      };
+      auditApiKeyScopeDenied(event, principal, required, pathname, event.request.method);
+      return json(errorResponse, { status: 403 });
     }
 
     // Validate monitor tag exists for /api/(vX/)?monitors/:monitor_tag/* routes

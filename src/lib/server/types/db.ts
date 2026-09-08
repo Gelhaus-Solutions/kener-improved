@@ -329,13 +329,39 @@ export interface ApiKeyRecord {
   status: string;
   created_at: DbTimestamp;
   updated_at: DbTimestamp;
+  /** JSON array of permission ids, or `["*"]`. Read through `parseScopes`. */
+  scopes: string;
+  expires_at: number | null;
+  last_used_at: number | null;
+  last_used_ip: string | null;
+  created_by: number | null;
+  rotated_from: number | null;
+  revoked_at: number | null;
+  key_prefix: string | null;
+  org_id: number | null;
 }
+
+/**
+ * An API key as the admin screen is allowed to see it.
+ *
+ * `hashed_key` is absent by construction rather than by the caller remembering
+ * to delete it. It is an HMAC an offline attacker can test guesses against, and
+ * nothing outside authentication has any use for it, so it must not travel to a
+ * browser on the strength of `api_keys.read`.
+ */
+export type ApiKeyRecordPublic = Omit<ApiKeyRecord, "hashed_key">;
 
 export interface ApiKeyRecordInsert {
   name: string;
   hashed_key: string;
   masked_key: string;
   status?: string;
+  scopes?: string;
+  expires_at?: number | null;
+  created_by?: number | null;
+  rotated_from?: number | null;
+  key_prefix?: string | null;
+  org_id?: number | null;
 }
 
 // ============ incidents table ============

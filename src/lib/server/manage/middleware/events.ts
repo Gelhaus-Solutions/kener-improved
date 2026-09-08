@@ -61,6 +61,8 @@ const ACTION_EVENT_MAP: Record<string, EventType | EventResolver> = {
   createNewApiKey: "apikey.created",
   updateApiKeyStatus: "apikey.updated",
   deleteApiKey: "apikey.deleted",
+  rotateApiKey: "apikey.rotated",
+  revokeApiKey: "apikey.revoked",
 
   // Instance configuration.
   storeSiteData: "site_settings.updated",

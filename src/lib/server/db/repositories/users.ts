@@ -4,6 +4,7 @@ import type {
   UserRecordPublic,
   ApiKeyRecord,
   ApiKeyRecordInsert,
+  ApiKeyRecordPublic,
   RoleRecord,
   RolePermissionRecord,
   UserRoleRecord,
@@ -210,6 +211,14 @@ export class UsersRepository extends BaseRepository {
       name: data.name,
       hashed_key: data.hashed_key,
       masked_key: data.masked_key,
+      // Falls back to full access so that any caller which predates scoping and
+      // omits the field keeps producing the key it used to produce.
+      scopes: data.scopes ?? '["*"]',
+      expires_at: data.expires_at ?? null,
+      created_by: data.created_by ?? null,
+      rotated_from: data.rotated_from ?? null,
+      key_prefix: data.key_prefix ?? null,
+      org_id: data.org_id ?? null,
       created_at: this.knex.fn.now(),
       updated_at: this.knex.fn.now(),
     });
@@ -230,8 +239,71 @@ export class UsersRepository extends BaseRepository {
     return await this.knex("api_keys").where("hashed_key", hashed_key).first();
   }
 
-  async getAllApiKeys(): Promise<ApiKeyRecord[]> {
-    return await this.knex("api_keys").orderBy("id", "desc");
+  async getApiKeyById(id: number): Promise<ApiKeyRecord | undefined> {
+    return await this.knex("api_keys").where("id", id).first();
+  }
+
+  /**
+   * Every key, without the hash.
+   *
+   * The column list is explicit rather than `select *` precisely so that
+   * `hashed_key` cannot come back. This method feeds the admin screen, and the
+   * previous `select *` shipped the HMAC of every key to any browser holding
+   * `api_keys.read`.
+   */
+  async getAllApiKeys(): Promise<ApiKeyRecordPublic[]> {
+    return await this.knex("api_keys")
+      .select(
+        "id",
+        "name",
+        "masked_key",
+        "status",
+        "created_at",
+        "updated_at",
+        "scopes",
+        "expires_at",
+        "last_used_at",
+        "last_used_ip",
+        "created_by",
+        "rotated_from",
+        "revoked_at",
+        "key_prefix",
+        "org_id",
+      )
+      .orderBy("id", "desc");
+  }
+
+  /**
+   * Records that a key was just used, at most once per stale window.
+   *
+   * The `last_used_at < staleBefore` guard is the same one `touchSession` uses,
+   * and it is the database-side half of the throttle: even when the Redis gate
+   * in front of it is unavailable, an active key produces one write a minute
+   * rather than one per request.
+   */
+  async touchApiKey(id: number, now: number, ip: string | null, staleBefore: number): Promise<void> {
+    await this.knex("api_keys")
+      .where("id", id)
+      .andWhere((builder) => builder.whereNull("last_used_at").orWhere("last_used_at", "<", staleBefore))
+      .update({ last_used_at: now, last_used_ip: ip });
+  }
+
+  /** One-way. A revoked key never authenticates again, whatever its status says. */
+  async revokeApiKey(id: number, now: number): Promise<number> {
+    return await this.knex("api_keys").where("id", id).whereNull("revoked_at").update({
+      revoked_at: now,
+      status: "INACTIVE",
+      updated_at: this.knex.fn.now(),
+    });
+  }
+
+  /** Renames a key and sets its expiry, which is what rotation does to the outgoing key. */
+  async retireApiKey(id: number, name: string, expiresAt: number): Promise<number> {
+    return await this.knex("api_keys").where("id", id).update({
+      name,
+      expires_at: expiresAt,
+      updated_at: this.knex.fn.now(),
+    });
   }
 
   // ============ Invitations ============

@@ -54,6 +54,14 @@ export interface UpdateSiteDataKeyResponse {
   data_type: string;
 }
 
+// A key that authenticated but is not scoped for what it asked to do.
+export interface ForbiddenResponse {
+  error: {
+    code: string;
+    message: string;
+  };
+}
+
 export interface NotFoundResponse {
   error: {
     code: string;

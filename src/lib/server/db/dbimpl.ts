@@ -176,6 +176,10 @@ class DbImpl {
   deleteApiKey!: UsersRepository["deleteApiKey"];
   getApiKeyByHashedKey!: UsersRepository["getApiKeyByHashedKey"];
   getAllApiKeys!: UsersRepository["getAllApiKeys"];
+  getApiKeyById!: UsersRepository["getApiKeyById"];
+  touchApiKey!: UsersRepository["touchApiKey"];
+  revokeApiKey!: UsersRepository["revokeApiKey"];
+  retireApiKey!: UsersRepository["retireApiKey"];
 
   // ============ Site Data ============
   insertOrUpdateSiteData!: SiteDataRepository["insertOrUpdateSiteData"];
@@ -611,6 +615,10 @@ class DbImpl {
     this.deleteApiKey = this.users.deleteApiKey.bind(this.users);
     this.getApiKeyByHashedKey = this.users.getApiKeyByHashedKey.bind(this.users);
     this.getAllApiKeys = this.users.getAllApiKeys.bind(this.users);
+    this.getApiKeyById = this.users.getApiKeyById.bind(this.users);
+    this.touchApiKey = this.users.touchApiKey.bind(this.users);
+    this.revokeApiKey = this.users.revokeApiKey.bind(this.users);
+    this.retireApiKey = this.users.retireApiKey.bind(this.users);
     this.updateUserProfile = this.users.updateUserProfile.bind(this.users);
 
     // Roles

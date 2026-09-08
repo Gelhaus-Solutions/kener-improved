@@ -88,6 +88,13 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   // Acting on somebody else's sessions is the one that needs a permission.
   revokeUserSessions: "sessions.admin",
 
+  // API keys (A10). Both are fork-invented actions, so upstream's map does not
+  // know them. Rotation and revocation are `api_keys.write` rather than
+  // `api_keys.delete`: neither destroys the record, and cutting a rotation's
+  // grace window short must not require the strongest permission in the group.
+  rotateApiKey: "api_keys.write",
+  revokeApiKey: "api_keys.write",
+
   // MFA (A2). All self-scoped, all taking the user id from the session. The
   // sensitive ones are guarded by the current password rather than by a
   // permission: this is about proving who is at the keyboard, not what role they
