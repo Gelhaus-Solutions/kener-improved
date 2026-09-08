@@ -1,5 +1,12 @@
 import type { Knex } from "knex";
 import monitorSeed from "./seedMonitorData.ts";
+import seedPagesData from "./seedPagesData.ts";
+import seedSiteData from "./seedSiteData.ts";
+import subscriptionAccountCodeTemplate from "../templates/general/subscription_account_code_template.ts";
+import subscriptionUpdateTemplate from "../templates/general/subscription_update_template.ts";
+import forgotPasswordTemplate from "../templates/general/forgot_password_template.ts";
+import inviteUserTemplate from "../templates/general/invite_user_template.ts";
+import verifyEmailTemplate from "../templates/general/verify_email_template.ts";
 import { permissions } from "../../allPerms.ts";
 import { orgPermissions } from "../../orgPerms.ts";
 
@@ -13,17 +20,16 @@ import { orgPermissions } from "../../orgPerms.ts";
  * an org, and the per-org work lives here so that creating an org (I3f) runs the
  * same code a fresh install does rather than a second copy of it that drifts.
  *
- * **What this deliberately does NOT provision, and why.**
+ * **Complete as of I3b.** Pages, site data and email templates used to be
+ * missing here because `pages.page_path`, `site_data.key` and
+ * `general_email_templates.template_id` were globally unique, so a second org's
+ * home page (path `""`) or its copy of `siteName` collided with the default
+ * org's on insert. I3b made all three keys per-org, so the provisioning that was
+ * waiting on it now lives here too.
  *
- * `pages.page_path`, `site_data.key` and `general_email_templates.template_id`
- * are still **globally** unique, so a second org's home page (path `""`) or its
- * copy of `siteName` would collide with the default org's on insert. Those
- * unique keys become per-org in I3b, and the corresponding provisioning belongs
- * with them. Attempting it here would either throw or, worse, silently attach
- * the default org's page to a new tenant.
- *
- * Until then `provisionOrg` is complete for what it covers and honest about the
- * rest: `provisionOrgPages` does not exist yet on purpose.
+ * The `seeds/` files are thin wrappers that call into this module with
+ * `DEFAULT_ORG_ID`. That is the point: a fresh install and a newly created org
+ * run the same code, so the two cannot drift.
  */
 
 /** The org that owns everything predating tenancy. Mirrors `DEFAULT_ORG_ID` in eventContext.ts. */
@@ -155,16 +161,165 @@ export async function provisionOrgMonitors(knex: Knex, orgId: number): Promise<v
 }
 
 /**
+ * Creates this org's starter pages and attaches its starter monitors to the home page.
+ *
+ * The monitor lookups go through the org's `tag_prefix`, because `monitors.tag`
+ * is still globally unique and a second org's copy of `earth` is `beta_earth`.
+ * Looking up the bare tag would attach the *default org's* monitor to a new
+ * tenant's page, which is the exact failure the old code was avoiding by not
+ * existing.
+ */
+export async function provisionOrgPages(knex: Knex, orgId: number): Promise<void> {
+  const existing = await knex("pages").where("org_id", orgId).count({ c: "*" }).first();
+  if (Number((existing as { c: string | number } | undefined)?.c ?? 0) > 0) return;
+
+  const org = await knex("orgs").where("id", orgId).first();
+  const prefix: string = org?.tag_prefix ?? "";
+  const taggedAs = (slug: string) => (prefix ? `${prefix}_${slug}` : slug);
+
+  for (const page of seedPagesData) {
+    const [insertedPage] = await knex("pages")
+      .insert({
+        org_id: orgId,
+        page_path: page.page_path,
+        page_title: page.page_title,
+        page_header: page.page_header,
+        page_subheader: page.page_subheader,
+        page_logo: page.page_logo,
+        page_settings_json: page.page_settings_json,
+        created_at: knex.fn.now(),
+        updated_at: knex.fn.now(),
+      })
+      .returning("id");
+
+    if (page.page_path !== "") continue;
+
+    const pageId = typeof insertedPage === "object" ? insertedPage.id : insertedPage;
+    let position = 0;
+    for (const slug of ["earth", "kener"]) {
+      const tag = taggedAs(slug);
+      const monitor = await knex("monitors").where({ tag, org_id: orgId }).first();
+      if (!monitor) continue;
+      await knex("pages_monitors").insert({
+        org_id: orgId,
+        page_id: pageId,
+        monitor_tag: tag,
+        monitor_settings_json: "",
+        position,
+        created_at: knex.fn.now(),
+        updated_at: knex.fn.now(),
+      });
+      position++;
+    }
+  }
+}
+
+/**
+ * Settings that a migration introduced rather than `seedSiteData`, and their defaults.
+ *
+ * Both were seeded by a one-off migration into whatever org existed at the time,
+ * so a newly provisioned org would not have them - and neither code fallback is
+ * the value the default org actually got:
+ *
+ *   - `mfaPolicy` falls back to `local_only`, which would silently make a second
+ *     factor **mandatory** for every password user in the new org. A2b changed
+ *     the seeded default to `none` precisely to avoid forcing enrolment on
+ *     people who had not asked for it, and a new org must inherit that decision
+ *     rather than the pre-A2b one.
+ *   - `eventBusConsumers` falls back to an empty map, so every consumer would
+ *     take its built-in declared mode instead of the instance's chosen ones.
+ *
+ * These are arguably instance-level rather than per-org, and I3g is where that
+ * gets decided properly (instance defaults with per-org overrides). Until then a
+ * new org gets its own copy of the same defaults, which is the behaviour that
+ * matches the default org.
+ */
+const MIGRATION_SEEDED_DEFAULTS: Record<string, { value: string; data_type: string }> = {
+  mfaPolicy: { value: "none", data_type: "string" },
+  eventBusConsumers: {
+    value: JSON.stringify({ audit: "live", webhook: "live", email: "live", subscribers: "shadow", triggers: "shadow" }),
+    data_type: "object",
+  },
+};
+
+/**
+ * Creates this org's settings from the shipped defaults.
+ *
+ * Scoped per key rather than "is the table empty", so an org that gained a
+ * setting in a later release picks up the new default without losing the values
+ * it has already changed. The lookup includes `org_id`: without it a second org
+ * finds the default org's row, decides the key is present and provisions
+ * nothing, which is exactly what the seed did before I3b made the key per-org.
+ */
+export async function provisionOrgSiteData(knex: Knex, orgId: number): Promise<void> {
+  for (const [key, entry] of Object.entries(MIGRATION_SEEDED_DEFAULTS)) {
+    const existing = await knex("site_data").where({ key, org_id: orgId }).first();
+    if (existing) continue;
+    await knex("site_data").insert({ key, value: entry.value, data_type: entry.data_type, org_id: orgId });
+  }
+
+  const defaults = seedSiteData as Record<string, unknown>;
+  for (const key of Object.keys(defaults)) {
+    const existing = await knex("site_data").where({ key, org_id: orgId }).first();
+    if (existing) continue;
+
+    let value = defaults[key];
+    const data_type = typeof value;
+    if (data_type === "object") value = JSON.stringify(value);
+
+    await knex("site_data").insert({ key, value, data_type, org_id: orgId });
+  }
+}
+
+/** The templates every org starts with, in the order the seed created them. */
+const STARTER_TEMPLATES = [
+  subscriptionAccountCodeTemplate,
+  subscriptionUpdateTemplate,
+  forgotPasswordTemplate,
+  inviteUserTemplate,
+  verifyEmailTemplate,
+];
+
+/**
+ * Creates this org's copy of the transactional email templates.
+ *
+ * Same org-scoped lookup, for the same reason: `general_email_templates` is
+ * keyed on `(org_id, template_id)` as of I3b, and a lookup by `template_id`
+ * alone would find another org's row.
+ */
+export async function provisionOrgTemplates(knex: Knex, orgId: number): Promise<void> {
+  for (const template of STARTER_TEMPLATES) {
+    const existing = await knex("general_email_templates")
+      .where({ template_id: template.template_id, org_id: orgId })
+      .first();
+    if (existing) continue;
+
+    await knex("general_email_templates").insert({
+      org_id: orgId,
+      template_id: template.template_id,
+      template_subject: template.template_subject,
+      template_html_body: template.template_html_body,
+      template_text_body: template.template_text_body,
+    });
+  }
+}
+
+/**
  * Everything a newly created org needs to be usable.
  *
- * I3f calls this when an operator creates an org. It is deliberately unused
- * until then: extracting it now, while there is still exactly one org and the
+ * I3e/I3f call this when an operator creates an org. It is deliberately unused
+ * until then: extracting it while there is still exactly one org, and the
  * behaviour can be compared against the old seeds row for row, is far safer than
  * retrofitting it alongside the UI that first depends on it.
+ *
+ * Order matters. Monitors come before pages because the home page attaches them,
+ * and roles come first because everything else is meaningless without somebody
+ * able to administer it.
  */
 export async function provisionOrg(knex: Knex, orgId: number): Promise<void> {
   await provisionOrgRoles(knex, orgId);
   await provisionOrgMonitors(knex, orgId);
-  // Pages, site_data and email templates wait for I3b to make their unique keys
-  // per-org. See the note at the top of this file.
+  await provisionOrgPages(knex, orgId);
+  await provisionOrgSiteData(knex, orgId);
+  await provisionOrgTemplates(knex, orgId);
 }

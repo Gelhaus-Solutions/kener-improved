@@ -1,82 +1,14 @@
-import subscriptionAccountCodeTemplate from "../src/lib/server/templates/general/subscription_account_code_template.ts";
-import subscriptionUpdateTemplate from "../src/lib/server/templates/general/subscription_update_template.ts";
-import forgotPasswordTemplate from "../src/lib/server/templates/general/forgot_password_template.ts";
-import inviteUserTemplate from "../src/lib/server/templates/general/invite_user_template.ts";
-import verifyEmailTemplate from "../src/lib/server/templates/general/verify_email_template.ts";
-import { DEFAULT_ORG_ID } from "../src/lib/server/db/provisionOrg.ts";
+import { DEFAULT_ORG_ID, provisionOrgTemplates } from "../src/lib/server/db/provisionOrg.ts";
 import type { Knex } from "knex";
 
+/**
+ * The transactional email templates, owned by the default org.
+ *
+ * A wrapper over `provisionOrgTemplates` as of I3b. This file used to repeat the
+ * same twelve-line block five times, each asking `where({ template_id })` with
+ * no org - a lookup that finds another org's row now that the primary key is
+ * `(org_id, template_id)`.
+ */
 export async function seed(knex: Knex): Promise<void> {
-  // Check if the table has template_id 'subscription_account_code'
-  let count = await knex("general_email_templates")
-    .where({ template_id: subscriptionAccountCodeTemplate.template_id })
-    .count("template_id as CNT")
-    .first();
-  if (count && count.CNT == 0) {
-    await knex("general_email_templates").insert({
-      org_id: DEFAULT_ORG_ID,
-      template_id: subscriptionAccountCodeTemplate.template_id,
-      template_subject: subscriptionAccountCodeTemplate.template_subject,
-      template_html_body: subscriptionAccountCodeTemplate.template_html_body,
-      template_text_body: subscriptionAccountCodeTemplate.template_text_body,
-    });
-  }
-
-  count = await knex("general_email_templates")
-    .where({ template_id: subscriptionUpdateTemplate.template_id })
-    .count("template_id as CNT")
-    .first();
-
-  if (count && count.CNT == 0) {
-    await knex("general_email_templates").insert({
-      org_id: DEFAULT_ORG_ID,
-      template_id: subscriptionUpdateTemplate.template_id,
-      template_subject: subscriptionUpdateTemplate.template_subject,
-      template_html_body: subscriptionUpdateTemplate.template_html_body,
-      template_text_body: subscriptionUpdateTemplate.template_text_body,
-    });
-  }
-  count = await knex("general_email_templates")
-    .where({ template_id: forgotPasswordTemplate.template_id })
-    .count("template_id as CNT")
-    .first();
-
-  if (count && count.CNT == 0) {
-    await knex("general_email_templates").insert({
-      org_id: DEFAULT_ORG_ID,
-      template_id: forgotPasswordTemplate.template_id,
-      template_subject: forgotPasswordTemplate.template_subject,
-      template_html_body: forgotPasswordTemplate.template_html_body,
-      template_text_body: forgotPasswordTemplate.template_text_body,
-    });
-  }
-  count = await knex("general_email_templates")
-    .where({ template_id: inviteUserTemplate.template_id })
-    .count("template_id as CNT")
-    .first();
-
-  if (count && count.CNT == 0) {
-    await knex("general_email_templates").insert({
-      org_id: DEFAULT_ORG_ID,
-      template_id: inviteUserTemplate.template_id,
-      template_subject: inviteUserTemplate.template_subject,
-      template_html_body: inviteUserTemplate.template_html_body,
-      template_text_body: inviteUserTemplate.template_text_body,
-    });
-  }
-
-  count = await knex("general_email_templates")
-    .where({ template_id: verifyEmailTemplate.template_id })
-    .count("template_id as CNT")
-    .first();
-
-  if (count && count.CNT == 0) {
-    await knex("general_email_templates").insert({
-      org_id: DEFAULT_ORG_ID,
-      template_id: verifyEmailTemplate.template_id,
-      template_subject: verifyEmailTemplate.template_subject,
-      template_html_body: verifyEmailTemplate.template_html_body,
-      template_text_body: verifyEmailTemplate.template_text_body,
-    });
-  }
+  await provisionOrgTemplates(knex, DEFAULT_ORG_ID);
 }
