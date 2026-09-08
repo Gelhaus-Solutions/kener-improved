@@ -14,20 +14,14 @@
   import SirenIcon from "@lucide/svelte/icons/siren";
   import BellIcon from "@lucide/svelte/icons/bell";
   import CodeIcon from "@lucide/svelte/icons/code";
-  import ChartSplineIcon from "@lucide/svelte/icons/chart-spline";
   import CloudAlertIcon from "@lucide/svelte/icons/cloud-alert";
-  import House from "@lucide/svelte/icons/house";
-  import BadgeIcon from "@lucide/svelte/icons/id-card";
   import ClockAlertIcon from "@lucide/svelte/icons/clock-alert";
   import BookOpenIcon from "@lucide/svelte/icons/book-open";
   import KeyIcon from "@lucide/svelte/icons/key";
   import ScrollTextIcon from "@lucide/svelte/icons/scroll-text";
-  import SendIcon from "@lucide/svelte/icons/send";
-  import RadioTowerIcon from "@lucide/svelte/icons/radio-tower";
   import WebhookIcon from "@lucide/svelte/icons/webhook";
   import UsersIcon from "@lucide/svelte/icons/users";
   import ShieldIcon from "@lucide/svelte/icons/shield";
-  import ShieldCheckIcon from "@lucide/svelte/icons/shield-check";
   import FingerprintIcon from "@lucide/svelte/icons/fingerprint";
   import Columns3CogIcon from "@lucide/svelte/icons/columns-3-cog";
   import SiteHeader from "./manage/site-header.svelte";
@@ -37,59 +31,132 @@
 
   import { Toaster } from "$lib/components/ui/sonner/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
-  import { ROUTE_PERMISSION_MAP } from "$lib/allPerms.js";
-  import { ORG_ROUTE_PERMISSION_MAP } from "$lib/orgPerms.js";
-
-  // Upstream's route map merged with the fork's. `allPerms.ts` stays
-  // byte-identical to upstream, so fork routes are declared in `orgPerms.ts`
-  // instead; see the comment there.
-  const MERGED_ROUTE_PERMISSION_MAP: Record<string, string | null> = {
-    ...ROUTE_PERMISSION_MAP,
-    ...ORG_ROUTE_PERMISSION_MAP
-  };
+  import { canReachRoute, routeIdForManageUrl } from "$lib/routePermissions.js";
 
   let { children, data } = $props();
 
-  // Navigation items - single source of truth
-  const allNavItems = [
-    { title: "Site Configurations", url: "/manage/app/site-configurations", icon: Settings2Icon },
-    { title: "Internationalization", url: "/manage/app/internationalization", icon: GlobeIcon },
-    { title: "Customizations", url: "/manage/app/customizations", icon: Columns3CogIcon },
-    { title: "Analytics Providers", url: "/manage/app/analytics-providers", icon: ChartSplineIcon },
-    { title: "Captcha Providers", url: "/manage/app/captcha-providers", icon: ShieldCheckIcon },
-    { title: "Pages", url: "/manage/app/pages", icon: BookOpenIcon },
-    { title: "Monitors", url: "/manage/app/monitors", icon: BlendIcon },
-    { title: "Monitoring Data", url: "/manage/app/monitoring-data", icon: DatabaseIcon },
-    { title: "Incidents", url: "/manage/app/incidents", icon: CloudAlertIcon },
-    { title: "Maintenances", url: "/manage/app/maintenances", icon: ClockAlertIcon },
-    { title: "Alerts", url: "/manage/app/alerts", icon: SirenIcon },
-    { title: "Subscriptions", url: "/manage/app/subscriptions", icon: BellIcon },
-    { title: "Users", url: "/manage/app/users", icon: UsersIcon },
-    { title: "Roles", url: "/manage/app/roles", icon: ShieldIcon },
-    { title: "OpenID Connect", url: "/manage/app/oidc", icon: FingerprintIcon },
-    { title: "Triggers", url: "/manage/app/triggers", icon: MailboxIcon },
-    { title: "Templates", url: "/manage/app/templates", icon: TemplateIcon },
-    { title: "Badges", url: "/manage/app/badges", icon: BadgeIcon },
-    { title: "Embed", url: "/manage/app/embed", icon: CodeIcon },
-    { title: "API Keys", url: "/manage/app/api-keys", icon: KeyIcon },
-    { title: "Webhooks", url: "/manage/app/webhooks", icon: WebhookIcon },
-    { title: "Audit Log", url: "/manage/app/audit", icon: ScrollTextIcon },
-    { title: "Delivery Log", url: "/manage/app/deliveries", icon: SendIcon },
-    { title: "Event Bus", url: "/manage/app/event-consumers", icon: RadioTowerIcon }
+  // Navigation - single source of truth.
+  //
+  // I3f: grouped rather than flat. The old list was 24 entries in the order
+  // screens happened to be built, so Alerts and Triggers sat five apart though
+  // one fires the other, and the screens used during an outage were below five
+  // configuration screens nobody opens twice a year. Order within a group is
+  // what an operator reaches for, most often first.
+  //
+  // Some entries now cover several screens. Analytics and Captcha are tabs on
+  // Site Configurations, Badges and Embed are tabs on Share, and the Delivery
+  // Log and Event Bus are tabs on Webhooks. The routes moved with them; the old
+  // paths 308 to the new ones, see `manageRedirects.ts`.
+  const allNavGroups = [
+    {
+      title: "Operate",
+      items: [
+        { title: "Monitors", url: "/manage/app/monitors", icon: BlendIcon },
+        { title: "Incidents", url: "/manage/app/incidents", icon: CloudAlertIcon },
+        { title: "Maintenances", url: "/manage/app/maintenances", icon: ClockAlertIcon },
+        { title: "Alerts", url: "/manage/app/alerts", icon: SirenIcon },
+        { title: "Monitoring Data", url: "/manage/app/monitoring-data", icon: DatabaseIcon }
+      ]
+    },
+    {
+      title: "Notify",
+      items: [
+        { title: "Subscriptions", url: "/manage/app/subscriptions", icon: BellIcon },
+        { title: "Triggers", url: "/manage/app/triggers", icon: MailboxIcon },
+        { title: "Templates", url: "/manage/app/templates", icon: TemplateIcon },
+        {
+          title: "Webhooks",
+          url: "/manage/app/webhooks",
+          icon: WebhookIcon,
+          tabs: ["/manage/app/webhooks", "/manage/app/webhooks/deliveries", "/manage/app/webhooks/event-consumers"]
+        }
+      ]
+    },
+    {
+      title: "Status page",
+      items: [
+        { title: "Pages", url: "/manage/app/pages", icon: BookOpenIcon },
+        { title: "Customizations", url: "/manage/app/customizations", icon: Columns3CogIcon },
+        { title: "Internationalization", url: "/manage/app/internationalization", icon: GlobeIcon },
+        {
+          title: "Share",
+          url: "/manage/app/share/badges",
+          match: "/manage/app/share",
+          icon: CodeIcon,
+          tabs: ["/manage/app/share/badges", "/manage/app/share/embed"]
+        }
+      ]
+    },
+    {
+      title: "Access",
+      items: [
+        { title: "Users", url: "/manage/app/users", icon: UsersIcon },
+        { title: "Roles", url: "/manage/app/roles", icon: ShieldIcon },
+        { title: "OpenID Connect", url: "/manage/app/oidc", icon: FingerprintIcon },
+        { title: "API Keys", url: "/manage/app/api-keys", icon: KeyIcon },
+        { title: "Audit Log", url: "/manage/app/audit", icon: ScrollTextIcon }
+      ]
+    },
+    {
+      title: "Settings",
+      items: [
+        {
+          title: "Site Configurations",
+          url: "/manage/app/site-configurations",
+          icon: Settings2Icon,
+          tabs: [
+            "/manage/app/site-configurations",
+            "/manage/app/site-configurations/analytics-providers",
+            "/manage/app/site-configurations/captcha-providers"
+          ]
+        }
+      ]
+    }
   ];
 
-  const navItems = allNavItems
-    .filter((item) => {
-      const routeId = `/(manage)${item.url}`;
-      const requiredPermission = MERGED_ROUTE_PERMISSION_MAP[routeId];
-      if (requiredPermission === undefined) return false;
-      if (requiredPermission === null) return true;
-      return (data.userPermissions ?? []).includes(requiredPermission);
-    })
-    .map((item) => ({ ...item, url: clientResolver(resolve, item.url) }));
+  // An entry that covers several tabs is shown when *any* of them is reachable,
+  // and points at the first one that is. Without this, folding the Event Bus
+  // into Webhooks would hide it outright from somebody holding `eventbus.read`
+  // and not `webhooks.read`, which is a combination the permissions are
+  // deliberately split to allow.
+  function firstReachable(item: { url: string; tabs?: string[] }): string | undefined {
+    return (item.tabs ?? [item.url]).find((url) => canReachRoute(data.userPermissions, routeIdForManageUrl(url)));
+  }
 
-  // Derive page title from current URL
-  let pageTitle = $derived(navItems.find((item) => page.url.pathname.startsWith(item.url))?.title || "Dashboard");
+  // A group whose every item is filtered out must not render an empty heading.
+  //
+  // `match` is the path that says whether an entry is the one being looked at.
+  // It is the entry's own url for most of them, but a section whose first tab
+  // sits below the section root needs the root: Share links to its Badges tab,
+  // and must still light up while the Embed tab is open.
+  const navGroups = allNavGroups
+    .map((group) => ({
+      ...group,
+      items: group.items
+        .map((item) => ({ item, url: firstReachable(item) }))
+        .filter((entry) => entry.url !== undefined)
+        .map(({ item, url }) => ({
+          ...item,
+          url: clientResolver(resolve, url as string),
+          match: clientResolver(resolve, (item as { match?: string }).match ?? item.url)
+        }))
+    }))
+    .filter((group) => group.items.length > 0);
+
+  const navItems = navGroups.flatMap((group) => group.items);
+
+  // Derive page title from current URL. Longest match wins, so a section's own
+  // entry does not claim the title of a screen nested under it.
+  //
+  // `resolve()` hands back a path relative to the current page, so these have to
+  // be resolved against it before they can be compared with an absolute
+  // pathname. Without that every screen was titled "Dashboard".
+  let pageTitle = $derived(
+    navItems
+      .map((item) => ({ ...item, path: new URL(item.match, page.url).pathname }))
+      .filter((item) => page.url.pathname.startsWith(item.path))
+      .sort((a, b) => b.path.length - a.path.length)[0]?.title || "Dashboard"
+  );
 </script>
 
 <ModeWatcher defaultMode={data.defaultSiteTheme as "light" | "dark" | "system"} />
@@ -125,7 +192,7 @@
 </svelte:head>
 <main class="kener-manage">
   <Sidebar.Provider style="--sidebar-width: calc(var(--spacing) * 72); --header-height: calc(var(--spacing) * 12);">
-    <AppSidebar variant="inset" {navItems} />
+    <AppSidebar variant="inset" {navGroups} />
     <Sidebar.Inset>
       <SiteHeader title={pageTitle} />
       <div class="p-4">

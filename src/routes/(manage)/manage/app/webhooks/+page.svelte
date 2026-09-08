@@ -207,7 +207,7 @@
   <div class="flex items-center justify-between">
     <p class="text-muted-foreground flex items-center gap-1 text-sm">
       Send a signed HTTP request whenever an incident, maintenance or monitor changes. Every attempt is recorded on the
-      <Button variant="link" class="h-auto p-0" href={clientResolver(resolve, "/manage/app/deliveries")}>
+      <Button variant="link" class="h-auto p-0" href={clientResolver(resolve, "/manage/app/webhooks/deliveries")}>
         delivery log
       </Button>.
     </p>

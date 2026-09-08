@@ -7,9 +7,10 @@
   import type { Component, ComponentProps } from "svelte";
   import { resolve } from "$app/paths";
   import clientResolver from "$lib/client/resolver.js";
-  type NavItem = { title: string; url: string; icon: Component };
+  type NavItem = { title: string; url: string; match: string; icon: Component };
+  type NavGroup = { title: string; items: NavItem[] };
 
-  let { navItems, ...restProps }: { navItems: NavItem[] } & ComponentProps<typeof Sidebar.Root> = $props();
+  let { navGroups, ...restProps }: { navGroups: NavGroup[] } & ComponentProps<typeof Sidebar.Root> = $props();
   const appVersion = version();
 </script>
 
@@ -34,7 +35,7 @@
     </Sidebar.Menu>
   </Sidebar.Header>
   <Sidebar.Content>
-    <NavMain items={navItems} />
+    <NavMain groups={navGroups} />
   </Sidebar.Content>
   <Sidebar.Footer>
     <NavUser />

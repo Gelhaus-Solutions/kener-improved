@@ -119,13 +119,22 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
  */
 export const ORG_ROUTE_PERMISSION_MAP: Record<string, string | null> = {
   "/(manage)/manage/app/audit": "audit.read",
-  "/(manage)/manage/app/deliveries": "webhooks.read",
   // Reading the list is enough to reach the screen; every button on it is
   // separately gated on webhooks.write by its action.
   "/(manage)/manage/app/webhooks": "webhooks.read",
+  "/(manage)/manage/app/webhooks/deliveries": "webhooks.read",
   // Same shape: the screen opens on read, and the mode control on it is gated
   // on eventbus.write by its own action.
-  "/(manage)/manage/app/event-consumers": "eventbus.read",
+  "/(manage)/manage/app/webhooks/event-consumers": "eventbus.read",
+
+  // I3f moved four upstream screens under a parent so they could share one
+  // sidebar entry and one tab bar. Their new route ids are declared here rather
+  // than in `allPerms.ts`, which stays byte-identical to upstream; upstream's
+  // entries for the old paths are left in place and are simply never matched.
+  "/(manage)/manage/app/site-configurations/analytics-providers": "settings.read",
+  "/(manage)/manage/app/site-configurations/captcha-providers": "settings.read",
+  "/(manage)/manage/app/share/badges": "settings.read",
+  "/(manage)/manage/app/share/embed": "settings.read",
 };
 
 /** Permission ids the fork owns. Used by the seeds to tell them from upstream's. */

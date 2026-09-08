@@ -5,17 +5,8 @@ import { IsEmailSetup } from "$lib/server/controllers/controller.js";
 import { RequirePermission } from "$lib/server/controllers/userController.js";
 import seedSiteData from "$lib/server/db/seedSiteData.js";
 import serverResolve from "$lib/server/resolver.js";
-import { ROUTE_PERMISSION_MAP } from "$lib/allPerms.js";
-import { ORG_ROUTE_PERMISSION_MAP } from "$lib/orgPerms.js";
+import { MERGED_ROUTE_PERMISSION_MAP } from "$lib/routePermissions.js";
 import { error } from "@sveltejs/kit";
-
-// Upstream's route map merged with the fork's. `allPerms.ts` stays
-// byte-identical to upstream, so fork routes are declared in `orgPerms.ts`
-// instead; see the comment there.
-const MERGED_ROUTE_PERMISSION_MAP: Record<string, string | null> = {
-  ...ROUTE_PERMISSION_MAP,
-  ...ORG_ROUTE_PERMISSION_MAP,
-};
 
 import { resolve } from "$app/paths";
 import { GetAllSiteData, IsSetupComplete, GetLocaleFromCookie } from "$lib/server/controllers/controller.js";
