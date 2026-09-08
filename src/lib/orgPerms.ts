@@ -74,6 +74,9 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
 export const ORG_ROUTE_PERMISSION_MAP: Record<string, string | null> = {
   "/(manage)/manage/app/audit": "audit.read",
   "/(manage)/manage/app/deliveries": "webhooks.read",
+  // Reading the list is enough to reach the screen; every button on it is
+  // separately gated on webhooks.write by its action.
+  "/(manage)/manage/app/webhooks": "webhooks.read",
 };
 
 /** Permission ids the fork owns. Used by the seeds to tell them from upstream's. */

@@ -23,6 +23,7 @@
   import KeyIcon from "@lucide/svelte/icons/key";
   import ScrollTextIcon from "@lucide/svelte/icons/scroll-text";
   import SendIcon from "@lucide/svelte/icons/send";
+  import WebhookIcon from "@lucide/svelte/icons/webhook";
   import UsersIcon from "@lucide/svelte/icons/users";
   import ShieldIcon from "@lucide/svelte/icons/shield";
   import ShieldCheckIcon from "@lucide/svelte/icons/shield-check";
@@ -70,6 +71,7 @@
     { title: "Badges", url: "/manage/app/badges", icon: BadgeIcon },
     { title: "Embed", url: "/manage/app/embed", icon: CodeIcon },
     { title: "API Keys", url: "/manage/app/api-keys", icon: KeyIcon },
+    { title: "Webhooks", url: "/manage/app/webhooks", icon: WebhookIcon },
     { title: "Audit Log", url: "/manage/app/audit", icon: ScrollTextIcon },
     { title: "Delivery Log", url: "/manage/app/deliveries", icon: SendIcon }
   ];
