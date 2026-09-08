@@ -85,7 +85,14 @@ async function start() {
       await db.migrate.latest(); // Runs migrations to the latest state
       console.log("Migrations completed successfully!");
     } catch (err) {
+      // Fatal, deliberately. This used to log and carry on, which meant a failed
+      // migration produced a running instance on a half-migrated schema: the new
+      // release appears to deploy fine, the feature it shipped is simply absent,
+      // and the only evidence is one line in a log nobody is tailing. A process
+      // that exits is visible to every orchestrator; one that lies is not.
       console.error("Error running migrations:", err);
+      console.error("Refusing to start on a partially migrated database.");
+      process.exit(1);
     }
   }
 
@@ -100,10 +107,19 @@ async function start() {
     }
   }
 
-  app.listen(PORT, async () => {
-    await runMigrations();
-    await runSeed();
-    await db.destroy();
+  // Migrate and seed *before* accepting traffic.
+  //
+  // These used to run inside the `listen` callback, so the port was already open
+  // while the schema was still being changed. During a rolling deploy that
+  // window is served by the new container against the old schema, and the
+  // healthcheck answers 200 throughout it, because the database connection is
+  // fine even when the tables are not. The orchestrator then routes real traffic
+  // into a pod that cannot answer it.
+  await runMigrations();
+  await runSeed();
+  await db.destroy();
+
+  app.listen(PORT, () => {
     Startup();
     console.log("Kener is running on port " + PORT + "!");
   });
