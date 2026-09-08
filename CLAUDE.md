@@ -71,7 +71,7 @@ Each monitor type has a dedicated implementation in `src/lib/server/services/`:
 ## Key Conventions
 
 - Always ask a lot of questions.
-- Never commit with any desc or coauthor. Use only a small conventional title for regular commits too. 
+- Never commit with any desc or coauthor. Use only a small conventional title for regular commits too.
 - Never use any em-dashes.
 
 ### Svelte 5 + TypeScript
@@ -137,7 +137,7 @@ Practical rules when working here:
   Renaming them would make every future upstream merge conflict, and that
   restraint is what pays for diverging freely everywhere else.
 - **Fix things here, not upstream.** Nothing is contributed back; the sync is
-  one-directional. An upstream bug this fork also carries may be *reported*
+  one-directional. An upstream bug this fork also carries may be _reported_
   upstream, but the fix still lands here first.
 - **Upstream releases are not adopted.** An upstream tag is not an event here.
   The fork runs its own release pipeline (`create-release.yml`, adapted from
@@ -146,8 +146,19 @@ Practical rules when working here:
 - **Never `git merge upstream/main` directly.** Use `npm run sync:upstream`. The
   `merge=ours` driver that `.gitattributes` relies on is registered by that
   script; a plain merge silently ignores it.
-- **Adding a fork-owned file?** Add it to the *Fork-owned files* block in
-  `.gitattributes` and to the divergence table in `FORK.md`.
+- **Working around an upstream file is a habit, not a rule.** Keeping upstream's
+  files mergeable is usually right and it is why fork handles live in
+  `src/lib/server/http/` and fork permissions in `orgPerms.ts`. But it exists to
+  make syncs cheap, so **when _not_ editing an upstream file would be a
+  medium or major disadvantage - a feature that cannot be built, a bug that
+  stays, or complexity invented solely to avoid one line - edit it and own the
+  divergence.** One conflict in one file, once, is cheaper than machinery built
+  to dodge it. `svelte.config.js` is the worked example in `FORK.md`. The
+  exception with no trade-off is rebranding: never.
+- **Adding a fork-owned file?** Add it to the _Fork-owned files_ block in
+  `.gitattributes` and to the divergence table in `FORK.md`. A file that merely
+  _diverges_ goes in the `FORK.md` table only - `.gitattributes` is for files
+  where an upstream diff has nothing useful to contribute.
 
 ## Skills
 

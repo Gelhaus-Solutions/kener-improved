@@ -104,6 +104,57 @@ an upstream diff has nothing useful to contribute.
 > `git merge upstream/main` will not honour it** - always sync through the
 > script or the workflow.
 
+### When to stop working around an upstream file
+
+The fork's habit is restraint: keep upstream's files as close to upstream as
+possible and add beside them instead of inside them. `src/lib/orgPerms.ts` next
+to a byte-identical `allPerms.ts`; every fork request handle in
+`src/lib/server/http/` so `hooks.server.ts` gains one import and one name in
+`sequence(...)`; a handler registry behind a seven-line `+server.ts`. That habit
+is what makes a sync cheap, and it is usually right.
+
+**It is a means, not a goal.** The point of keeping a file mergeable is to make
+future syncs cheap. When working around a file costs more than the sync it saves,
+the trade has inverted and the fork should take the file over.
+
+The test: **if not editing an upstream file would be a medium or major
+disadvantage - a feature that cannot be built, a correctness problem, a bug that
+stays, or a pile of complexity built solely to avoid one line - then own it
+fork-side and move on.** A sync conflict in one file, once, is a small and
+predictable cost. Machinery invented to avoid that conflict is an unbounded one,
+and it has to be understood by everyone who reads the code afterwards.
+
+Worked example, and the one that prompted this rule:
+
+> **`svelte.config.js` and `paths.relative`.** I3e added an optional
+> `/o/<slug>/` organisation prefix so one instance on one hostname can serve
+> several tenants. SvelteKit's default emits links relative to the _routed_ path
+> while computing depth from the _real_ URL, so every link on a prefixed page
+> climbed out of the organisation it belonged to. The fix is one line in
+> upstream's `svelte.config.js`: `paths.relative: false`.
+>
+> Avoiding that line meant either moving every public route under an `[[org]]`
+> parameter, or post-processing rendered HTML - both far more invasive, and both
+> permanent. The line was taken, the reason written next to it, and a row added
+> to the divergence table below.
+
+What owning a file means in practice:
+
+1. **Make the change, and say why at the change**, not only here. The next
+   person to read `svelte.config.js` should learn why that line exists without
+   opening this document.
+2. **Add a row to the divergence table** in _How the fork diverges_.
+3. **Decide whether it is also `merge=ours`**, which is a separate question.
+   Only when an upstream diff to that file has nothing useful to contribute. A
+   one-line divergence in a file upstream still maintains - `svelte.config.js`
+   is exactly that - should keep merging normally, so an upstream adapter or
+   Vite change still arrives.
+
+The rule does not loosen the one restriction that is not a trade-off: the fork
+does not rebrand. Product name, UI strings, seeded site data and docs content
+stay identical to upstream, and that restraint is what pays for diverging freely
+everywhere else.
+
 ### The admin API: reported, not merged
 
 `src/routes/(manage)/manage/api/+server.ts` is upstream's whole admin write
@@ -165,6 +216,7 @@ git push
 | `docs/adr/`                                                                        | ADRs reconstructed by the fork, numbered from 0100                           |
 | `src/routes/(manage)/manage/api/+server.ts`                                        | 7 lines here vs upstream's ~930; upstream's actions are reported, not merged |
 | `scripts/diff-upstream-actions.mjs`, `docs/agents/upstream-manage-api.snapshot.ts` | The machinery that reports them                                              |
+| `svelte.config.js`                                                                 | `paths.relative: false`, so the `/o/<slug>/` org prefix survives into links  |
 | `src/**`, `migrations/**`                                                          | Diverge by design; conflicts are resolved by hand on each sync               |
 | `LICENSE`, product name, UI strings, docs content                                  | **Unchanged** - the fork does not rebrand                                    |
 
