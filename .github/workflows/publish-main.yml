@@ -1,4 +1,12 @@
-name: Publish Main Docker Image (with Docs)
+name: Publish Main Docker Image
+
+# Every push to main publishes the tip of the branch as :main. Nothing gates
+# this on the Tests workflow, so :main can briefly point at a commit whose
+# tests later fail - use :latest for anything that matters.
+#
+# The bump commit that publish-release.yml pushes does NOT land here: pushes
+# made with GITHUB_TOKEN do not trigger workflows, which is what stops a
+# release from rebuilding :main straight after building :latest.
 
 on:
   push:
@@ -11,13 +19,13 @@ env:
 
 jobs:
   build-and-push-main:
-    name: Build and push main Docker images (with docs)
+    name: Build and push :main${{ matrix.docs && '-w-docs' || '' }}
     strategy:
       fail-fast: false
       matrix:
-        variant: [debian, alpine]
+        docs: [false, true]
     concurrency:
-      group: main-docker-${{ github.ref }}-${{ matrix.variant }}
+      group: main-docker-${{ github.ref }}-${{ matrix.docs }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
     permissions:
@@ -27,6 +35,11 @@ jobs:
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3.3.0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3.8.0
@@ -44,22 +57,26 @@ jobs:
         run: |
           echo "name=${GITHUB_REGISTRY}/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
+      # "" for the plain image, "-w-docs" for the one carrying the docs site.
+      - name: Compute tag suffix
+        id: suffix
+        run: |
+          if [ "${{ matrix.docs }}" = "true" ]; then
+            echo "value=-w-docs" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5.6.1
         with:
           images: ${{ steps.image.outputs.name }}
           tags: |
-            type=raw,value=main-with-docs,enable=${{ matrix.variant == 'debian' }}
-            type=raw,value=main-with-docs-alpine,enable=${{ matrix.variant == 'alpine' }}
-            type=sha,format=short,prefix=main-with-docs-,enable=${{ matrix.variant == 'debian' }}
-            type=sha,format=short,prefix=main-with-docs-alpine-,enable=${{ matrix.variant == 'alpine' }}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3.3.0
+            type=raw,value=main${{ steps.suffix.outputs.value }}
+            type=sha,format=short,prefix=main${{ steps.suffix.outputs.value }}-
 
       - name: Build and push Docker image
-        id: build-and-push
         uses: docker/build-push-action@v6.13.0
         with:
           context: .
@@ -67,8 +84,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            VARIANT=${{ matrix.variant }}
-            WITH_DOCS=true
+            VARIANT=debian
+            WITH_DOCS=${{ matrix.docs }}
           platforms: linux/amd64,linux/arm64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=main-docs-${{ matrix.docs }}
+          cache-to: type=gha,mode=max,scope=main-docs-${{ matrix.docs }}

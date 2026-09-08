@@ -1,5 +1,13 @@
 name: Create Release
 
+# A convenience wrapper around the GitHub release form: it creates the tag and
+# the release with auto-generated notes, nothing more.
+#
+# Everything else - the version bump, the changelog, the Docker images - is done
+# by publish-release.yml, which reacts to the release being published. Creating
+# the release by hand in the GitHub UI works exactly the same way; use whichever
+# you prefer.
+
 on:
   workflow_dispatch:
     inputs:
@@ -23,7 +31,7 @@ permissions:
 
 jobs:
   create-release:
-    name: Bump version, tag, and create release
+    name: Tag and create the release
     runs-on: ubuntu-latest
 
     steps:
@@ -50,43 +58,9 @@ jobs:
             exit 1
           fi
 
-      - name: Bump package version
-        run: |
-          VERSION="${{ inputs.version }}"
-          CURRENT_VERSION=$(node -p 'require("./package.json").version')
-
-          if [ "$CURRENT_VERSION" != "$VERSION" ]; then
-            npm version "$VERSION" --no-git-tag-version --allow-same-version
-          else
-            echo "package.json already at version $VERSION"
-          fi
-
-      - name: Commit version bump
-        run: |
-          VERSION="${{ inputs.version }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git add package.json
-          if [ -f package-lock.json ]; then
-            git add package-lock.json
-          fi
-
-          if git diff --cached --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "chore(release): bump version to $VERSION"
-          fi
-
-      - name: Create and push git tag
-        run: |
-          VERSION="${{ inputs.version }}"
-          TAG="v$VERSION"
-
-          git tag -a "$TAG" -m "Release $TAG"
-          git push origin "HEAD:${{ github.event.repository.default_branch }}"
-          git push origin "$TAG"
-
+      # The tag is created here at the head of the default branch, which is
+      # where publish-release.yml requires it to be. It moves the tag onto the
+      # version-bump commit afterwards.
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:

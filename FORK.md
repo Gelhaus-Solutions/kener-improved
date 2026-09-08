@@ -49,12 +49,12 @@ Run it from a clean working tree, on a throwaway branch.
 
 Environment overrides:
 
-| Variable              | Default                                    | Purpose                              |
-| --------------------- | ------------------------------------------ | ------------------------------------ |
-| `UPSTREAM_URL`        | `https://github.com/rajnandan1/kener.git`  | Where upstream lives                 |
-| `UPSTREAM_BRANCH`     | `main`                                     | Branch to merge                      |
-| `UPSTREAM_REMOTE`     | `upstream`                                 | Local remote name                    |
-| `SKIP_LOCKFILE_REGEN` | unset                                      | Set to `1` to skip `npm install`     |
+| Variable              | Default                                   | Purpose                          |
+| --------------------- | ----------------------------------------- | -------------------------------- |
+| `UPSTREAM_URL`        | `https://github.com/rajnandan1/kener.git` | Where upstream lives             |
+| `UPSTREAM_BRANCH`     | `main`                                    | Branch to merge                  |
+| `UPSTREAM_REMOTE`     | `upstream`                                | Local remote name                |
+| `SKIP_LOCKFILE_REGEN` | unset                                     | Set to `1` to skip `npm install` |
 
 ## What gets resolved automatically
 
@@ -80,7 +80,7 @@ collide:
 - **Anything genuinely contested** - the script exits non-zero, naming the exact
   key path (e.g. `scripts.build`), and the file keeps its conflict markers.
 
-Owned keys are aligned across all three stages *before* the merge runs, so keys
+Owned keys are aligned across all three stages _before_ the merge runs, so keys
 stay in their original position rather than shuffling to the end of the file on
 every sync.
 
@@ -94,7 +94,7 @@ regeneration would be based on a broken file.
 
 ### Fork-owned files - `merge=ours`
 
-Files listed in [`.gitattributes`](.gitattributes) under *Fork-owned files* use
+Files listed in [`.gitattributes`](.gitattributes) under _Fork-owned files_ use
 the `ours` merge driver: upstream edits to them are dropped instead of raising a
 conflict on every sync. These are files the fork has rewritten wholesale, where
 an upstream diff has nothing useful to contribute.
@@ -115,7 +115,7 @@ That would normally mean silently dropping every upstream change to the admin
 API, including new actions. So the sync converts the merge it cannot do into a
 to-do list it can: it extracts the action strings from upstream's version,
 compares them against the registry, and writes the difference into the PR body
-under *Admin actions to reconcile*, naming the file to create for each one. It
+under _Admin actions to reconcile_, naming the file to create for each one. It
 then refreshes `docs/agents/upstream-manage-api.snapshot.ts`, which exists only
 so the next sync can tell "upstream just added this" from "we never had this".
 
@@ -129,7 +129,7 @@ Fork permissions live in `src/lib/orgPerms.ts` and are merged at the consumers.
 If upstream edits a file this fork removed on purpose, git raises a
 modify/delete conflict. The sync keeps the deletion.
 
-## What is *not* resolved automatically
+## What is _not_ resolved automatically
 
 Source conflicts in `src/`, `migrations/`, `scripts/` and everywhere else. When
 the sync hits one, it still commits and opens the PR - **with the conflict
@@ -148,25 +148,27 @@ git push
 
 ## How the fork diverges
 
-| Area                       | Divergence                                                            |
-| -------------------------- | --------------------------------------------------------------------- |
-| `package.json`             | `repository`, `homepage`, `bugs` point here; `sync:upstream` script    |
-| `package.json` `version`   | Fork-owned; the fork releases on its own schedule and numbers          |
-| `README.md`                | Fork notice at the top; upstream content otherwise                     |
-| `.github/FUNDING.yml`      | Emptied - sponsor upstream directly, not this fork                     |
-| `.github/workflows/publish-*.yml` | Publish to GHCR only; no Docker Hub, no cosign signing         |
-| `.github/workflows/create-release.yml` | Uses `GITHUB_TOKEN` instead of upstream's `RELEASE_TOKEN` |
-| `.github/ISSUE_TEMPLATE/`  | No upstream assignee                                                   |
-| `docs/agents/issue-tracker.md` | Points at the Plane project, not GitHub Issues                     |
-| `docs/agents/triage-labels.md` | States that triage labels are unused                               |
-| `CLAUDE.md`, `AGENTS.md`   | Fork-specific agent instructions; no upstream counterpart              |
-| `docs/adr/`                | ADRs reconstructed by the fork, numbered from 0100                     |
-| `src/routes/(manage)/manage/api/+server.ts` | 7 lines here vs upstream's ~930; upstream's actions are reported, not merged |
-| `scripts/diff-upstream-actions.mjs`, `docs/agents/upstream-manage-api.snapshot.ts` | The machinery that reports them |
-| `src/**`, `migrations/**`  | Diverge by design; conflicts are resolved by hand on each sync         |
-| `LICENSE`, product name, UI strings, docs content | **Unchanged** - the fork does not rebrand       |
+| Area                                                                               | Divergence                                                                   |
+| ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `package.json`                                                                     | `repository`, `homepage`, `bugs` point here; `sync:upstream` script          |
+| `package.json` `version`                                                           | Fork-owned; the fork releases on its own schedule and numbers                |
+| `README.md`                                                                        | Fork notice at the top; upstream content otherwise                           |
+| `.github/FUNDING.yml`                                                              | Emptied - sponsor upstream directly, not this fork                           |
+| `.github/workflows/publish-*.yml`                                                  | Publish to GHCR only; no Docker Hub, no cosign signing                       |
+| `.github/workflows/create-release.yml`                                             | Uses `GITHUB_TOKEN` instead of upstream's `RELEASE_TOKEN`                    |
+| `CHANGELOG.md`                                                                     | Fork-only; the GitHub release body, recorded on publish                      |
+| `scripts/apply-release.mjs`                                                        | Applies a published release: version bump plus the changelogs                |
+| `.github/ISSUE_TEMPLATE/`                                                          | No upstream assignee                                                         |
+| `docs/agents/issue-tracker.md`                                                     | Points at the Plane project, not GitHub Issues                               |
+| `docs/agents/triage-labels.md`                                                     | States that triage labels are unused                                         |
+| `CLAUDE.md`, `AGENTS.md`                                                           | Fork-specific agent instructions; no upstream counterpart                    |
+| `docs/adr/`                                                                        | ADRs reconstructed by the fork, numbered from 0100                           |
+| `src/routes/(manage)/manage/api/+server.ts`                                        | 7 lines here vs upstream's ~930; upstream's actions are reported, not merged |
+| `scripts/diff-upstream-actions.mjs`, `docs/agents/upstream-manage-api.snapshot.ts` | The machinery that reports them                                              |
+| `src/**`, `migrations/**`                                                          | Diverge by design; conflicts are resolved by hand on each sync               |
+| `LICENSE`, product name, UI strings, docs content                                  | **Unchanged** - the fork does not rebrand                                    |
 
-Not every row here is `merge=ours`. A file is *fork-owned* only when an upstream
+Not every row here is `merge=ours`. A file is _fork-owned_ only when an upstream
 diff to it has nothing useful to contribute, and those are the rows that also
 appear in `.gitattributes`. `src/**` and `migrations/**` diverge but are still
 merged normally, because upstream changes there are worth reading.
@@ -184,7 +186,7 @@ Neither is required; the sync works without both.
   it, `test.yml` runs on every sync PR.
 - **GHCR packages** - the image workflows push to
   `ghcr.io/gelhaus-solutions/kener-improved` using the built-in `GITHUB_TOKEN`.
-  New packages default to private; make them public in the repo's *Packages*
+  New packages default to private; make them public in the repo's _Packages_
   settings if you want to pull without authenticating.
 
 ## Releases
@@ -194,11 +196,8 @@ event here: no version bump, no release, nothing to do. The code from that
 release arrives the same way every other upstream change does, through the next
 sync PR, and lands under whatever version this fork is on.
 
-What the fork took from upstream is the release *machinery*, not the releases.
-[`.github/workflows/create-release.yml`](.github/workflows/create-release.yml)
-is adapted from upstream's: a manual **Actions -> Create Release -> Run
-workflow** with an explicit version, which bumps `package.json`, tags, and cuts
-the GitHub release. The fork numbers on its own schedule.
+What the fork took from upstream is the release _machinery_, not the releases.
+The fork numbers on its own schedule.
 
 Two consequences worth stating plainly, because both used to be the other way
 round:
@@ -208,8 +207,67 @@ round:
 - The fork's version number carries **no relationship** to upstream's. Do not
   read it as "based on upstream 4.1.5", and do not bump it to match upstream.
 
-The older release pipeline this fork inherited is fully resolved and gone; the
-workflow above is the only one.
+### Cutting a release
+
+Publishing a GitHub release is the whole trigger. Either create it in the
+GitHub UI, or run **Actions -> Create Release -> Run workflow**
+([`create-release.yml`](.github/workflows/create-release.yml)), which only
+creates the tag and the release with auto-generated notes.
+
+**The release body is the changelog.** Write it in the release form, or press
+_Generate release notes_. An empty body fails the workflow, because there would
+be nothing to record.
+
+[`publish-release.yml`](.github/workflows/publish-release.yml) then does the
+rest, in order:
+
+1. `scripts/apply-release.mjs` bumps `package.json` and `package-lock.json` to
+   the tag's version and writes the release body into `CHANGELOG.md`, into
+   `src/routes/(docs)/docs/content/v4/changelogs/vX.Y.Z.md`, and into the
+   `docs.json` sidebar.
+2. It commits that to `main` as `chore(release): vX.Y.Z` and **moves the tag**
+   onto the commit, so the tag, the release and the image all describe the same
+   tree.
+3. It builds and pushes the Docker images.
+
+Two requirements follow from step 2:
+
+- The tag has to be at the head of `main` when the release is published.
+  Releasing from an older commit fails the workflow rather than quietly
+  widening the release.
+- `main` has to accept a push from `github-actions[bot]`. If the branch is
+  protected, allow that actor to bypass.
+
+The script is runnable by hand, which is the way to repair a release the
+workflow could not finish:
+
+```bash
+node scripts/apply-release.mjs --version 4.2.0 --notes-file notes.md
+```
+
+It is idempotent: re-running it for a version already applied rewrites that
+entry in place rather than stacking a duplicate. That matters because editing
+and re-publishing a release fires the workflow again.
+
+Because a release writes into `docs.json` and adds a changelog page, both of
+which are upstream content, a sync can conflict there. The `docs.json` edit is a
+minimal text splice specifically so the conflict stays small. A changelog
+_filename_ collision - upstream releasing the same version number this fork
+already used - is resolved by hand.
+
+### Docker images
+
+Published to GHCR only, `linux/amd64` and `linux/arm64`, Debian base
+(`node:24-slim`). The `-w-docs` variants bundle the documentation site.
+
+| Tag                         | Built by                                    |
+| --------------------------- | ------------------------------------------- |
+| `:main`, `:main-w-docs`     | every push to `main`, ungated by tests      |
+| `:main-<sha>`               | same build, pinned to the commit            |
+| `:latest`, `:latest-w-docs` | a published, non-pre-release GitHub release |
+| `:X.Y.Z`, `:vX.Y.Z`         | every published release, pre-releases too   |
+
+A pre-release publishes its version tags but never moves `:latest`.
 
 ## Nothing is contributed back
 
@@ -218,5 +276,5 @@ This fork does not open pull requests against
 branch off this fork's `main`, including fixes that are not fork-specific. The
 sync is one-directional by decision, not by oversight.
 
-Upstream bugs that this fork also carries may still be *reported* upstream, so
+Upstream bugs that this fork also carries may still be _reported_ upstream, so
 an upstream fix arrives on the next sync. Reporting is not contributing.
