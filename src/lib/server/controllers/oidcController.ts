@@ -8,7 +8,8 @@
 import * as client from "openid-client";
 import { GenerateRandomHexString } from "../tool.js";
 import db from "$lib/server/db/db";
-import { GenerateToken, CookieConfig } from "./commonController.js";
+import { CookieConfig } from "./commonController.js";
+import { CreateSession } from "./sessionController.js";
 import type { OidcSettings } from "$lib/types/site.js";
 import type { UserRecordPublic } from "../types/db.js";
 import { GetSiteDataByKey } from "./siteDataController.js";
@@ -340,12 +341,25 @@ async function SyncOidcUserRoles(userId: number, oidcGroups: string[], settings:
 /**
  * Generate a JWT token and cookie configuration for an OIDC user.
  */
-export async function GenerateOidcSession(user: UserRecordPublic): Promise<{
+/**
+ * Mints a session for a user who authenticated at the identity provider.
+ *
+ * The single chokepoint for OIDC sign-in, which is why A2 can set `mfa_level`
+ * from the ID token's `amr`/`acr` in exactly one place later.
+ */
+export async function GenerateOidcSession(
+  user: UserRecordPublic,
+  context: { ip?: string | null; userAgent?: string | null; mfaLevel?: string } = {},
+): Promise<{
   token: string;
   cookieConfig: ReturnType<typeof CookieConfig>;
 }> {
-  const token = await GenerateToken(user);
-  const cookieConfig = CookieConfig();
+  const { token, cookieConfig } = await CreateSession({
+    userId: user.id,
+    ip: context.ip ?? null,
+    userAgent: context.userAgent ?? null,
+    mfaLevel: context.mfaLevel,
+  });
   return { token, cookieConfig };
 }
 

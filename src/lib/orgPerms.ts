@@ -24,7 +24,9 @@ export const orgPermissions: Array<{ id: string; permission_name: string }> = [
   // Audit log (P1)
   { id: "audit.read", permission_name: "View the audit log" },
 
-  // Sessions (P3)
+  // Sessions (P3). Reading and revoking your *own* sessions needs no permission
+  // at all: a user must always be able to see whether somebody else is using
+  // their account. This one is only for acting on somebody else's.
   { id: "sessions.admin", permission_name: "View and revoke other users' sessions" },
 
   // Event bus and outbound webhooks (P2)
@@ -77,6 +79,14 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   getEventConsumers: "eventbus.read",
   getShadowDiff: "eventbus.read",
   setEventConsumerMode: "eventbus.write",
+
+  // Sessions (A9). `null` means authenticated-is-enough: these two are scoped to
+  // the caller's own sessions by construction, taking the user id from the
+  // resolved session rather than from the payload.
+  getMySessions: null,
+  revokeMySession: null,
+  // Acting on somebody else's sessions is the one that needs a permission.
+  revokeUserSessions: "sessions.admin",
 };
 
 /**

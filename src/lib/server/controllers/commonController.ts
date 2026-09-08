@@ -127,10 +127,21 @@ export const CookieConfig = (): {
   if (!!process.env.ORIGIN) {
     isSecuredDomain = process.env.ORIGIN.startsWith("https://");
   }
+  // Inferring Secure from ORIGIN is wrong behind a reverse proxy, which is the
+  // common deployment: the proxy terminates TLS and the app is told an internal
+  // `http://` origin, so the session cookie silently loses the Secure flag on a
+  // site that is served over HTTPS. Nothing reports it. This is the explicit
+  // override for that case.
+  if (process.env.KENER_FORCE_SECURE_COOKIES === "true") {
+    isSecuredDomain = true;
+  }
   return {
     name: "kener-user",
     secure: isSecuredDomain,
-    maxAge: 365 * 24 * 60 * 60, // 1 year in seconds
+    // Matches the session lifetime in sessionController.ts. The cookie expiring
+    // is only a convenience: the session row is what actually decides, so a
+    // cookie that outlived its session would be refused rather than honoured.
+    maxAge: 30 * 24 * 60 * 60,
     httpOnly: true,
     sameSite: "lax",
     path: cookiePath,

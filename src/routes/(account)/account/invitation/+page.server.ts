@@ -1,11 +1,14 @@
 import type { PageServerLoad } from "./$types";
 import { VerifyToken } from "$lib/server/controllers/commonController.js";
+import { EndSession } from "$lib/server/controllers/sessionController.js";
 import db from "$lib/server/db/db.js";
 import { GetUserPasswordHashById } from "$lib/server/controllers/userController.js";
 
 export const load: PageServerLoad = async ({ url, cookies }) => {
-  // Clear any existing session
-  cookies.delete("kener-user", { path: "/" });
+  // Clear any existing session. Goes through EndSession so the session row is
+  // revoked too: deleting the cookie alone would leave a live session behind
+  // that somebody with a copy of it could keep using.
+  await EndSession(cookies, "invitation_accepted");
 
   const view = url.searchParams.get("view") || "";
   const token = url.searchParams.get("token") || "";

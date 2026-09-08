@@ -6,7 +6,8 @@ import {
   GetUserPasswordHashById,
   CreateFirstUser,
 } from "$lib/server/controllers/userController";
-import { VerifyPassword, GenerateToken, CookieConfig } from "$lib/server/controllers/commonController";
+import { VerifyPassword } from "$lib/server/controllers/commonController";
+import { CreateSession } from "$lib/server/controllers/sessionController";
 import { GetOidcSettings } from "$lib/server/controllers/oidcController";
 import serverResolve from "$lib/server/resolver.js";
 import GC from "$lib/global-constants";
@@ -51,6 +52,18 @@ export const load: PageServerLoad = async ({ parent, url }) => {
     oidcError,
   };
 };
+
+/**
+ * `event.getClientAddress()` throws when the adapter cannot resolve an address.
+ * A diagnostic column on a session row is never worth failing a login over.
+ */
+function safeClientAddress(event: { getClientAddress: () => string }): string | null {
+  try {
+    return event.getClientAddress();
+  } catch {
+    return null;
+  }
+}
 
 export const actions: Actions = {
   login: async (event) => {
@@ -132,8 +145,13 @@ export const actions: Actions = {
 
     auditSignIn(event, { outcome: "ok", email, userId: userDB.id, reason: "password", statusCode: 302 });
 
-    const token = await GenerateToken(userDB);
-    const cookieConfig = CookieConfig();
+    // A revocable session row, not a year-long self-certifying copy of the user
+    // record. See sessionController.ts.
+    const { token, cookieConfig } = await CreateSession({
+      userId: userDB.id,
+      ip: safeClientAddress(event),
+      userAgent: request.headers.get("user-agent"),
+    });
     cookies.set(cookieConfig.name, token, {
       path: cookieConfig.path,
       maxAge: cookieConfig.maxAge,
@@ -144,7 +162,8 @@ export const actions: Actions = {
 
     throw redirect(302, serverResolve("/manage/app/site-configurations"));
   },
-  signup: async ({ request, cookies }) => {
+  signup: async (event) => {
+    const { request, cookies } = event;
     const formData = await request.formData();
     const name = String(formData.get("name") ?? "").trim();
     const email = String(formData.get("email") ?? "").trim();
@@ -174,8 +193,13 @@ export const actions: Actions = {
       return fail(500, { error: "Failed to create user", values: { name, email } });
     }
 
-    const token = await GenerateToken(userDB);
-    const cookieConfig = CookieConfig();
+    // Same capture as the login path: the first session on a new instance is
+    // still a session somebody may later need to recognise on their device list.
+    const { token, cookieConfig } = await CreateSession({
+      userId: userDB.id,
+      ip: safeClientAddress(event),
+      userAgent: request.headers.get("user-agent"),
+    });
     cookies.set(cookieConfig.name, token, {
       path: cookieConfig.path,
       maxAge: cookieConfig.maxAge,

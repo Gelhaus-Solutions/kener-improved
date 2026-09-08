@@ -1,6 +1,7 @@
 import db from "../db/db.js";
 import type { PaginationInput } from "$lib/types/common";
 import { GenerateToken, HashPassword, ValidatePassword, VerifyToken } from "./commonController.js";
+import { ResolveSession, BumpUserEpoch, RevokeUserSessions } from "./sessionController.js";
 import type { Cookies } from "@sveltejs/kit";
 import type { UserRecordPublic, UserRecordDashboard, RoleRecord } from "../types/db.js";
 import { GetAllSiteData } from "./controller.js";
@@ -257,43 +258,65 @@ export const ManualUpdateUserData = async (forUserId: number, data: ManualUserUp
         throw new Error(`Role "${roleId}" is not active`);
       }
     }
-    return await db.updateUserRoles(forUser.id, data.role_ids);
+    const result = await db.updateUserRoles(forUser.id, data.role_ids);
+    // Their permissions just changed, so every session they hold must stop
+    // being honoured. One write, and it also catches a session created while
+    // this was running.
+    await BumpUserEpoch(forUser.id);
+    return result;
   } else if (data.updateType == "is_active") {
     if (data.is_active === undefined) throw new Error("is_active is required");
     // Owner cannot be deactivated
     if (forUser.is_owner === "YES" && data.is_active === 0) {
       throw new Error("Owner account cannot be deactivated");
     }
-    return await db.updateUserIsActive(forUser.id, data.is_active);
+    const result = await db.updateUserIsActive(forUser.id, data.is_active);
+    if (data.is_active === 0) {
+      // Deactivation has to reach sessions that already exist. `ResolveSession`
+      // also refuses an inactive user, so this is belt and braces - but it is
+      // the half that puts a reason on the row.
+      await RevokeUserSessions(forUser.id, "deactivated");
+      await BumpUserEpoch(forUser.id);
+    }
+    return result;
   } else if (data.updateType == "password") {
     if (!data.password || !data.passwordPlain) throw new Error("Password is required");
-    return await UpdatePassword({
+    const result = await UpdatePassword({
       userID: forUser.id,
       newPassword: data.password,
       newPlainPassword: data.passwordPlain,
     });
+    // An administrator setting somebody else's password ends every session that
+    // person holds, with no exception: unlike the self-service path there is no
+    // session here that is known to belong to the account's owner.
+    await RevokeUserSessions(forUser.id, "password_changed");
+    return result;
   } else {
     throw new Error(`Unsupported update type: ${data.updateType}`);
   }
 };
 
+/**
+ * The signed-in user, or null.
+ *
+ * Now a thin wrapper over `ResolveSession`: the session row decides, and this
+ * keeps the signature its three callers already use. See sessionController.ts
+ * for what the row is checked against.
+ *
+ * Two things changed underneath it. The user is fetched **by id**, not by email
+ * - the old lookup was a latent identity bug the moment OIDC could change an
+ * address, since the session would silently follow whoever held that email
+ * next. And a revoked session, an expired one, or one whose permission epoch has
+ * moved on now returns null instead of being honoured.
+ */
 export const GetLoggedInSession = async (cookies: Cookies): Promise<UserRecordPublic | null> => {
-  let tokenData = cookies.get("kener-user");
-  if (!!!tokenData) {
-    return null;
-  }
-  const tokenUser = await VerifyToken(tokenData);
-  if (!tokenUser) {
-    return null;
-  }
-  const userDB = await db.getUserByEmail(tokenUser.email);
-  if (!userDB) {
-    return null;
-  }
-  if (!userDB.is_active) {
-    return null;
-  }
-  return userDB;
+  const resolved = await ResolveSession(cookies);
+  return resolved ? resolved.user : null;
+};
+
+/** The session itself, for callers that need its id or its MFA level. */
+export const GetLoggedInSessionFull = async (cookies: Cookies) => {
+  return await ResolveSession(cookies);
 };
 
 //given a limit return total pages
@@ -562,6 +585,11 @@ export const DeleteRole = async (
     throw new Error("Readonly roles cannot be deleted");
   }
 
+  // Captured before anything moves. After `migrateUsersRole` or the cascade,
+  // there is no longer a membership list to read, and these are exactly the
+  // users whose permissions are about to change.
+  const affectedUsers = await db.getUsersByRoleId(roleId);
+
   if (options.action === "migrate") {
     const targetRoleId = options.targetRoleId?.trim();
     if (!targetRoleId) {
@@ -582,6 +610,10 @@ export const DeleteRole = async (
 
   // CASCADE on FK will clean up users_roles and roles_permissions
   await db.deleteRole(roleId);
+
+  for (const user of affectedUsers) {
+    await BumpUserEpoch(user.id);
+  }
 
   return { success: true };
 };
@@ -630,8 +662,32 @@ export const UpdateRolePermissions = async (roleId: string, permissionIds: strin
     }
   }
 
+  // Every user holding this role just had their permissions change, so each one
+  // needs their epoch moved on. Per user rather than a global flush: a role with
+  // three members must not sign out the whole instance.
+  await BumpEpochForRoleMembers(roleId);
+
   return await db.getRolePermissions(roleId);
 };
+
+/**
+ * Moves the epoch on for everybody holding a role.
+ *
+ * Used wherever a *role* changes rather than a user's membership of one. Never
+ * throws, for the same reason `BumpUserEpoch` does not: the permission change
+ * itself has already been made, and failing here would report a completed change
+ * as an error.
+ */
+async function BumpEpochForRoleMembers(roleId: string): Promise<void> {
+  try {
+    const users = await db.getUsersByRoleId(roleId);
+    for (const user of users) {
+      await BumpUserEpoch(user.id);
+    }
+  } catch (error) {
+    console.error(`session: could not bump epochs for members of role "${roleId}":`, error);
+  }
+}
 
 export const GetRoleUsers = async (roleId: string) => {
   const role = await db.getRoleById(roleId);
@@ -655,6 +711,7 @@ export const AddUserToRole = async (roleId: string, userId: number) => {
     throw new Error("User is already assigned to this role");
   }
   await db.addUserToRole(roleId, userId);
+  await BumpUserEpoch(userId);
   return { success: true };
 };
 
@@ -666,6 +723,7 @@ export const RemoveUserFromRole = async (roleId: string, userId: number) => {
     }
   }
   await db.removeUserFromRole(roleId, userId);
+  await BumpUserEpoch(userId);
   return { success: true };
 };
 

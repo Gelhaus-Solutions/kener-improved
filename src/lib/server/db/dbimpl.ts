@@ -21,6 +21,7 @@ import { MonitorAlertConfigRepository } from "./repositories/monitorAlertConfig.
 import { AuditRepository } from "./repositories/audit.js";
 import { EventsRepository } from "./repositories/events.js";
 import { WebhooksRepository } from "./repositories/webhooks.js";
+import { SessionsRepository } from "./repositories/sessions.js";
 import { SubscriptionSystemRepository } from "./repositories/subscriptionSystem.js";
 import { EmailTemplateConfigRepository } from "./repositories/emailTemplateConfig.js";
 
@@ -56,6 +57,7 @@ class DbImpl {
   private audit!: AuditRepository;
   private events!: EventsRepository;
   private webhooks!: WebhooksRepository;
+  private sessions!: SessionsRepository;
   private subscriptionSystem!: SubscriptionSystemRepository;
   private emailTemplateConfig!: EmailTemplateConfigRepository;
 
@@ -356,6 +358,19 @@ class DbImpl {
   pruneEventDeliveries!: EventsRepository["pruneDeliveries"];
 
   // Outbound webhook endpoints (E10). Attempts live in event_deliveries.
+  // ============ Sessions (A9) ============
+  createSession!: SessionsRepository["createSession"];
+  getLiveSession!: SessionsRepository["getLiveSession"];
+  getSessionsForUser!: SessionsRepository["getSessionsForUser"];
+  revokeSession!: SessionsRepository["revokeSession"];
+  revokeUserSessions!: SessionsRepository["revokeUserSessions"];
+  touchSession!: SessionsRepository["touchSession"];
+  setSessionOrg!: SessionsRepository["setSessionOrg"];
+  setSessionMfaLevel!: SessionsRepository["setSessionMfaLevel"];
+  bumpUserSessionEpoch!: SessionsRepository["bumpUserSessionEpoch"];
+  getUserSessionEpoch!: SessionsRepository["getUserSessionEpoch"];
+  pruneSessions!: SessionsRepository["pruneSessions"];
+
   createWebhookEndpoint!: WebhooksRepository["createEndpoint"];
   updateWebhookEndpoint!: WebhooksRepository["updateEndpoint"];
   deleteWebhookEndpoint!: WebhooksRepository["deleteEndpoint"];
@@ -470,6 +485,7 @@ class DbImpl {
     this.audit = new AuditRepository(this.knex);
     this.events = new EventsRepository(this.knex);
     this.webhooks = new WebhooksRepository(this.knex);
+    this.sessions = new SessionsRepository(this.knex);
     this.subscriptionSystem = new SubscriptionSystemRepository(this.knex);
     this.emailTemplateConfig = new EmailTemplateConfigRepository(this.knex);
 
@@ -488,6 +504,7 @@ class DbImpl {
     this.bindEmailTemplateConfigMethods();
     this.bindEventsMethods();
     this.bindWebhooksMethods();
+    this.bindSessionsMethods();
 
     this.init();
   }
@@ -1049,6 +1066,20 @@ class DbImpl {
     this.getShadowDiffEventIds = this.events.getShadowDiffEventIds.bind(this.events);
     this.getShadowDiffEventCount = this.events.getShadowDiffEventCount.bind(this.events);
     this.pruneEventDeliveries = this.events.pruneDeliveries.bind(this.events);
+  }
+
+  private bindSessionsMethods(): void {
+    this.createSession = this.sessions.createSession.bind(this.sessions);
+    this.getLiveSession = this.sessions.getLiveSession.bind(this.sessions);
+    this.getSessionsForUser = this.sessions.getSessionsForUser.bind(this.sessions);
+    this.revokeSession = this.sessions.revokeSession.bind(this.sessions);
+    this.revokeUserSessions = this.sessions.revokeUserSessions.bind(this.sessions);
+    this.touchSession = this.sessions.touchSession.bind(this.sessions);
+    this.setSessionOrg = this.sessions.setSessionOrg.bind(this.sessions);
+    this.setSessionMfaLevel = this.sessions.setSessionMfaLevel.bind(this.sessions);
+    this.bumpUserSessionEpoch = this.sessions.bumpUserSessionEpoch.bind(this.sessions);
+    this.getUserSessionEpoch = this.sessions.getUserSessionEpoch.bind(this.sessions);
+    this.pruneSessions = this.sessions.pruneSessions.bind(this.sessions);
   }
 
   private bindWebhooksMethods(): void {

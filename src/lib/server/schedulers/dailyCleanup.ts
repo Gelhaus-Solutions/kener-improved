@@ -70,6 +70,30 @@ const pruneAuditLog = async (): Promise<number> => {
   }
 };
 
+/**
+ * How long an expired session row is kept after it stops working.
+ *
+ * Not zero, and the delay is the point: "when did that session end, and was it
+ * revoked or did it just lapse" is a question asked after an incident, and a row
+ * deleted the moment it expired cannot answer it. It stops being usable at
+ * `expires_at` regardless; this only governs when the record is discarded.
+ */
+const SESSION_GRACE_DAYS = 30;
+
+const pruneSessions = async (): Promise<number> => {
+  try {
+    const cutoff = GetNowTimestampUTC() - SESSION_GRACE_DAYS * 86400;
+    const removed = await db.pruneSessions(cutoff);
+    if (removed > 0) console.log(`Pruned ${removed} session row(s) that expired over ${SESSION_GRACE_DAYS} days ago`);
+    return removed;
+  } catch (error) {
+    // Same reasoning as the audit prune: never fail the monitoring-data cleanup
+    // over a housekeeping task riding along with it.
+    console.error("Session pruning failed:", error);
+    return 0;
+  }
+};
+
 const runDailyCleanup = async (): Promise<DailyCleanupResult> => {
   const policy = await getRetentionPolicy();
   const retentionDays = Math.max(1, Math.floor(policy.retentionDays || defaultPolicy.retentionDays));
@@ -98,8 +122,9 @@ const addWorker = () => {
     console.log("Running daily monitoring_data cleanup...");
     const result = await runDailyCleanup();
     const prunedAuditRows = await pruneAuditLog();
+    const prunedSessions = await pruneSessions();
 
-    return { ...result, prunedAuditRows };
+    return { ...result, prunedAuditRows, prunedSessions };
   });
 
   worker.on("failed", (_job: Job | undefined, err: Error) => {

@@ -1066,6 +1066,39 @@ export interface AuditLogFilter {
   end?: number;
 }
 
+// ---------------------------------------------------------------- sessions
+
+/** How strongly the user authenticated. Written by A2; `none` until then. */
+export type SessionMfaLevel = "none" | "totp" | "recovery" | "idp";
+
+export interface SessionInsert {
+  id: string;
+  user_id: number;
+  active_org_id?: number | null;
+  issued_at: number;
+  last_seen_at: number;
+  expires_at: number;
+  epoch: number;
+  mfa_level?: string;
+  ip?: string | null;
+  user_agent?: string | null;
+}
+
+export interface SessionRecord {
+  id: string;
+  user_id: number;
+  active_org_id: number | null;
+  issued_at: number;
+  last_seen_at: number;
+  expires_at: number;
+  revoked_at: number | null;
+  revoked_reason: string | null;
+  epoch: number;
+  mfa_level: string;
+  ip: string | null;
+  user_agent: string | null;
+}
+
 // ---------------------------------------------------------------- webhooks
 
 export type WebhookEndpointStatus = "ACTIVE" | "DISABLED" | "DISABLED_AUTO";

@@ -91,6 +91,7 @@
   let manualUpdateError = $state("");
   let manualSuccess = $state("");
   let sendingSelfVerification = $state(false);
+  let revokingSessions = $state(false);
 
   const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -260,6 +261,40 @@
   }
 
   // Manual update user data
+  /**
+   * Signs a user out of every device.
+   *
+   * The action for a lost laptop or a suspected compromise. Before real sessions
+   * existed there was no way to do this at all: a token was valid for a year and
+   * nothing could revoke it.
+   */
+  async function revokeUserSessions() {
+    if (!toEditUser) return;
+    revokingSessions = true;
+    manualUpdateError = "";
+    manualSuccess = "";
+    try {
+      const response = await fetch(clientResolver(resolve, "/manage/api"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "revokeUserSessions", data: { user_id: toEditUser.id } })
+      });
+      const result = await response.json();
+      if (result.error) {
+        manualUpdateError = result.error;
+      } else {
+        manualSuccess =
+          result.revoked > 0
+            ? `Signed out of ${result.revoked} session${result.revoked === 1 ? "" : "s"}.`
+            : "That user had no active sessions.";
+      }
+    } catch {
+      manualUpdateError = "Error while signing the user out";
+    } finally {
+      revokingSessions = false;
+    }
+  }
+
   async function manualUpdateData(updateType: string) {
     if (!toEditUser) return;
 
@@ -665,6 +700,24 @@
               </Button>
             </Card.Content>
           </Card.Root>
+
+          <!-- Sign out everywhere -->
+          {#if hasPermission("sessions.admin")}
+            <Card.Root>
+              <Card.Content class="p-4">
+                <p class="mb-3 text-sm">
+                  Sign this user out of every device. Use it when a device is lost or the account may be compromised.
+                  They keep their access and can sign in again.
+                </p>
+                <Button variant="secondary" disabled={revokingSessions} onclick={() => revokeUserSessions()}>
+                  {#if revokingSessions}
+                    <Spinner class="size-4" />
+                  {/if}
+                  Sign Out Everywhere
+                </Button>
+              </Card.Content>
+            </Card.Root>
+          {/if}
 
           <!-- Activate/Deactivate User -->
           {#if toEditUser.is_active}
