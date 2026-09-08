@@ -1,15 +1,23 @@
 import seedPagesData from "../src/lib/server/db/seedPagesData.ts";
+import { DEFAULT_ORG_ID } from "../src/lib/server/db/provisionOrg.ts";
 import type { Knex } from "knex";
 
+/**
+ * Starter pages for the default org.
+ *
+ * Scoped by org rather than asking whether the whole table is empty. Not yet
+ * extracted into `provisionOrg`: `pages.page_path` is still globally unique, so
+ * a second org cannot have a home page (path `""`) until I3b swaps that key.
+ */
 export async function seed(knex: Knex): Promise<void> {
-  // Check if the pages table is empty
-  const pageCount = await knex("pages").count("id as CNT").first();
+  const pageCount = await knex("pages").where({ org_id: DEFAULT_ORG_ID }).count("id as CNT").first();
 
   if (pageCount && pageCount.CNT == 0) {
     // Insert seed pages
     for (const page of seedPagesData) {
       const [insertedPage] = await knex("pages")
         .insert({
+          org_id: DEFAULT_ORG_ID,
           page_path: page.page_path,
           page_title: page.page_title,
           page_header: page.page_header,
@@ -23,10 +31,11 @@ export async function seed(knex: Knex): Promise<void> {
 
       // For the home page, add the default monitor (earth) if it exists
       if (page.page_path === "") {
-        const earthMonitor = await knex("monitors").where({ tag: "earth" }).first();
+        const earthMonitor = await knex("monitors").where({ tag: "earth", org_id: DEFAULT_ORG_ID }).first();
         if (earthMonitor) {
           const pageId = typeof insertedPage === "object" ? insertedPage.id : insertedPage;
           await knex("pages_monitors").insert({
+            org_id: DEFAULT_ORG_ID,
             page_id: pageId,
             monitor_tag: "earth",
             monitor_settings_json: "",
@@ -36,10 +45,11 @@ export async function seed(knex: Knex): Promise<void> {
           });
         }
 
-        const kenerMonitor = await knex("monitors").where({ tag: "kener" }).first();
+        const kenerMonitor = await knex("monitors").where({ tag: "kener", org_id: DEFAULT_ORG_ID }).first();
         if (kenerMonitor) {
           const pageId = typeof insertedPage === "object" ? insertedPage.id : insertedPage;
           await knex("pages_monitors").insert({
+            org_id: DEFAULT_ORG_ID,
             page_id: pageId,
             monitor_tag: "kener",
             monitor_settings_json: "",

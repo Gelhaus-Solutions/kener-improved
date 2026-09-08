@@ -244,7 +244,13 @@ export const ManualUpdateUserData = async (forUserId: number, data: ManualUserUp
   }
   if (data.updateType == "role") {
     if (!data.role_ids || data.role_ids.length === 0) throw new Error("At least one role is required");
-    // Owner must always retain the admin role
+    // Owner must always retain the admin role.
+    //
+    // `users.is_owner` is the *instance* superadmin from P4 onwards, and
+    // `org_members.is_org_owner` is the per-org owner. While there is exactly
+    // one org the two coincide and this guard is correct as written. It becomes
+    // org-aware in I3d, which is what establishes the org context this would
+    // need to know *which* org's admin role to insist on.
     if (forUser.is_owner === "YES" && !data.role_ids.includes("admin")) {
       throw new Error("Owner must retain the admin role");
     }
@@ -485,7 +491,17 @@ export const SendVerificationEmail = async (toUserId: number, currentUserId: num
   );
 };
 
-const RESTRICTED_ROLE_IDS = ["admin", "editor", "member"];
+/**
+ * The built-in role names an operator may not claim.
+ *
+ * **Keys, not ids.** They are the same string for the default org, whose roles
+ * keep their bare ids, and they diverge for every org after it: a second org's
+ * administrator role has id `o2_admin` and `role_key` `admin`. Checking the id
+ * would let somebody in that org create a role literally called `admin`,
+ * colliding with the seeded one in everything a human reads while being a
+ * different row. Checking the key is what the guard always meant.
+ */
+const RESTRICTED_ROLE_KEYS = ["admin", "editor", "member"];
 const ROLE_ID_REGEX = /^[a-z0-9_-]+$/;
 
 const normalizeRoleId = (id: string): string => {
@@ -506,7 +522,7 @@ export const CreateRole = async (data: { role_id: string; name: string }): Promi
     throw new Error("Role name is required");
   }
 
-  if (RESTRICTED_ROLE_IDS.includes(roleId)) {
+  if (RESTRICTED_ROLE_KEYS.includes(roleId)) {
     throw new Error(`Role ID "${roleId}" is restricted and cannot be used`);
   }
 

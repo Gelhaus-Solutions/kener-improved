@@ -1,31 +1,14 @@
-import monitorSeed from "../src/lib/server/db/seedMonitorData.ts";
+import { provisionOrgMonitors, DEFAULT_ORG_ID } from "../src/lib/server/db/provisionOrg.ts";
 import type { Knex } from "knex";
 
+/**
+ * Starter monitors for the default org.
+ *
+ * The emptiness check moved into `provisionOrgMonitors` and is scoped by org.
+ * It used to ask whether the whole `monitors` table was empty, which stops being
+ * the right question the moment a second org exists: that org would find the
+ * table full and be provisioned with nothing.
+ */
 export async function seed(knex: Knex): Promise<void> {
-  // Check if the table is empty
-  const count = await knex("monitors").count("id as CNT").first();
-  if (count && count.CNT == 0) {
-    // Deletes ALL existing entries
-    for (const monitor of monitorSeed) {
-      await knex("monitors").insert({
-        tag: monitor.tag,
-        name: monitor.name,
-        description: monitor.description,
-        image: monitor.image,
-        cron: monitor.cron,
-        default_status: monitor.default_status,
-        status: monitor.status,
-        category_name: monitor.category_name,
-        monitor_type: monitor.monitor_type,
-        type_data: monitor.type_data,
-        day_degraded_minimum_count: monitor.day_degraded_minimum_count,
-        day_down_minimum_count: monitor.day_down_minimum_count,
-        include_degraded_in_downtime: monitor.include_degraded_in_downtime,
-        is_hidden: monitor.is_hidden || "NO",
-        monitor_settings_json: monitor.monitor_settings_json || null,
-        created_at: knex.fn.now(),
-        updated_at: knex.fn.now(),
-      });
-    }
-  }
+  await provisionOrgMonitors(knex, DEFAULT_ORG_ID);
 }

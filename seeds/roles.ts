@@ -1,6 +1,7 @@
 import type { Knex } from "knex";
 import { permissions } from "../src/lib/allPerms.ts";
 import { orgPermissions, orgPermissionIds } from "../src/lib/orgPerms.ts";
+import { provisionOrgRoles, roleIdFor, DEFAULT_ORG_ID } from "../src/lib/server/db/provisionOrg.ts";
 
 /**
  * Seeds the three readonly roles (admin, editor, member),
@@ -37,47 +38,24 @@ const rolePermissions: Record<string, string[]> = {
 };
 
 export async function seed(knex: Knex): Promise<void> {
-  // 1. Ensure readonly roles exist
-  for (const role of readonlyRoles) {
-    const existing = await knex("roles").where("id", role.id).first();
-    if (!existing) {
-      await knex("roles").insert({
-        id: role.id,
-        role_name: role.role_name,
-        readonly: 1,
-        status: "ACTIVE",
-        created_at: knex.fn.now(),
-        updated_at: knex.fn.now(),
-      });
-    }
-  }
+  // 1. The default org's roles and grants. Shared with org creation (I3f) so a
+  //    new org is provisioned by the same code a fresh install runs, rather than
+  //    a second copy of it that drifts.
+  await provisionOrgRoles(knex, DEFAULT_ORG_ID);
 
-  // 2. Seed roles_permissions for readonly roles
-  //    Only insert permissions that actually exist in the permissions table
-  //    to avoid FK constraint errors if permissions seed hasn't run yet.
+  // 2. Reconcile removals for the default org. Granting is `provisionOrgRoles`'
+  //    job; this is the half that takes a permission away again when the seed
+  //    mapping drops it.
   const existingPermRows: Array<{ id: string }> = await knex("permissions").select("id");
   const existingPermIds = new Set(existingPermRows.map((p) => p.id));
 
-  for (const [roleId, permissionIds] of Object.entries(rolePermissions)) {
+  for (const [roleKey, permissionIds] of Object.entries(rolePermissions)) {
+    const roleId = roleIdFor(DEFAULT_ORG_ID, roleKey);
     const validPermissionIds = permissionIds.filter((id) => existingPermIds.has(id));
 
     const existingPerms: Array<{ permissions_id: string }> = await knex("roles_permissions")
       .where("roles_id", roleId)
       .select("permissions_id");
-    const existingSet = new Set(existingPerms.map((e) => e.permissions_id));
-
-    // Insert missing permissions
-    for (const permId of validPermissionIds) {
-      if (!existingSet.has(permId)) {
-        await knex("roles_permissions").insert({
-          roles_id: roleId,
-          permissions_id: permId,
-          status: "ACTIVE",
-          created_at: knex.fn.now(),
-          updated_at: knex.fn.now(),
-        });
-      }
-    }
 
     // Remove permissions no longer assigned to this role.
     //

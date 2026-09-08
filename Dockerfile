@@ -170,6 +170,7 @@ COPY --chown=node:node --from=builder /app/src/lib/allPerms.ts                  
 # an allowlist, so a new fork file imported by a seed has to be added here too;
 # `dockerfile-seed-imports.test.ts` fails the build when one is not.
 COPY --chown=node:node --from=builder /app/src/lib/orgPerms.ts                   ./src/lib/orgPerms.ts
+COPY --chown=node:node --from=builder /app/src/lib/server/db/provisionOrg.ts     ./src/lib/server/db/provisionOrg.ts
 COPY --chown=node:node --from=builder /app/src/lib/server/templates/general       ./src/lib/server/templates/general
 
 # Locale JSON files (read at runtime by server-side i18n)
