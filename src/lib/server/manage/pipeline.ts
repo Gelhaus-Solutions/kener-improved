@@ -1,7 +1,6 @@
 import { json } from "@sveltejs/kit";
 import type { RequestEvent } from "@sveltejs/kit";
 import { getActionDefinition } from "./registry.js";
-import { runLegacy } from "./legacy.js";
 import { ActionError } from "./types.js";
 import type { ActionContext } from "./types.js";
 import { authenticate } from "./middleware/authenticate.js";
@@ -25,10 +24,8 @@ import { auditBefore, auditAfter } from "./middleware/audit.js";
  * runs unscoped; rate limiting sits after auth so tenants get separate buckets,
  * and before validation so floods stay cheap.
  *
- * Unmigrated actions fall through to `runLegacy`, which is the inherited
- * if/else chain verbatim. That fallback is what makes migrating incrementally
- * safe: an action nobody has moved yet still runs, with the same auth and the
- * same response, so a batch can ship without being complete.
+ * Every action is a file under `actions/<domain>/`. The transitional
+ * `legacy.ts` fallback is gone: the registry is the only dispatch path.
  */
 export async function runAction(event: RequestEvent): Promise<Response> {
   let payload: { action?: unknown; data?: unknown };
@@ -74,11 +71,12 @@ export async function runAction(event: RequestEvent): Promise<Response> {
 
     await rateLimit(action, def, ctx);
 
-    // Unmigrated: hand over to the inherited chain, which has already had auth
-    // and authorization applied above exactly as it applied them itself.
+    // isKnownAction guarantees a definition exists past this point: the
+    // permission map and the registry now cover exactly the same action set,
+    // which the boot-time check in registry.ts and the sync-time diff both
+    // depend on.
     if (!def) {
-      const result = await runLegacy(action, data, ctx);
-      return result instanceof Response ? result : json(result, { status: 200 });
+      return json({ error: "Unknown action" }, { status: 400 });
     }
 
     const validated = def.schema ? def.schema(data) : data;

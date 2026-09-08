@@ -45,6 +45,17 @@ export interface ActionDefinition<T = Record<string, unknown>> {
   action: string;
 
   /**
+   * Additional action strings this same definition answers to.
+   *
+   * Exists because the inherited chain had a branch matching two strings
+   * (`getMonitorAlertConfig` and `getMonitorAlertConfigById`). Splitting that
+   * into two files would duplicate the handler; dropping one would silently
+   * break a caller. Use this only for genuine aliases of one behaviour, never
+   * to group two actions that merely look similar.
+   */
+  aliases?: string[];
+
+  /**
    * Permission id required to run this.
    *
    * **Omit it.** The pipeline then looks the action up in ACTION_PERMISSION_MAP,
@@ -90,6 +101,23 @@ export interface ActionDefinition<T = Record<string, unknown>> {
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type AnyActionDefinition = ActionDefinition<any>;
+
+/**
+ * Payload type for actions transcribed from the inherited chain.
+ *
+ * It is `any`, deliberately and temporarily. The chain read `data` as `any` and
+ * passed it straight into controllers whose inputs have required fields, so
+ * anything narrower (even `Record<string, unknown>`) would force edits at the
+ * call sites and turn a transcription into a redesign, which is exactly the risk
+ * this migration is trying not to take.
+ *
+ * The name is the point: it marks every handler that has not been given a real
+ * payload type yet. Replacing one with an interface plus a `schema` is a
+ * self-contained improvement, and is worth doing first for anything that takes
+ * an id, a secret, or a permission-relevant field.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type LegacyPayload = any;
 
 /**
  * An error carrying the HTTP status the client should see.

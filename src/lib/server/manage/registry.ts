@@ -32,12 +32,12 @@ for (const path in modules) {
     throw new Error(`manage registry: ${path} declares action "${def.action}" but the file is named "${expected}.ts"`);
   }
 
-  const existing = registry.get(def.action);
-  if (existing) {
-    throw new Error(`manage registry: action "${def.action}" is registered twice (second one at ${path})`);
+  for (const key of [def.action, ...(def.aliases ?? [])]) {
+    if (registry.has(key)) {
+      throw new Error(`manage registry: action "${key}" is registered twice (second one at ${path})`);
+    }
+    registry.set(key, def);
   }
-
-  registry.set(def.action, def);
 }
 
 /** The definition for `action`, or undefined when it has not been migrated yet. */
