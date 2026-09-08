@@ -257,8 +257,12 @@ already used - is resolved by hand.
 
 ### Docker images
 
-Published to GHCR only, `linux/amd64` and `linux/arm64`, Debian base
-(`node:24-slim`). The `-w-docs` variants bundle the documentation site.
+Published to GHCR only, `linux/amd64` only, Debian base (`node:24-slim`). The
+`-w-docs` variants bundle the documentation site.
+
+There is no `arm64` image. Building one on a GitHub-hosted runner means QEMU
+emulation, which is slow enough to dominate the release; add an `arm64` runner
+to the matrix if the platform is wanted back, rather than re-enabling emulation.
 
 | Tag                         | Built by                                    |
 | --------------------------- | ------------------------------------------- |

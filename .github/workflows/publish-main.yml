@@ -38,9 +38,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3.3.0
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3.8.0
 
@@ -86,6 +83,6 @@ jobs:
           build-args: |
             VARIANT=debian
             WITH_DOCS=${{ matrix.docs }}
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           cache-from: type=gha,scope=main-docs-${{ matrix.docs }}
           cache-to: type=gha,mode=max,scope=main-docs-${{ matrix.docs }}
