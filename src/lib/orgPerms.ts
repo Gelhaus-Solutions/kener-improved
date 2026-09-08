@@ -74,6 +74,24 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   retryEventDelivery: "webhooks.write",
   retryDeliveriesForTarget: "webhooks.write",
 
+  // Organisations (I3f). Reading the org and its domains is `orgs.read`;
+  // anything that changes how it is reached, or who may act in it, is a write.
+  //
+  // `switchOrg` is deliberately `null`: membership is the check, and it is made
+  // against `org_members` rather than against a role. A permission would have to
+  // be granted per org, so gating on one would let a user be a member of an org
+  // they could not switch into.
+  switchOrg: null,
+  getOrganisation: "orgs.read",
+  updateOrganisation: "orgs.write",
+  createOrganisation: "orgs.write",
+  addOrgDomain: "orgs.write",
+  removeOrgDomain: "orgs.write",
+  getOrgMembers: "orgs.members.read",
+  addOrgMember: "orgs.members.write",
+  setOrgMemberOwner: "orgs.members.write",
+  removeOrgMember: "orgs.members.write",
+
   // Event bus consumers (H8c). The diff is a read of what would have been sent;
   // the mode is the switch that decides whether anything is sent at all.
   getEventConsumers: "eventbus.read",
@@ -135,6 +153,10 @@ export const ORG_ROUTE_PERMISSION_MAP: Record<string, string | null> = {
   "/(manage)/manage/app/site-configurations/captcha-providers": "settings.read",
   "/(manage)/manage/app/share/badges": "settings.read",
   "/(manage)/manage/app/share/embed": "settings.read",
+
+  // Organisations (I3f). `orgs.read` opens the screen; the member list and every
+  // button on it are separately gated by their own actions.
+  "/(manage)/manage/app/organisations": "orgs.read",
 };
 
 /** Permission ids the fork owns. Used by the seeds to tell them from upstream's. */

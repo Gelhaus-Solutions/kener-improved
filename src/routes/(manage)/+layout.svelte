@@ -28,6 +28,7 @@
   import TemplateIcon from "@lucide/svelte/icons/layout-template";
   import clientResolver from "$lib/client/resolver.js";
   import DatabaseIcon from "@lucide/svelte/icons/database";
+  import Building2Icon from "@lucide/svelte/icons/building-2";
 
   import { Toaster } from "$lib/components/ui/sonner/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
@@ -94,6 +95,7 @@
         { title: "Roles", url: "/manage/app/roles", icon: ShieldIcon },
         { title: "OpenID Connect", url: "/manage/app/oidc", icon: FingerprintIcon },
         { title: "API Keys", url: "/manage/app/api-keys", icon: KeyIcon },
+        { title: "Organisations", url: "/manage/app/organisations", icon: Building2Icon },
         { title: "Audit Log", url: "/manage/app/audit", icon: ScrollTextIcon }
       ]
     },
@@ -145,6 +147,16 @@
 
   const navItems = navGroups.flatMap((group) => group.items);
 
+  // Every screen the org switcher could land on, **unfiltered**: which of them
+  // are reachable depends on the org being switched *to*, and the permissions for
+  // that org only exist once the switch has happened. See org-switcher.svelte.
+  const navTargets = allNavGroups.flatMap((group) =>
+    group.items.map((item) => ({
+      section: (item as { match?: string }).match ?? item.url,
+      urls: (item as { tabs?: string[] }).tabs ?? [item.url]
+    }))
+  );
+
   // Derive page title from current URL. Longest match wins, so a section's own
   // entry does not claim the title of a screen nested under it.
   //
@@ -192,7 +204,7 @@
 </svelte:head>
 <main class="kener-manage">
   <Sidebar.Provider style="--sidebar-width: calc(var(--spacing) * 72); --header-height: calc(var(--spacing) * 12);">
-    <AppSidebar variant="inset" {navGroups} />
+    <AppSidebar variant="inset" {navGroups} {navTargets} />
     <Sidebar.Inset>
       <SiteHeader title={pageTitle} />
       <div class="p-4">

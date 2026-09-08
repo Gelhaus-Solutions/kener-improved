@@ -2,6 +2,7 @@
   import InnerShadowTopIcon from "@lucide/svelte/icons/user";
   import NavMain from "./nav-main.svelte";
   import NavUser from "./nav-user.svelte";
+  import OrgSwitcher from "./org-switcher.svelte";
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
   import version from "$lib/version";
   import type { Component, ComponentProps } from "svelte";
@@ -9,8 +10,13 @@
   import clientResolver from "$lib/client/resolver.js";
   type NavItem = { title: string; url: string; match: string; icon: Component };
   type NavGroup = { title: string; items: NavItem[] };
+  type NavTarget = { section: string; urls: string[] };
 
-  let { navGroups, ...restProps }: { navGroups: NavGroup[] } & ComponentProps<typeof Sidebar.Root> = $props();
+  let {
+    navGroups,
+    navTargets,
+    ...restProps
+  }: { navGroups: NavGroup[]; navTargets: NavTarget[] } & ComponentProps<typeof Sidebar.Root> = $props();
   const appVersion = version();
 </script>
 
@@ -33,6 +39,9 @@
         </Sidebar.MenuButton>
       </Sidebar.MenuItem>
     </Sidebar.Menu>
+    <!-- I3f: renders nothing at all on a single-org install, which is what keeps
+         this change invisible to the many installs that will only ever have one. -->
+    <OrgSwitcher targets={navTargets} />
   </Sidebar.Header>
   <Sidebar.Content>
     <NavMain groups={navGroups} />

@@ -32,6 +32,16 @@ export interface ActionContext {
   ip: string | null;
   /** Inbound user agent, for audit rows. */
   userAgent: string | null;
+  /**
+   * The organisation this request acts in (I3f).
+   *
+   * Written by `requireOrg`, which is the middleware that validates it, so a
+   * handler reading this is reading a membership-checked answer rather than
+   * whatever the session claimed. It is the same number the ambient org context
+   * carries; it lives here as well so that a handler acting *on* an org - rather
+   * than merely querying inside one - says which org it means explicitly.
+   */
+  orgId: number;
 }
 
 /** The shape every action handler has. Returning a Response bypasses serialisation. */

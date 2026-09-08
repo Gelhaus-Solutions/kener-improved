@@ -407,6 +407,18 @@ class DbImpl {
   getOrgsForUser!: OrgsRepository["getOrgsForUser"];
   getOrgMembership!: OrgsRepository["getOrgMembership"];
   isOrgMember!: OrgsRepository["isOrgMember"];
+  createOrg!: OrgsRepository["createOrg"];
+  provisionNewOrg!: OrgsRepository["provisionNewOrg"];
+  updateOrg!: OrgsRepository["updateOrg"];
+  getOrgDomainsForOrg!: OrgsRepository["getOrgDomainsForOrg"];
+  addOrgDomain!: OrgsRepository["addOrgDomain"];
+  deleteOrgDomain!: OrgsRepository["deleteOrgDomain"];
+  getOrgDomainByHostname!: OrgsRepository["getOrgDomainByHostname"];
+  addOrgMember!: OrgsRepository["addOrgMember"];
+  setOrgMemberOwner!: OrgsRepository["setOrgMemberOwner"];
+  removeOrgMember!: OrgsRepository["removeOrgMember"];
+  countOrgOwners!: OrgsRepository["countOrgOwners"];
+  getOrgMembersDetailed!: OrgsRepository["getOrgMembersDetailed"];
 
   getWebhookEndpoints!: WebhooksRepository["getEndpoints"];
   getWebhookEndpointsCount!: WebhooksRepository["getEndpointsCount"];
@@ -1151,6 +1163,18 @@ class DbImpl {
     this.getOrgsForUser = this.orgs.getOrgsForUser.bind(this.orgs);
     this.getOrgMembership = this.orgs.getOrgMembership.bind(this.orgs);
     this.isOrgMember = this.orgs.isOrgMember.bind(this.orgs);
+    this.createOrg = this.orgs.createOrg.bind(this.orgs);
+    this.provisionNewOrg = this.orgs.provisionNewOrg.bind(this.orgs);
+    this.updateOrg = this.orgs.updateOrg.bind(this.orgs);
+    this.getOrgDomainsForOrg = this.orgs.getOrgDomainsForOrg.bind(this.orgs);
+    this.addOrgDomain = this.orgs.addOrgDomain.bind(this.orgs);
+    this.deleteOrgDomain = this.orgs.deleteOrgDomain.bind(this.orgs);
+    this.getOrgDomainByHostname = this.orgs.getOrgDomainByHostname.bind(this.orgs);
+    this.addOrgMember = this.orgs.addOrgMember.bind(this.orgs);
+    this.setOrgMemberOwner = this.orgs.setOrgMemberOwner.bind(this.orgs);
+    this.removeOrgMember = this.orgs.removeOrgMember.bind(this.orgs);
+    this.countOrgOwners = this.orgs.countOrgOwners.bind(this.orgs);
+    this.getOrgMembersDetailed = this.orgs.getOrgMembersDetailed.bind(this.orgs);
     this.getWebhookEndpoints = this.webhooks.getEndpoints.bind(this.webhooks);
     this.getWebhookEndpointsCount = this.webhooks.getEndpointsCount.bind(this.webhooks);
     this.setWebhookEndpointEvents = this.webhooks.setEndpointEvents.bind(this.webhooks);

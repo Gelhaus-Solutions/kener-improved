@@ -74,6 +74,11 @@ export async function runAction(event: RequestEvent): Promise<Response> {
       cookies: event.cookies,
       ip: safeClientAddress(event),
       userAgent: event.request.headers.get("user-agent"),
+      // Overwritten by `requireOrg` below, which is what makes it trustworthy.
+      // It is seeded here only because the context has to exist before the check
+      // that establishes the org - the catch at the bottom needs a context to
+      // attribute a failure to, including a failure of that very check.
+      orgId: DEFAULT_ORG_ID,
     };
 
     // Before requireOrg and before authorize: a user who owes the instance a
@@ -86,6 +91,7 @@ export async function runAction(event: RequestEvent): Promise<Response> {
     // repository call below - the audit snapshot included - is scoped without
     // anything else having to know about tenancy.
     const orgId = await requireOrg(ctx);
+    ctx.orgId = orgId;
 
     // Deliberately after authenticate, not before it. The inherited chain
     // resolved the session first and only then consulted the permission map, so

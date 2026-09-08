@@ -12,6 +12,8 @@ import { resolve } from "$app/paths";
 import { GetAllSiteData, IsSetupComplete, GetLocaleFromCookie } from "$lib/server/controllers/controller.js";
 import { GetUserPermissions, GetLoggedInSessionFull } from "$lib/server/controllers/userController.js";
 import { RequiresMfaEnrolment } from "$lib/server/controllers/mfaController.js";
+import { CanCreateOrg, GetMyOrgs } from "$lib/server/controllers/orgController.js";
+import { DEFAULT_ORG_ID } from "$lib/server/db/orgContext.js";
 
 export const load: LayoutServerLoad = async ({ cookies, route }) => {
   let isSetupComplete = await IsSetupComplete();
@@ -57,6 +59,23 @@ export const load: LayoutServerLoad = async ({ cookies, route }) => {
     }
   }
 
+  // I3f: what the org switcher in the sidebar header renders.
+  //
+  // Loaded here rather than fetched by the component, because the switcher is
+  // part of the chrome on every admin screen and a round trip per navigation to
+  // draw a header is not worth saving two queries.
+  //
+  // `sessionOrgHandle` has already established this org for the whole request
+  // and checked the membership behind it, so the id below is the org everything
+  // above was read in, not merely what the session claims.
+  const activeOrgId = resolvedSession?.session.active_org_id ?? DEFAULT_ORG_ID;
+  const orgs = await GetMyOrgs(loggedInUser.id);
+  // Acting in the default org already means the permissions resolved above are
+  // the default org's, so the question is answered without asking again. See
+  // CanCreateOrg for why creating an org asks about that org specifically.
+  const canCreateOrg =
+    activeOrgId === DEFAULT_ORG_ID ? userPermissions.has("orgs.write") : await CanCreateOrg(loggedInUser.id);
+
   const siteStatusColors = siteData.colors;
   const siteStatusColorsDark = siteData.colorsDark || siteStatusColors;
   const font = siteData.font || { cssSrc: "", family: "" };
@@ -70,5 +89,8 @@ export const load: LayoutServerLoad = async ({ cookies, route }) => {
     defaultSiteTheme,
     canSendEmail: IsEmailSetup(),
     seedSiteData,
+    orgs,
+    activeOrgId,
+    canCreateOrg,
   };
 };
