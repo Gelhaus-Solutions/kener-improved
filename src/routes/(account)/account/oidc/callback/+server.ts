@@ -8,8 +8,10 @@ import {
   OidcLoginError,
 } from "$lib/server/controllers/oidcController";
 import serverResolve from "$lib/server/resolver.js";
+import { auditOidcCallback } from "$lib/server/audit/events";
 
-export const GET: RequestHandler = async ({ url, cookies }) => {
+export const GET: RequestHandler = async (event) => {
+  const { url, cookies } = event;
   const settings = await GetOidcSettings();
   if (!settings) {
     throw error(404, "OpenID Connect is not configured or not enabled");
@@ -22,6 +24,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
   if (errorParam) {
     const errorDesc = url.searchParams.get("error_description") || errorParam;
     console.error(`OIDC provider error: ${errorParam} - ${errorDesc}`);
+    auditOidcCallback(event, { outcome: "denied", reason: "provider_error" });
     throw redirect(302, serverResolve("/account/signin?oidc_error=provider_error"));
   }
 
@@ -44,12 +47,21 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
     const user = await FindOrCreateOidcUser(settings, oidcData);
 
     if (!user.is_active) {
+      auditOidcCallback(event, {
+        outcome: "denied",
+        userId: user.id,
+        email: user.email,
+        reason: "account_deactivated",
+      });
       throw redirect(302, serverResolve("/account/signin?oidc_error=account_deactivated"));
     }
 
     if (!user.role_ids || user.role_ids.length === 0) {
+      auditOidcCallback(event, { outcome: "denied", userId: user.id, email: user.email, reason: "no_roles" });
       throw redirect(302, serverResolve("/account/signin?oidc_error=no_roles"));
     }
+
+    auditOidcCallback(event, { outcome: "ok", userId: user.id, email: user.email, reason: "oidc" });
 
     const { token, cookieConfig } = await GenerateOidcSession(user);
 
@@ -71,7 +83,10 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
     }
 
     console.error("OIDC callback error:", e);
+    // The OidcLoginError code is the useful part: it distinguishes a
+    // misconfigured provider from a user who is simply not provisioned.
     const code = e instanceof OidcLoginError ? e.code : "auth_failed";
+    auditOidcCallback(event, { outcome: "error", reason: code });
     throw redirect(302, serverResolve(`/account/signin?oidc_error=${code}`));
   }
 };

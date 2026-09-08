@@ -10,6 +10,7 @@ import { VerifyPassword, GenerateToken, CookieConfig } from "$lib/server/control
 import { GetOidcSettings } from "$lib/server/controllers/oidcController";
 import serverResolve from "$lib/server/resolver.js";
 import GC from "$lib/global-constants";
+import { auditSignIn } from "$lib/server/audit/events";
 
 // oidc_error carries a code, never free text; anything unknown gets the generic message.
 const OIDC_ERROR_MESSAGES: Record<string, string> = {
@@ -52,20 +53,29 @@ export const load: PageServerLoad = async ({ parent, url }) => {
 };
 
 export const actions: Actions = {
-  login: async ({ request, cookies }) => {
+  login: async (event) => {
+    const { request, cookies } = event;
     const oidcSettings = await GetOidcSettings();
+
+    // Every rejection below goes through here, so adding a new one cannot
+    // accidentally skip the audit trail. `reason` is a stable code rather than
+    // the user-facing copy, so the log stays greppable when the wording changes.
+    const deny = (status: number, error: string, reason: string, email: string, userId?: number) => {
+      auditSignIn(event, { outcome: "denied", email, userId, reason, statusCode: status });
+      return fail(status, { error, values: { email } });
+    };
 
     const formData = await request.formData();
     const email = String(formData.get("email") ?? "").trim();
     const password = String(formData.get("password") ?? "");
 
     if (!email || !password) {
-      return fail(400, { error: "Email and password are required", values: { email } });
+      return deny(400, "Email and password are required", "missing_credentials", email);
     }
 
     const userCount = await GetUsersCount();
     if (!userCount || Number(userCount.count) === 0) {
-      return fail(400, { error: GC.ERROR_NO_SETUP, values: { email } });
+      return deny(400, GC.ERROR_NO_SETUP, "setup_incomplete", email);
     }
 
     // Local login can be enabled by setting Env-Variable "KENER_FORCE_LOCAL_LOGIN" == "true".
@@ -73,46 +83,54 @@ export const actions: Actions = {
     // Checked before the user lookup so the response does not reveal whether the email exists.
     const forceLocalLogin = process.env.KENER_FORCE_LOCAL_LOGIN === "true";
     if (oidcSettings && !oidcSettings.allow_local_login && !forceLocalLogin) {
-      return fail(403, {
-        error: "Local login is disabled. Please use SSO.",
-        values: { email },
-      });
+      return deny(403, "Local login is disabled. Please use SSO.", "local_login_disabled", email);
     }
 
     const userDB = await GetUserByEmail(email);
     if (!userDB) {
-      return fail(401, { error: "User does not exist", values: { email } });
+      return deny(401, "User does not exist", "unknown_user", email);
     }
     if (userDB.auth_provider === GC.AUTH_PROVIDER_OIDC) {
-      return fail(403, {
-        error: "This account uses SSO authentication. Please use the SSO login button.",
-        values: { email },
-      });
+      return deny(
+        403,
+        "This account uses SSO authentication. Please use the SSO login button.",
+        "oidc_account",
+        email,
+        userDB.id,
+      );
     }
 
     const passwordStored = await GetUserPasswordHashById(userDB.id);
     if (!passwordStored || !passwordStored.password_hash) {
-      return fail(401, { error: "Invalid password or Email", values: { email } });
+      return deny(401, "Invalid password or Email", "no_password_set", email, userDB.id);
     }
 
     const isMatch = await VerifyPassword(password, passwordStored.password_hash);
     if (!isMatch) {
-      return fail(401, { error: "Invalid password or Email", values: { email } });
+      return deny(401, "Invalid password or Email", "bad_password", email, userDB.id);
     }
 
     if (!userDB.is_active) {
-      return fail(403, {
-        error: "Your account has been deactivated. Please contact an administrator.",
-        values: { email },
-      });
+      return deny(
+        403,
+        "Your account has been deactivated. Please contact an administrator.",
+        "account_deactivated",
+        email,
+        userDB.id,
+      );
     }
 
     if (!userDB.role_ids || userDB.role_ids.length === 0) {
-      return fail(403, {
-        error: "Your account has no active roles assigned. Please contact an administrator.",
-        values: { email },
-      });
+      return deny(
+        403,
+        "Your account has no active roles assigned. Please contact an administrator.",
+        "no_roles",
+        email,
+        userDB.id,
+      );
     }
+
+    auditSignIn(event, { outcome: "ok", email, userId: userDB.id, reason: "password", statusCode: 302 });
 
     const token = await GenerateToken(userDB);
     const cookieConfig = CookieConfig();

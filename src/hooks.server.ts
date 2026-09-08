@@ -1,6 +1,7 @@
 import { json, type Handle } from "@sveltejs/kit";
 import { sequence } from "@sveltejs/kit/hooks";
 import { requestIdHandle } from "$lib/server/http/requestId";
+import { auditApiKeyAuthFailure } from "$lib/server/audit/events";
 import { VerifyAPIKey } from "$lib/server/controllers/apiController";
 import db from "$lib/server/db/db";
 import type { UnauthorizedResponse, NotFoundResponse } from "$lib/types/api";
@@ -111,6 +112,7 @@ const apiAuthHandle: Handle = async ({ event, resolve }) => {
           message: "Missing or invalid authorization header",
         },
       };
+      auditApiKeyAuthFailure(event, "missing_bearer_token", pathname);
       return json(errorResponse, { status: 401 });
     }
 
@@ -122,6 +124,10 @@ const apiAuthHandle: Handle = async ({ event, resolve }) => {
           message: "Invalid API key",
         },
       };
+      // The key itself is never recorded, not even truncated: a prefix is
+      // enough to confirm a guess against the log if the log is ever read by
+      // someone it should not be.
+      auditApiKeyAuthFailure(event, "invalid_api_key", pathname);
       return json(errorResponse, { status: 401 });
     }
 

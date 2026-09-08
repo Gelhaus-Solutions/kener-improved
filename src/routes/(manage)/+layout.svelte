@@ -21,6 +21,7 @@
   import ClockAlertIcon from "@lucide/svelte/icons/clock-alert";
   import BookOpenIcon from "@lucide/svelte/icons/book-open";
   import KeyIcon from "@lucide/svelte/icons/key";
+  import ScrollTextIcon from "@lucide/svelte/icons/scroll-text";
   import UsersIcon from "@lucide/svelte/icons/users";
   import ShieldIcon from "@lucide/svelte/icons/shield";
   import ShieldCheckIcon from "@lucide/svelte/icons/shield-check";
@@ -68,7 +69,8 @@
     { title: "Templates", url: "/manage/app/templates", icon: TemplateIcon },
     { title: "Badges", url: "/manage/app/badges", icon: BadgeIcon },
     { title: "Embed", url: "/manage/app/embed", icon: CodeIcon },
-    { title: "API Keys", url: "/manage/app/api-keys", icon: KeyIcon }
+    { title: "API Keys", url: "/manage/app/api-keys", icon: KeyIcon },
+    { title: "Audit Log", url: "/manage/app/audit", icon: ScrollTextIcon }
   ];
 
   const navItems = allNavItems
