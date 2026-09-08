@@ -8,6 +8,8 @@ import { requireOrg } from "./middleware/requireOrg.js";
 import { authorize, isKnownAction } from "./middleware/authorize.js";
 import { rateLimit } from "./middleware/rateLimit.js";
 import { auditBefore, auditAfter, auditOutcomeOnly } from "./middleware/audit.js";
+import { emitActionEvent } from "./middleware/events.js";
+import { runWithEventContext, DEFAULT_ORG_ID } from "$lib/server/events/eventContext.js";
 
 /**
  * The admin action pipeline.
@@ -15,7 +17,8 @@ import { auditBefore, auditAfter, auditOutcomeOnly } from "./middleware/audit.js
  * Order is load-bearing, not stylistic:
  *
  *   requestId -> authenticate -> requireOrg -> authorize -> rateLimit
- *             -> validate -> audit:before -> handler -> audit:after -> errors
+ *             -> validate -> audit:before -> handler -> audit:after
+ *             -> events -> errors
  *
  * The reasoning for each position lives on the middleware itself, so that
  * anyone about to move a step reads why it is where it is first. In short:
@@ -23,6 +26,11 @@ import { auditBefore, auditAfter, auditOutcomeOnly } from "./middleware/audit.js
  * the check; org context precedes validation and the audit snapshot so no query
  * runs unscoped; rate limiting sits after auth so tenants get separate buckets,
  * and before validation so floods stay cheap.
+ *
+ * `events` runs last and only on success, reusing the diff `audit:after` already
+ * computed rather than taking the same snapshot twice. It emits the
+ * *administrative* events only; incidents and maintenances emit from inside the
+ * transaction that changes them, because those must not be lost.
  *
  * Every action is a file under `actions/<domain>/`. The transitional
  * `legacy.ts` fallback is gone: the registry is the only dispatch path.
@@ -87,14 +95,33 @@ export async function runAction(event: RequestEvent): Promise<Response> {
 
     const auditRecord = await auditBefore(action, def, validated, ctx);
 
-    const result = await def.handler(validated, ctx);
+    // Establishes who is acting for the whole handler, so a controller three
+    // layers down can emit an event attributed to this user without anyone
+    // threading an actor argument through the call chain. See eventContext.ts.
+    // Captured as a const: `ctx` is a `let` so the catch below can attribute a
+    // failure, and TypeScript will not carry its narrowing into a closure.
+    const actionCtx = ctx;
+    const result = await runWithEventContext(
+      {
+        actor_type: "user",
+        actor_id: actionCtx.user.id,
+        actor_label: actionCtx.user.email ?? String(actionCtx.user.id),
+        correlation_id: requestId,
+        // P4 replaces this with the org requireOrg resolved.
+        org_id: DEFAULT_ORG_ID,
+      },
+      async () => await def.handler(validated, actionCtx),
+    );
 
     if (result instanceof Response) {
-      await auditAfter(auditRecord, def, validated, result.ok ? "ok" : "error", result.status);
+      const ok = result.ok;
+      const diff = await auditAfter(auditRecord, def, validated, ok ? "ok" : "error", result.status);
+      if (ok) await emitActionEvent(action, validated, actionCtx, diff);
       return result;
     }
 
-    await auditAfter(auditRecord, def, validated, "ok", 200);
+    const diff = await auditAfter(auditRecord, def, validated, "ok", 200);
+    await emitActionEvent(action, validated, actionCtx, diff);
     return json(result, { status: 200 });
   } catch (error: unknown) {
     const status = error instanceof ActionError ? error.status : 500;

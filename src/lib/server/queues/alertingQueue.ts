@@ -37,6 +37,8 @@ import sendSlack from "$lib/server/notification/slack_notification.js";
 import sendDiscord from "$lib/server/notification/discord_notification.js";
 
 import type { SiteDataForNotification } from "../notification/types.js";
+import { emit } from "../events/emit.js";
+import { currentOrgId } from "../events/eventContext.js";
 let alertingQueue: Queue | null = null;
 
 let worker: Worker | null = null;
@@ -284,7 +286,32 @@ const addWorker = () => {
         return;
       }
 
-      activeAlert = await CreateMonitorAlertV2(monitor_alerts_configured.id, monitor_tag);
+      // The alert row and its event commit together. Without that, a crash
+      // between the two loses the event permanently: the retried job finds the
+      // alert already TRIGGERED and returns early, so nothing ever emits it.
+      // This is the persistence section, so a throw here is a retry, by design.
+      activeAlert = await db.withTransaction(async () => {
+        const created = await CreateMonitorAlertV2(monitor_alerts_configured.id, monitor_tag);
+        await emit({
+          org_id: currentOrgId(),
+          type: "monitor.alert_triggered",
+          aggregate_id: created.id,
+          // One alert row triggers exactly once, so its id is the natural key.
+          idempotency_key: `monitor.alert_triggered:${created.id}`,
+          payload: {
+            alert_id: created.id,
+            config_id: monitor_alerts_configured.id,
+            monitor_tag,
+            monitor_name,
+            alert_for: monitor_alerts_configured.alert_for,
+            alert_value: monitor_alerts_configured.alert_value,
+            severity: monitor_alerts_configured.severity,
+            failure_threshold: monitor_alerts_configured.failure_threshold,
+          },
+        });
+        return created;
+      });
+
       if (monitor_alerts_configured.create_incident === GC.YES) {
         const newIncidentNumber = await createNewIncident(
           activeAlert,
@@ -320,7 +347,28 @@ const addWorker = () => {
     }
 
     //resolve the alert
-    activeAlert = await UpdateMonitorAlertV2Status(activeAlert.id, GC.RESOLVED);
+    const alertToResolve = activeAlert;
+    activeAlert = await db.withTransaction(async () => {
+      const resolved = await UpdateMonitorAlertV2Status(alertToResolve.id, GC.RESOLVED);
+      await emit({
+        org_id: currentOrgId(),
+        type: "monitor.alert_resolved",
+        aggregate_id: resolved.id,
+        idempotency_key: `monitor.alert_resolved:${resolved.id}`,
+        payload: {
+          alert_id: resolved.id,
+          config_id: monitor_alerts_configured.id,
+          monitor_tag,
+          monitor_name,
+          incident_id: resolved.incident_id,
+          alert_for: monitor_alerts_configured.alert_for,
+          alert_value: monitor_alerts_configured.alert_value,
+          severity: monitor_alerts_configured.severity,
+          success_threshold: monitor_alerts_configured.success_threshold,
+        },
+      });
+      return resolved;
+    });
 
     // If alert has an incident, add closure comment
     if (activeAlert.incident_id) {

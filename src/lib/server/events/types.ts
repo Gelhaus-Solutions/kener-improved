@@ -1,3 +1,5 @@
+import type { EventType } from "$lib/event-taxonomy.js";
+
 // Shapes for the event bus. Kept separate from types/db.ts because the delivery
 // side is a protocol between the relay and its consumers, not just table rows.
 
@@ -29,13 +31,25 @@ export interface EventInput {
    */
   org_id: number;
 
-  /** Dotted taxonomy, e.g. "incident.created". H8b defines the vocabulary. */
-  type: string;
+  /**
+   * One of the closed set in `$lib/event-taxonomy`. Typed rather than a free
+   * string so a typo is a compile error instead of an event nobody subscribes to.
+   */
+  type: EventType;
 
+  /**
+   * What the event is about. Defaults from `EVENT_AGGREGATE_TYPE`, so pass it
+   * only to override; `aggregate_id` is what callers actually need to supply.
+   */
   aggregate_type?: string | null;
   aggregate_id?: string | number | null;
 
-  actor_type: EventActorType;
+  /**
+   * Who caused it. Optional: when omitted it comes from the ambient
+   * `eventContext`, which the request pipeline and the queue workers establish.
+   * Pass it only when the ambient actor is not the right answer.
+   */
+  actor_type?: EventActorType;
   actor_id?: string | number | null;
   actor_label?: string | null;
 
@@ -46,6 +60,7 @@ export interface EventInput {
   /** A shallow before/after, already redacted by the caller. */
   diff?: unknown;
 
+  /** Defaults to the ambient request id, tying an event to its audit rows. */
   correlation_id?: string | null;
   causation_id?: string | null;
 

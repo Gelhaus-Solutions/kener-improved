@@ -342,20 +342,48 @@ export class MaintenancesRepository extends BaseRepository {
       .andWhere("m.status", GC.ACTIVE);
   }
 
+  /**
+   * Updates an event. A write that includes `status` also bumps
+   * `transition_seq`, so the event bus can tell a genuine re-entry into a status
+   * from a retried job. Bumping here rather than at the call sites is what makes
+   * that impossible to forget.
+   */
   async updateMaintenanceEvent(id: number, data: Partial<MaintenanceEventRecordInsert>): Promise<number> {
-    return await this.knex("maintenances_events")
-      .where("id", id)
-      .update({
-        ...data,
-        updated_at: this.knex.fn.now(),
-      });
+    const patch: Record<string, unknown> = {
+      ...data,
+      updated_at: this.knex.fn.now(),
+    };
+    if (data.status !== undefined) {
+      patch.transition_seq = this.knex.raw("transition_seq + 1");
+    }
+    return await this.knex("maintenances_events").where("id", id).update(patch);
   }
 
+  /**
+   * Sets an event's status and returns its **new** `transition_seq`.
+   *
+   * The return value used to be the affected row count, which every caller
+   * ignored. It is the sequence number now because every caller needs it for the
+   * idempotency key of the event it emits next. Reading one column back is
+   * cheaper and less error-prone than each call site re-fetching the whole event
+   * or, worse, assuming the new value is its stale copy plus one.
+   *
+   * Returns 0 when no row matched.
+   */
   async updateMaintenanceEventStatus(id: number, status: string): Promise<number> {
-    return await this.knex("maintenances_events").where("id", id).update({
-      status,
-      updated_at: this.knex.fn.now(),
-    });
+    const updated = await this.knex("maintenances_events")
+      .where("id", id)
+      .update({
+        status,
+        transition_seq: this.knex.raw("transition_seq + 1"),
+        updated_at: this.knex.fn.now(),
+      });
+    if (!updated) return 0;
+
+    const row = (await this.knex("maintenances_events").select("transition_seq").where("id", id).first()) as
+      | { transition_seq: number }
+      | undefined;
+    return Number(row?.transition_seq ?? 0);
   }
 
   /**

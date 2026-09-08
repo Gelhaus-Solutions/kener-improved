@@ -24,6 +24,9 @@ import { GetAllSiteData } from "./siteDataController.js";
 import subscriberQueue from "../queues/subscriberQueue.js";
 import mdToHTML from "../../marked.js";
 import type { SubscriptionVariableMap } from "../notification/types.js";
+import { emit } from "../events/emit.js";
+import { currentOrgId } from "../events/eventContext.js";
+import { afterCommit } from "../db/trxContext.js";
 
 interface IncidentsDashboardInput {
   page: number;
@@ -117,7 +120,18 @@ export const RemoveIncidentMonitor = async (incident_id: number, monitor_tag: st
   if (!incidentExists) {
     throw new Error(`Incident with id ${incident_id} does not exist`);
   }
-  return await db.removeIncidentMonitor(incident_id, monitor_tag);
+  return await db.withTransaction(async () => {
+    // Removing a component from an incident is an impact change to NONE, not a
+    // separate kind of event: a consumer tracking which components are affected
+    // needs both halves to arrive on the same stream or it never clears them.
+    await emit({
+      org_id: currentOrgId(),
+      type: "incident.component_impact_changed",
+      aggregate_id: incident_id,
+      payload: { incident_id, monitor_tag, monitor_impact: null },
+    });
+    return await db.removeIncidentMonitor(incident_id, monitor_tag);
+  });
 };
 
 export const GetIncidentsDashboard = async (
@@ -344,12 +358,30 @@ export const CreateIncident = async (data: IncidentInput): Promise<{ incident_id
     throw new Error("End date time cannot be less than start date time");
   }
 
-  let newIncident = await db.createIncident(incident);
+  return await db.withTransaction(async () => {
+    const newIncident = await db.createIncident(incident);
 
-  return {
-    incident_id: newIncident.id,
-  };
+    // `backfilled` rather than `created` when the incident describes something
+    // that already ended. A subscriber wants to hear about an outage happening
+    // now; being paged about one that was over before the record was typed up is
+    // the fastest way to get notifications muted.
+    const isBackfill = !!incident.end_date_time && incident.end_date_time <= GetNowSeconds();
+    await emit({
+      org_id: currentOrgId(),
+      type: isBackfill ? "incident.backfilled" : "incident.created",
+      aggregate_id: newIncident.id,
+      payload: { ...incident, incident_id: newIncident.id },
+    });
+
+    return {
+      incident_id: newIncident.id,
+    };
+  });
 };
+
+function GetNowSeconds(): number {
+  return Math.floor(Date.now() / 1000);
+}
 
 export const UpdateIncident = async (incident_id: number, data: IncidentUpdateInput): Promise<number> => {
   let incidentExists = await db.getIncidentById(incident_id);
@@ -373,7 +405,48 @@ export const UpdateIncident = async (incident_id: number, data: IncidentUpdateIn
     is_global: data.is_global !== undefined ? data.is_global : incidentExists.is_global,
   };
 
-  return await db.updateIncident(updateObject as IncidentRecord);
+  return await db.withTransaction(async () => {
+    const rows = await db.updateIncident(updateObject as IncidentRecord);
+
+    const before: Record<string, unknown> = {};
+    const after: Record<string, unknown> = {};
+    for (const key of ["title", "start_date_time", "status", "state", "end_date_time", "is_global"] as const) {
+      const previous = (incidentExists as unknown as Record<string, unknown>)[key];
+      const next = (updateObject as unknown as Record<string, unknown>)[key];
+      if (previous === next) continue;
+      before[key] = previous;
+      after[key] = next;
+    }
+
+    // Nothing actually moved. `UpdateIncident` is called on every comment, so
+    // without this an unchanged incident would emit on every timeline entry.
+    if (Object.keys(after).length === 0) return rows;
+
+    const base = {
+      org_id: currentOrgId(),
+      aggregate_id: incident_id,
+      payload: { incident_id, title: updateObject.title, state: updateObject.state, status: updateObject.status },
+      diff: { before, after },
+    } as const;
+
+    await emit({ ...base, type: "incident.updated" });
+
+    const stateChanged = incidentExists.state !== updateObject.state;
+    if (stateChanged) {
+      await emit({ ...base, type: "incident.state_changed" });
+
+      // Separate types rather than a payload condition, because "tell me when an
+      // incident is resolved" is the single most common subscription there is
+      // and it should not require a filter expression to express.
+      if (updateObject.state === GC.RESOLVED) {
+        await emit({ ...base, type: "incident.resolved" });
+      } else if (incidentExists.state === GC.RESOLVED) {
+        await emit({ ...base, type: "incident.reopened" });
+      }
+    }
+
+    return rows;
+  });
 };
 
 export const AddIncidentMonitor = async (
@@ -402,10 +475,29 @@ export const AddIncidentMonitor = async (
     throw new Error(`Incident with id ${incident_id} does not exist`);
   }
 
-  return await db.insertIncidentMonitorWithMerge({
-    incident_id,
-    monitor_tag,
-    monitor_impact,
+  const existing = await db.getIncidentMonitorsByIncidentID(incident_id);
+  const previous = existing.find((m) => m.monitor_tag === monitor_tag)?.monitor_impact ?? null;
+
+  return await db.withTransaction(async () => {
+    const result = await db.insertIncidentMonitorWithMerge({
+      incident_id,
+      monitor_tag,
+      monitor_impact,
+    });
+
+    // Only when the impact actually moved. Re-asserting the same impact is what
+    // the alerting path does on every evaluation, and it is not news.
+    if (previous !== monitor_impact) {
+      await emit({
+        org_id: currentOrgId(),
+        type: "incident.component_impact_changed",
+        aggregate_id: incident_id,
+        payload: { incident_id, monitor_tag, monitor_impact },
+        diff: { before: { monitor_impact: previous }, after: { monitor_impact } },
+      });
+    }
+
+    return result;
   });
 };
 
@@ -424,21 +516,35 @@ export const UpdateCommentByID = async (
   if (!commentExists) {
     throw new Error(`Comment with id ${comment_id} does not exist`);
   }
-  let c = await db.updateIncidentCommentByID(comment_id, comment, state, commented_at);
-  if (c) {
-    let incidentUpdate: IncidentUpdateInput = {
-      state: state,
-    };
-    if (state === GC.RESOLVED) {
-      incidentUpdate.end_date_time = commented_at;
-    } else {
-      if (incidentExists.state === GC.RESOLVED) {
-        await db.setIncidentEndTimeToNull(incident_id);
+  return await db.withTransaction(async () => {
+    const c = await db.updateIncidentCommentByID(comment_id, comment, state, commented_at);
+    if (c) {
+      await emit({
+        org_id: currentOrgId(),
+        type: "incident.comment_updated",
+        aggregate_id: incident_id,
+        payload: { incident_id, comment_id, state, commented_at },
+        diff: {
+          before: { comment: commentExists.comment, state: commentExists.state },
+          after: { comment, state },
+        },
+      });
+
+      let incidentUpdate: IncidentUpdateInput = {
+        state: state,
+      };
+      if (state === GC.RESOLVED) {
+        incidentUpdate.end_date_time = commented_at;
+      } else {
+        if (incidentExists.state === GC.RESOLVED) {
+          await db.setIncidentEndTimeToNull(incident_id);
+        }
       }
+      // Joins this transaction and emits its own state_changed/resolved events.
+      await UpdateIncident(incident_id, incidentUpdate);
     }
-    await UpdateIncident(incident_id, incidentUpdate);
-  }
-  return c;
+    return c;
+  });
 };
 // Subscriber notifications are driven solely by incident comments: the comment
 // timeline is the incident's public communication channel, so posting a comment
@@ -487,25 +593,43 @@ export const AddIncidentComment = async (
     state = incidentExists.state;
   }
 
-  let c = await db.insertIncidentComment(incident_id, comment, state, commented_at);
-  let incidentType = incidentExists.incident_type;
-  //update incident state
-  if (c && incidentType === GC.INCIDENT) {
-    let incidentUpdate: IncidentUpdateInput = {
-      state: state,
-    };
-    if (state === GC.RESOLVED) {
-      incidentUpdate.end_date_time = commented_at;
-    } else {
-      if (incidentExists.state === GC.RESOLVED) {
-        await db.setIncidentEndTimeToNull(incident_id);
-      }
-    }
-    await UpdateIncident(incident_id, incidentUpdate);
-    await notifySubscribersOfComment(incidentExists, c);
-  }
+  const incidentType = incidentExists.incident_type;
 
-  return c;
+  return await db.withTransaction(async () => {
+    const c = await db.insertIncidentComment(incident_id, comment, state, commented_at);
+
+    await emit({
+      org_id: currentOrgId(),
+      type: "incident.comment_added",
+      aggregate_id: incident_id,
+      payload: { incident_id, comment_id: c.id, state, commented_at, comment },
+      // The comment is the incident's public timeline entry, so one comment must
+      // notify exactly once even if the write is retried.
+      idempotency_key: `incident.comment_added:${c.id}`,
+    });
+
+    //update incident state
+    if (c && incidentType === GC.INCIDENT) {
+      let incidentUpdate: IncidentUpdateInput = {
+        state: state,
+      };
+      if (state === GC.RESOLVED) {
+        incidentUpdate.end_date_time = commented_at;
+      } else {
+        if (incidentExists.state === GC.RESOLVED) {
+          await db.setIncidentEndTimeToNull(incident_id);
+        }
+      }
+      await UpdateIncident(incident_id, incidentUpdate);
+
+      // Deferred past the commit rather than awaited here. A queue push inside a
+      // transaction can be picked up by a worker before the transaction commits,
+      // and the worker then reads a comment that does not exist yet.
+      afterCommit(() => notifySubscribersOfComment(incidentExists, c));
+    }
+
+    return c;
+  });
 };
 
 export const UpdateCommentStatusByID = async (
@@ -517,7 +641,20 @@ export const UpdateCommentStatusByID = async (
   if (!commentExists) {
     throw new Error(`Comment with id ${comment_id} does not exist`);
   }
-  return await db.updateIncidentCommentStatusByID(comment_id, status);
+  return await db.withTransaction(async () => {
+    const rows = await db.updateIncidentCommentStatusByID(comment_id, status);
+    // The taxonomy calls this `comment_hidden` because hiding is the only thing
+    // this status is ever used for; the payload carries the actual value so an
+    // un-hide is distinguishable.
+    await emit({
+      org_id: currentOrgId(),
+      type: "incident.comment_hidden",
+      aggregate_id: incident_id,
+      payload: { incident_id, comment_id, status },
+      diff: { before: { status: commentExists.status }, after: { status } },
+    });
+    return rows;
+  });
 };
 
 export const ParseIncidentToAPIResp = async (
@@ -571,8 +708,26 @@ export const DeleteIncident = async (incident_id: number): Promise<{ success: bo
   // Delete incident comments permanently
   await db.deleteIncidentCommentsByIncidentID(incident_id);
 
-  // Delete the incident
-  await db.deleteIncident(incident_id);
+  return await db.withTransaction(async () => {
+    // Before the delete, so the payload can still say what was removed. An
+    // `incident.deleted` carrying nothing but an id leaves whoever has to
+    // explain the gap in a public timeline with nothing to explain it from.
+    await emit({
+      org_id: currentOrgId(),
+      type: "incident.deleted",
+      aggregate_id: incident_id,
+      payload: {
+        incident_id,
+        title: incident.title,
+        state: incident.state,
+        status: incident.status,
+        start_date_time: incident.start_date_time,
+        end_date_time: incident.end_date_time,
+      },
+    });
 
-  return { success: true };
+    await db.deleteIncident(incident_id);
+
+    return { success: true };
+  });
 };

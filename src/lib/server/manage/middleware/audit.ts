@@ -89,15 +89,26 @@ export async function auditBefore(
   };
 }
 
-/** Writes the row. Never throws: auditing must not be able to fail a request. */
+/**
+ * Writes the row, and returns the before/after it computed.
+ *
+ * The return value exists so the event middleware can reuse the diff instead of
+ * running the after-snapshot a second time: those snapshots are database reads,
+ * and doing them twice per write action to produce the same answer is a cost
+ * nobody would accept if it were visible.
+ *
+ * Never throws: auditing must not be able to fail a request.
+ */
 export async function auditAfter(
   auditRecord: AuditRecord | null,
   def: AnyActionDefinition | undefined,
   data: Record<string, unknown>,
   outcome: AuditOutcome,
   statusCode: number,
-): Promise<void> {
-  if (!auditRecord) return;
+): Promise<{ before: Record<string, unknown>; after: Record<string, unknown> } | null> {
+  if (!auditRecord) return null;
+
+  let computedDiff: { before: Record<string, unknown>; after: Record<string, unknown> } | null = null;
 
   try {
     let beforeJson: string | null = null;
@@ -112,6 +123,7 @@ export async function auditAfter(
       }
       const diff = diffSnapshots(auditRecord.before, after);
       if (diff) {
+        computedDiff = diff as { before: Record<string, unknown>; after: Record<string, unknown> };
         beforeJson = toJsonColumn(diff.before);
         afterJson = toJsonColumn(diff.after);
       }
@@ -142,6 +154,8 @@ export async function auditAfter(
   } catch (error) {
     console.error("audit: failed to record", auditRecord.action, error);
   }
+
+  return computedDiff;
 }
 
 /**

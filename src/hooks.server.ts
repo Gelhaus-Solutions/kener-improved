@@ -1,6 +1,7 @@
 import { json, type Handle } from "@sveltejs/kit";
 import { sequence } from "@sveltejs/kit/hooks";
 import { requestIdHandle } from "$lib/server/http/requestId";
+import { eventContextHandle } from "$lib/server/http/eventContext";
 import { auditApiKeyAuthFailure } from "$lib/server/audit/events";
 import { VerifyAPIKey } from "$lib/server/controllers/apiController";
 import db from "$lib/server/db/db";
@@ -220,4 +221,4 @@ const apiAuthHandle: Handle = async ({ event, resolve }) => {
   return response;
 };
 
-export const handle = sequence(requestIdHandle, csrfHandle, apiAuthHandle);
+export const handle = sequence(requestIdHandle, csrfHandle, apiAuthHandle, eventContextHandle);

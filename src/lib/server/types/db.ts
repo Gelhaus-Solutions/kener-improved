@@ -621,6 +621,12 @@ export interface MaintenanceEventRecord {
   start_date_time: number;
   end_date_time: number;
   status: "SCHEDULED" | "READY" | "ONGOING" | "COMPLETED" | "CANCELLED";
+  /**
+   * Bumped by the repository on every status write. Part of the event bus
+   * idempotency key, so a genuine re-entry into a status is not mistaken for a
+   * retry. See migrations/20260908170000_add_maintenance_event_transition_seq.ts
+   */
+  transition_seq: number;
   created_at: DbTimestamp;
   updated_at: DbTimestamp;
 }

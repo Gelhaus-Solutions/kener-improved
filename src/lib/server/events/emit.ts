@@ -1,6 +1,8 @@
 import db from "../db/db.js";
 import { afterCommit } from "../db/trxContext.js";
 import { ulid } from "./ulid.js";
+import { currentActor, currentCorrelationId } from "./eventContext.js";
+import { EVENT_AGGREGATE_TYPE } from "$lib/event-taxonomy.js";
 import type { EventInput } from "./types.js";
 
 // The public front door of the event bus.
@@ -69,19 +71,25 @@ function toStringOrNull(value: string | number | null | undefined): string | nul
  * silent cross-tenant leak instead of a compile error.
  */
 export async function emit(input: EventInput): Promise<EmitResult> {
+  // The ambient actor, unless the caller knows better. See eventContext.ts for
+  // why this is not a parameter threaded through every controller.
+  const actor = input.actor_type ? input : currentActor();
+
   const { inserted, event_id } = await db.insertEvent({
     event_id: ulid(),
     org_id: input.org_id,
     type: input.type,
-    aggregate_type: input.aggregate_type ?? null,
+    // Defaulted from the taxonomy so a call site states the id and not the kind,
+    // and so two events about the same thing cannot disagree about what it is.
+    aggregate_type: input.aggregate_type ?? EVENT_AGGREGATE_TYPE[input.type] ?? null,
     aggregate_id: toStringOrNull(input.aggregate_id),
-    actor_type: input.actor_type,
-    actor_id: toStringOrNull(input.actor_id),
-    actor_label: input.actor_label ?? null,
+    actor_type: actor.actor_type ?? "system",
+    actor_id: toStringOrNull(actor.actor_id),
+    actor_label: actor.actor_label ?? null,
     occurred_at: input.occurred_at ?? nowSeconds(),
     payload: toJson(input.payload),
     diff: toJson(input.diff),
-    correlation_id: input.correlation_id ?? null,
+    correlation_id: input.correlation_id ?? currentCorrelationId(),
     causation_id: input.causation_id ?? null,
     idempotency_key: input.idempotency_key ?? null,
     suppress: input.suppress ?? false,
