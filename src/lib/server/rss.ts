@@ -8,6 +8,7 @@
  *      both the default-page and named-page route handlers.
  */
 
+import { ResolvePublicMonitor } from "./controllers/publicMonitorResolver.js";
 import db from "$lib/server/db/db.js";
 import { GetAllSiteData } from "$lib/server/controllers/siteDataController.js";
 import type { IncidentForMonitorListWithComments, MaintenanceEventsMonitorList } from "$lib/server/types/db.js";
@@ -137,11 +138,15 @@ export async function renderRssFeedResponse(args: RenderRssFeedArgs): Promise<Re
 
   let monitorTags: string[] | undefined = undefined;
   if (args.scope.type === "monitor") {
-    const monitor = await db.getMonitorByTag(args.scope.tag);
+    // I3e: the feed URL carries the monitor's per-org slug, like every other
+    // public URL. Identical to the tag for the default org.
+    const monitor = await ResolvePublicMonitor(args.scope.tag);
     if (!monitor || monitor.is_hidden === "YES" || monitor.status !== "ACTIVE") {
       return new Response("Not found", { status: 404 });
     }
-    monitorTags = [args.scope.tag];
+    // The physical tag, not the URL's slug: everything below keys monitoring
+    // data and incidents by tag.
+    monitorTags = [monitor.tag];
   } else {
     let pagePath = args.scope.pagePath;
     if (!!siteData.globalPageVisibilitySettings?.forceExclusivity && pagePath === null) {
