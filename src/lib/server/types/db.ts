@@ -1020,3 +1020,42 @@ export interface SubscriptionsConfig {
     };
   };
 }
+
+// ============ Audit log ============
+
+export type AuditActorType = "user" | "api_key" | "system" | "oidc" | "anonymous";
+export type AuditOutcome = "ok" | "denied" | "error";
+
+export interface AuditLogInsert {
+  org_id?: number | null;
+  ts: number;
+  request_id?: string | null;
+  actor_type: AuditActorType;
+  actor_id?: string | null;
+  actor_label?: string | null;
+  action: string;
+  permission?: string | null;
+  target_type?: string | null;
+  target_id?: string | null;
+  outcome: AuditOutcome;
+  status_code?: number | null;
+  ip?: string | null;
+  user_agent?: string | null;
+  before_json?: string | null;
+  after_json?: string | null;
+  meta_json?: string | null;
+}
+
+export interface AuditLogRecord extends AuditLogInsert {
+  id: number;
+}
+
+export interface AuditLogFilter {
+  org_id?: number | null;
+  action?: string;
+  actor_type?: AuditActorType;
+  actor_id?: string;
+  outcome?: AuditOutcome;
+  start?: number;
+  end?: number;
+}

@@ -6,6 +6,7 @@ import type { ActionDefinition, LegacyPayload } from "../../types.js";
  */
 export default {
   action: "deleteMonitorAlertConfig",
+  audit: { targetType: "alert_config" },
   handler: async (data: LegacyPayload) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let resp: any;

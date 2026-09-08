@@ -1,22 +1,31 @@
 import type { ActionContext, AnyActionDefinition } from "../types.js";
 import { resolvedPermission } from "./authorize.js";
+import { record } from "$lib/server/audit/writer.js";
+import { diffSnapshots, redact, toJsonColumn } from "$lib/server/audit/redact.js";
+import { GetNowTimestampUTC } from "$lib/server/tool.js";
+import type { AuditOutcome } from "$lib/server/types/db.js";
 
 /**
- * Audit log capture points.
+ * Audit capture, driven entirely by the registry entry.
  *
- * Not enforced yet: the table, the batched writer and the redaction live in the
- * audit-log item. What exists here is the shape and, more importantly, the
- * positions, because those are what the rest of the pipeline is ordered around.
+ * The rule this enforces: **a definition declares how to capture, never what to
+ * write.** Every write action is logged with actor, action, outcome and request
+ * id from the definition alone, with zero per-action code, because anything
+ * needing a line per action is something that eventually gets a line missed, and
+ * an audit log with gaps is not evidence.
  *
- * The design rule this encodes: **the registry entry declares how to capture,
- * never what to write.** Every write action is logged with actor, action,
- * target, outcome and request id from the definition alone, with zero
- * per-action code, because anything requiring a line per action eventually gets
- * a line missed and the log quietly stops being evidence.
+ * What an action may opt into:
+ *   `audit: false`                  - not logged at all
+ *   `audit: { targetType }`         - labels what kind of thing was acted on
+ *   `audit: { snapshot }`           - called before and after; only changed keys
+ *                                     are stored, redacted
  *
- * `before` runs after requireOrg for a reason that is easy to get wrong: a
- * snapshot is a database read, and a read issued without an org context is a
- * cross-tenant read.
+ * Reads are skipped by default. They are most of the traffic and least of the
+ * evidence, and keeping them would bury the writes.
+ *
+ * Position is load-bearing: `before` runs after requireOrg, because a snapshot
+ * is a database read and a read issued without an org context is a cross-tenant
+ * read.
  */
 
 export interface AuditRecord {
@@ -27,51 +36,175 @@ export interface AuditRecord {
   actorLabel: string;
   ip: string | null;
   userAgent: string | null;
-  before?: unknown;
+  targetType: string | null;
+  before: unknown;
+  snapshot?: (data: Record<string, unknown>) => Promise<unknown>;
 }
 
-/** Captures pre-handler state, or nothing when the action opts out. */
+/** True when this action should produce an audit row at all. */
+function shouldAudit(permission: string | null | undefined, def: AnyActionDefinition | undefined): boolean {
+  if (def?.audit === false) return false;
+  // An action with no permission mapping is still logged: "nobody decided what
+  // this needs" is exactly the kind of thing an audit log should surface.
+  if (typeof permission === "string" && permission.endsWith(".read")) return false;
+  return true;
+}
+
+/** Captures pre-handler state, or null when the action is not audited. */
 export async function auditBefore(
   action: string,
   def: AnyActionDefinition | undefined,
   data: Record<string, unknown>,
   ctx: ActionContext,
 ): Promise<AuditRecord | null> {
-  if (def?.audit === false) return null;
-
   const permission = resolvedPermission(action, def);
-  // Reads are skipped: they are the bulk of the traffic and the least of the
-  // evidence. An action with no permission at all is still logged, since
-  // "nobody decided what this needs" is worth knowing about.
-  if (typeof permission === "string" && permission.endsWith(".read")) return null;
+  if (!shouldAudit(permission, def)) return null;
 
-  const snapshot = def?.audit ? def.audit.snapshot : undefined;
+  const audit = def?.audit ? def.audit : undefined;
+  const snapshot = audit?.snapshot;
+
+  let before: unknown;
+  if (snapshot) {
+    try {
+      before = await snapshot(data);
+    } catch (error) {
+      // A snapshot is a nicety. Failing to take one must not fail the action it
+      // was describing.
+      console.error(`audit: before-snapshot failed for ${action}:`, error);
+    }
+  }
 
   return {
     action,
     permission,
     requestId: ctx.requestId,
     actorId: ctx.user.id,
-    // Denormalised on capture: users get deleted, and an audit row that can no
-    // longer say who did it is not an audit row.
+    // Denormalised now, while the user still exists.
     actorLabel: ctx.user.email ?? String(ctx.user.id),
     ip: ctx.ip,
     userAgent: ctx.userAgent,
-    before: snapshot ? await snapshot(data) : undefined,
+    targetType: audit?.targetType ?? null,
+    before,
+    snapshot,
   };
 }
 
-/** Records the outcome. A no-op until the audit table exists. */
+/** Writes the row. Never throws: auditing must not be able to fail a request. */
 export async function auditAfter(
-  record: AuditRecord | null,
-  _def: AnyActionDefinition | undefined,
-  _data: Record<string, unknown>,
-  _outcome: "ok" | "denied" | "error",
-  _statusCode: number,
+  auditRecord: AuditRecord | null,
+  def: AnyActionDefinition | undefined,
+  data: Record<string, unknown>,
+  outcome: AuditOutcome,
+  statusCode: number,
 ): Promise<void> {
-  if (!record) return;
-  // Later: take the after-snapshot, shallow-diff it against record.before so
-  // only changed keys are stored, redact recursively, and hand the row to the
-  // batched writer so this costs the request nothing.
-  return;
+  if (!auditRecord) return;
+
+  try {
+    let beforeJson: string | null = null;
+    let afterJson: string | null = null;
+
+    if (auditRecord.snapshot && outcome === "ok") {
+      let after: unknown;
+      try {
+        after = await auditRecord.snapshot(data);
+      } catch (error) {
+        console.error(`audit: after-snapshot failed for ${auditRecord.action}:`, error);
+      }
+      const diff = diffSnapshots(auditRecord.before, after);
+      if (diff) {
+        beforeJson = toJsonColumn(diff.before);
+        afterJson = toJsonColumn(diff.after);
+      }
+    }
+
+    record({
+      // P4 fills this from the org context established by requireOrg.
+      org_id: null,
+      ts: GetNowTimestampUTC(),
+      request_id: auditRecord.requestId,
+      actor_type: "user",
+      actor_id: String(auditRecord.actorId),
+      actor_label: auditRecord.actorLabel,
+      action: auditRecord.action,
+      permission: auditRecord.permission ?? null,
+      target_type: auditRecord.targetType,
+      target_id: extractTargetId(data),
+      outcome,
+      status_code: statusCode,
+      ip: auditRecord.ip,
+      user_agent: auditRecord.userAgent,
+      before_json: beforeJson,
+      after_json: afterJson,
+      // The payload identifies what was acted on even without a snapshot, so a
+      // redacted copy is kept for the actions that have not opted into one.
+      meta_json: auditRecord.snapshot ? null : toJsonColumn(redact(data)),
+    });
+  } catch (error) {
+    console.error("audit: failed to record", auditRecord.action, error);
+  }
+}
+
+/**
+ * Best-effort target id from the payload.
+ *
+ * The chain used a dozen different names for "the thing being acted on", and
+ * requiring each action to declare one would be exactly the per-action code this
+ * design avoids. Guessing is fine here: it is a convenience column for
+ * filtering, and the full payload is in `meta_json` regardless.
+ */
+function extractTargetId(data: Record<string, unknown>): string | null {
+  for (const key of ["id", "tag", "monitor_tag", "page_id", "incident_id", "maintenance_id", "email", "key"]) {
+    const v = data[key];
+    if (typeof v === "string" || typeof v === "number") return String(v);
+  }
+  return null;
+}
+
+/**
+ * Records a failed attempt: a denial or an error.
+ *
+ * Separate from the before/after pair because a failure has no "after", and a
+ * denial must not take a snapshot: running the read that the caller was just
+ * refused would be a small but real information leak through timing and load.
+ *
+ * Fire-and-forget on purpose. The request is already being answered and the
+ * writer is buffered, so there is nothing to await.
+ */
+export function auditOutcomeOnly(
+  action: string,
+  def: AnyActionDefinition | undefined,
+  data: Record<string, unknown>,
+  ctx: ActionContext,
+  outcome: AuditOutcome,
+  statusCode: number,
+): void {
+  const permission = resolvedPermission(action, def);
+  // Denials are recorded even for reads: being refused a read is a security
+  // event in a way that performing one is not.
+  if (def?.audit === false) return;
+  if (outcome !== "denied" && typeof permission === "string" && permission.endsWith(".read")) return;
+
+  try {
+    record({
+      org_id: null,
+      ts: GetNowTimestampUTC(),
+      request_id: ctx.requestId,
+      actor_type: "user",
+      actor_id: String(ctx.user.id),
+      actor_label: ctx.user.email ?? String(ctx.user.id),
+      action,
+      permission: permission ?? null,
+      target_type: def?.audit ? (def.audit.targetType ?? null) : null,
+      target_id: extractTargetId(data),
+      outcome,
+      status_code: statusCode,
+      ip: ctx.ip,
+      user_agent: ctx.userAgent,
+      before_json: null,
+      after_json: null,
+      meta_json: toJsonColumn(redact(data)),
+    });
+  } catch (error) {
+    console.error("audit: failed to record failure for", action, error);
+  }
 }

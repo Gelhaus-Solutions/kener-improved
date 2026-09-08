@@ -42,6 +42,7 @@ async function storeSiteData(data: { [x: string]: any }) {
  */
 export default {
   action: "storeSiteData",
+  audit: { targetType: "site_data" },
   handler: async (data: LegacyPayload) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let resp: any;

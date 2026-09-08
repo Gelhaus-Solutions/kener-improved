@@ -41,19 +41,22 @@ export const orgPermissions: Array<{ id: string; permission_name: string }> = [
 /**
  * Action to permission, for fork-invented admin actions.
  *
- * Empty today: every action in the registry is an upstream action already
- * mapped in `ACTION_PERMISSION_MAP`. Entries land here as the phases above add
- * actions, and never in `allPerms.ts`.
+ * Entries land here as the phases above add actions, and never in
+ * `allPerms.ts`. `getAuditLog` is the first: it is a fork-invented action, so
+ * upstream's map does not and should not know about it.
  */
-export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {};
+export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
+  getAuditLog: "audit.read",
+};
 
 /**
  * Route to permission, for fork-invented manage routes.
  *
- * Empty today. The audit log UI at `/(manage)/manage/app/audit` adds the first
- * entry, gated on `audit.read`.
+ * The audit log UI is the first entry, gated on `audit.read`.
  */
-export const ORG_ROUTE_PERMISSION_MAP: Record<string, string | null> = {};
+export const ORG_ROUTE_PERMISSION_MAP: Record<string, string | null> = {
+  "/(manage)/manage/app/audit": "audit.read",
+};
 
 /** Permission ids the fork owns. Used by the seeds to tell them from upstream's. */
 export const orgPermissionIds: ReadonlySet<string> = new Set(orgPermissions.map((p) => p.id));

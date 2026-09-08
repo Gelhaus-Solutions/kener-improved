@@ -1,3 +1,4 @@
+import { GetRolePermissions } from "$lib/server/controllers/userController.js";
 import { UpdateRolePermissions } from "$lib/server/controllers/userController.js";
 import type { ActionDefinition, LegacyPayload } from "../../types.js";
 
@@ -6,6 +7,8 @@ import type { ActionDefinition, LegacyPayload } from "../../types.js";
  */
 export default {
   action: "updateRolePermissions",
+  // Before/after on this one: it is a config change people ask questions about later.
+  audit: { targetType: "role", snapshot: async (data) => (data.role_id ? await GetRolePermissions(String(data.role_id)) : undefined) },
   handler: async (data: LegacyPayload) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let resp: any;

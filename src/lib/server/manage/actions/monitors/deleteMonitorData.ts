@@ -9,6 +9,7 @@ import type { ActionDefinition, LegacyPayload } from "../../types.js";
  */
 export default {
   action: "deleteMonitorData",
+  audit: { targetType: "monitor" },
   handler: async (data: LegacyPayload) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let resp: any;

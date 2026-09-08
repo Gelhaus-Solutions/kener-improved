@@ -2,6 +2,8 @@ import { Queue, Worker, Job, type JobSchedulerTemplateOptions } from "bullmq";
 import q from "../queues/q.js";
 import db from "../db/db.js";
 import type { DataRetentionPolicy } from "../../types/site.js";
+import { GetSiteDataByKey } from "../controllers/siteDataController.js";
+import { GetNowTimestampUTC } from "../tool.js";
 
 let dailyCleanupQueue: Queue | null = null;
 let worker: Worker | null = null;
@@ -44,6 +46,30 @@ const getRetentionPolicy = async (): Promise<DataRetentionPolicy> => {
   }
 };
 
+/**
+ * Days of audit_log history to keep. Deliberately independent of the monitoring
+ * data retention policy: audit evidence is usually kept far longer than
+ * telemetry, and tying them together would mean shortening one to shorten the
+ * other.
+ */
+const DEFAULT_AUDIT_RETENTION_DAYS = 365;
+
+const pruneAuditLog = async (): Promise<number> => {
+  try {
+    const raw = await GetSiteDataByKey("auditRetentionDays");
+    const days = Math.max(1, Math.floor(Number(raw) || DEFAULT_AUDIT_RETENTION_DAYS));
+    const cutoff = GetNowTimestampUTC() - days * 86400;
+    const removed = await db.pruneAuditLog(cutoff);
+    if (removed > 0) console.log(`Pruned ${removed} audit_log row(s) older than ${days} days`);
+    return removed;
+  } catch (error) {
+    // Never let audit pruning fail the monitoring-data cleanup it rides along
+    // with; that is the job people actually notice not running.
+    console.error("Audit log pruning failed:", error);
+    return 0;
+  }
+};
+
 const runDailyCleanup = async (): Promise<DailyCleanupResult> => {
   const policy = await getRetentionPolicy();
   const retentionDays = Math.max(1, Math.floor(policy.retentionDays || defaultPolicy.retentionDays));
@@ -71,8 +97,9 @@ const addWorker = () => {
   worker = q.createWorker(getQueue(), async (_job: Job) => {
     console.log("Running daily monitoring_data cleanup...");
     const result = await runDailyCleanup();
+    const prunedAuditRows = await pruneAuditLog();
 
-    return result;
+    return { ...result, prunedAuditRows };
   });
 
   worker.on("failed", (_job: Job | undefined, err: Error) => {

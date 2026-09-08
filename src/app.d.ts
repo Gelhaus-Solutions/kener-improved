@@ -4,6 +4,8 @@ declare global {
   namespace App {
     // interface Error {}
     interface Locals {
+      // Set by requestIdHandle, first in the hooks sequence. Always present.
+      requestId?: string;
       // Example: set by hooks.server.ts after validating a cookie/JWT.
       user?: import("$lib/server/types/auth").SessionUser;
       // Set by hooks.server.ts for /api/monitors/:monitor_tag/* routes

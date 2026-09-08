@@ -7,7 +7,7 @@ import { authenticate } from "./middleware/authenticate.js";
 import { requireOrg } from "./middleware/requireOrg.js";
 import { authorize, isKnownAction } from "./middleware/authorize.js";
 import { rateLimit } from "./middleware/rateLimit.js";
-import { auditBefore, auditAfter } from "./middleware/audit.js";
+import { auditBefore, auditAfter, auditOutcomeOnly } from "./middleware/audit.js";
 
 /**
  * The admin action pipeline.
@@ -38,16 +38,20 @@ export async function runAction(event: RequestEvent): Promise<Response> {
   const action = typeof payload.action === "string" ? payload.action : "";
   const data = (payload.data ?? {}) as Record<string, unknown>;
 
-  // requestId. Set by hooks.server.ts once the audit log lands; generated here
-  // meanwhile so handlers and logs can already correlate.
-  const requestId = (event.locals as { requestId?: string }).requestId ?? crypto.randomUUID();
+  // Set by requestIdHandle, first in the hooks sequence. The fallback covers
+  // direct calls to runAction that do not come through the hooks (tests).
+  const requestId = event.locals.requestId ?? crypto.randomUUID();
 
   const def = getActionDefinition(action);
+
+  // Declared out here so the catch can attribute a failure to the caller. A
+  // denial or an error is at least as worth recording as a success.
+  let ctx: ActionContext | null = null;
 
   try {
     const { user, permissions } = await authenticate(event.cookies);
 
-    const ctx: ActionContext = {
+    ctx = {
       user,
       permissions,
       requestId,
@@ -93,6 +97,17 @@ export async function runAction(event: RequestEvent): Promise<Response> {
     await auditAfter(auditRecord, def, validated, "ok", 200);
     return json(result, { status: 200 });
   } catch (error: unknown) {
+    const status = error instanceof ActionError ? error.status : 500;
+
+    // 401s are not attributable to anyone and would let an unauthenticated
+    // caller fill the log, so they are the one failure not recorded here.
+    if (ctx) {
+      // A 403 never reaches audit:before, by design: a denied action must not
+      // run the snapshot queries it was denied the right to run. It still gets
+      // a row, just without before/after.
+      auditOutcomeOnly(action, def, data, ctx, status === 403 ? "denied" : "error", status);
+    }
+
     if (error instanceof ActionError) {
       return json({ error: error.message }, { status: error.status });
     }

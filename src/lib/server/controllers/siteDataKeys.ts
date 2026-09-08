@@ -272,6 +272,12 @@ export const siteDataKeys: SiteDataKey[] = [
     data_type: "object",
   },
   {
+    // Fork addition. Days of audit_log history to keep; pruned by dailyCleanup.
+    key: "auditRetentionDays",
+    isValid: (value: string) => Number.isFinite(Number(value)) && Number(value) >= 1,
+    data_type: "string",
+  },
+  {
     key: "eventDisplaySettings",
     isValid: IsValidJSONString,
     data_type: "object",

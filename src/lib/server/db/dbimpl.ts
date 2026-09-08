@@ -18,6 +18,7 @@ import { ImagesRepository } from "./repositories/images.js";
 import { PagesRepository } from "./repositories/pages.js";
 import { MaintenancesRepository } from "./repositories/maintenances.js";
 import { MonitorAlertConfigRepository } from "./repositories/monitorAlertConfig.js";
+import { AuditRepository } from "./repositories/audit.js";
 import { SubscriptionSystemRepository } from "./repositories/subscriptionSystem.js";
 import { EmailTemplateConfigRepository } from "./repositories/emailTemplateConfig.js";
 
@@ -50,6 +51,7 @@ class DbImpl {
   private pages!: PagesRepository;
   private maintenances!: MaintenancesRepository;
   private monitorAlertConfig!: MonitorAlertConfigRepository;
+  private audit!: AuditRepository;
   private subscriptionSystem!: SubscriptionSystemRepository;
   private emailTemplateConfig!: EmailTemplateConfigRepository;
 
@@ -313,6 +315,11 @@ class DbImpl {
   getMonitorAlertConfigById!: MonitorAlertConfigRepository["getMonitorAlertConfigById"];
   getMonitorAlertConfigs!: MonitorAlertConfigRepository["getMonitorAlertConfigs"];
   getMonitorAlertConfigsByMonitorTag!: MonitorAlertConfigRepository["getMonitorAlertConfigsByMonitorTag"];
+  insertAuditLogMany!: AuditRepository["insertMany"];
+  getAuditLogPaginated!: AuditRepository["getAuditLogPaginated"];
+  getAuditLogCount!: AuditRepository["getAuditLogCount"];
+  getAuditLogByRequestId!: AuditRepository["getAuditLogByRequestId"];
+  pruneAuditLog!: AuditRepository["prune"];
   getActiveMonitorAlertConfigs!: MonitorAlertConfigRepository["getActiveMonitorAlertConfigs"];
   getMonitorTagsWithActiveAlertConfigs!: MonitorAlertConfigRepository["getMonitorTagsWithActiveAlertConfigs"];
   getActiveMonitorAlertConfigsByMonitorTag!: MonitorAlertConfigRepository["getActiveMonitorAlertConfigsByMonitorTag"];
@@ -413,6 +420,7 @@ class DbImpl {
     this.pages = new PagesRepository(this.knex);
     this.maintenances = new MaintenancesRepository(this.knex);
     this.monitorAlertConfig = new MonitorAlertConfigRepository(this.knex);
+    this.audit = new AuditRepository(this.knex);
     this.subscriptionSystem = new SubscriptionSystemRepository(this.knex);
     this.emailTemplateConfig = new EmailTemplateConfigRepository(this.knex);
 
@@ -726,6 +734,11 @@ class DbImpl {
     this.getActiveMonitorAlertConfigs = this.monitorAlertConfig.getActiveMonitorAlertConfigs.bind(
       this.monitorAlertConfig,
     );
+    this.insertAuditLogMany = this.audit.insertMany.bind(this.audit);
+    this.getAuditLogPaginated = this.audit.getAuditLogPaginated.bind(this.audit);
+    this.getAuditLogCount = this.audit.getAuditLogCount.bind(this.audit);
+    this.getAuditLogByRequestId = this.audit.getAuditLogByRequestId.bind(this.audit);
+    this.pruneAuditLog = this.audit.prune.bind(this.audit);
     this.getMonitorTagsWithActiveAlertConfigs =
       this.monitorAlertConfig.getMonitorTagsWithActiveAlertConfigs.bind(this.monitorAlertConfig);
     this.getActiveMonitorAlertConfigsByMonitorTag =
