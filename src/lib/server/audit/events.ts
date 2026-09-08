@@ -1,4 +1,5 @@
 import { record } from "./writer.js";
+import { currentOrgIdOrDefault } from "../db/orgContext.js";
 import { GetNowTimestampUTC } from "../tool.js";
 import type { AuditActorType, AuditOutcome } from "../types/db.js";
 
@@ -14,6 +15,19 @@ import type { AuditActorType, AuditOutcome } from "../types/db.js";
  * Kept as named helpers rather than raw `record()` calls so the shape of an
  * authentication event is decided once. A call site should not be choosing what
  * `actor_type` a failed login has.
+ *
+ * **Every row carries an org, resolved here at record time.** These used to pass
+ * `org_id: null`, which was silently worse than it looks: `audit_log` is a tenant
+ * table, so the Audit Log screen reads it through `where org_id = ?` and a null
+ * never matches. From I3c onwards every sign-in, every rejected API key and every
+ * OIDC callback was written to a row nobody could see. Caught only when I3b's
+ * deferred NOT NULL turned the invisible write into a loud one.
+ *
+ * The org has to be captured *now* rather than at flush time: `record()` buffers
+ * and the flush happens on a timer, long after the request's AsyncLocalStorage
+ * context is gone. `currentOrgIdOrDefault` is the right question for all four -
+ * these are pre-authentication events, so there is no session to ask, and the
+ * hostname the attempt arrived on is exactly the tenant it concerns.
  */
 
 interface RequestBits {
@@ -55,7 +69,7 @@ export function auditSignIn(
 ): void {
   const bits = bitsOf(source);
   record({
-    org_id: null,
+    org_id: currentOrgIdOrDefault(),
     ts: GetNowTimestampUTC(),
     request_id: bits.requestId,
     actor_type: args.userId ? "user" : "anonymous",
@@ -82,7 +96,7 @@ export function auditOidcCallback(
 ): void {
   const bits = bitsOf(source);
   record({
-    org_id: null,
+    org_id: currentOrgIdOrDefault(),
     ts: GetNowTimestampUTC(),
     request_id: bits.requestId,
     actor_type: (args.userId ? "oidc" : "anonymous") as AuditActorType,
@@ -112,7 +126,7 @@ export function auditOidcCallback(
 export function auditApiKeyAuthFailure(source: Parameters<typeof bitsOf>[0], reason: string, path: string): void {
   const bits = bitsOf(source);
   record({
-    org_id: null,
+    org_id: currentOrgIdOrDefault(),
     ts: GetNowTimestampUTC(),
     request_id: bits.requestId,
     actor_type: "api_key",
@@ -151,7 +165,7 @@ export function auditApiKeyScopeDenied(
 ): void {
   const bits = bitsOf(source);
   record({
-    org_id: null,
+    org_id: currentOrgIdOrDefault(),
     ts: GetNowTimestampUTC(),
     request_id: bits.requestId,
     actor_type: "api_key",
