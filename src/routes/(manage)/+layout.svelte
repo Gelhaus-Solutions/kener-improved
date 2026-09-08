@@ -22,6 +22,7 @@
   import BookOpenIcon from "@lucide/svelte/icons/book-open";
   import KeyIcon from "@lucide/svelte/icons/key";
   import ScrollTextIcon from "@lucide/svelte/icons/scroll-text";
+  import SendIcon from "@lucide/svelte/icons/send";
   import UsersIcon from "@lucide/svelte/icons/users";
   import ShieldIcon from "@lucide/svelte/icons/shield";
   import ShieldCheckIcon from "@lucide/svelte/icons/shield-check";
@@ -42,9 +43,8 @@
   // instead; see the comment there.
   const MERGED_ROUTE_PERMISSION_MAP: Record<string, string | null> = {
     ...ROUTE_PERMISSION_MAP,
-    ...ORG_ROUTE_PERMISSION_MAP,
+    ...ORG_ROUTE_PERMISSION_MAP
   };
-
 
   let { children, data } = $props();
 
@@ -70,7 +70,8 @@
     { title: "Badges", url: "/manage/app/badges", icon: BadgeIcon },
     { title: "Embed", url: "/manage/app/embed", icon: CodeIcon },
     { title: "API Keys", url: "/manage/app/api-keys", icon: KeyIcon },
-    { title: "Audit Log", url: "/manage/app/audit", icon: ScrollTextIcon }
+    { title: "Audit Log", url: "/manage/app/audit", icon: ScrollTextIcon },
+    { title: "Delivery Log", url: "/manage/app/deliveries", icon: SendIcon }
   ];
 
   const navItems = allNavItems
@@ -87,7 +88,7 @@
   let pageTitle = $derived(navItems.find((item) => page.url.pathname.startsWith(item.url))?.title || "Dashboard");
 </script>
 
-<ModeWatcher defaultMode={data.defaultSiteTheme as 'light' | 'dark' | 'system'} />
+<ModeWatcher defaultMode={data.defaultSiteTheme as "light" | "dark" | "system"} />
 <Toaster />
 
 <svelte:head>

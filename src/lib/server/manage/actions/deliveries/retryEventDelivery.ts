@@ -8,17 +8,22 @@ import type { ActionDefinition } from "../../types.js";
 /**
  * Puts a dead delivery back on the ladder by hand.
  *
- * Only DEAD rows: anything else is either already delivered or still being
- * retried on its own, and forcing a second attempt would double-send. The
- * repository enforces that with a conditional update, so two operators clicking
- * retry at once produce one attempt.
+ * **The existing row is reset rather than a new one inserted.** The E9 plan said
+ * "insert a fresh PENDING delivery for the same event_id", which the schema
+ * forbids: `UNIQUE (event_id, consumer, target_type, target_id)` is what makes a
+ * re-published event collapse instead of double-sending, and a second row for
+ * the same target would either violate it or require weakening the guarantee
+ * that the whole crash-safety design rests on. Resetting also keeps one row per
+ * target, so the log shows a delivery's history rather than a pile of near
+ * duplicates.
  *
- * The row is reset first and enqueued second. If the enqueue fails the row is
- * PENDING and due, so the 60s sweeper picks it up anyway; the enqueue is only
- * there to make the retry feel immediate.
+ * Only DEAD rows: anything else is either already delivered or still retrying on
+ * its own, and forcing an attempt would double-send. The repository enforces
+ * that with a conditional update, so two operators clicking at once produce one
+ * attempt.
  */
 export default {
-  action: "retryWebhookDelivery",
+  action: "retryEventDelivery",
   audit: { targetType: "event_delivery" },
   handler: async (data: { id: number }) => {
     const id = Number(data.id);
@@ -35,10 +40,12 @@ export default {
       throw new ActionError(409, "Delivery is no longer retryable");
     }
 
+    // Enqueued only to make the retry feel immediate. If this fails the row is
+    // PENDING and due, so the 60s sweeper picks it up regardless.
     await eventDispatchQueue
       .push(id, dispatchJobId(delivery.event_id, delivery.consumer, delivery.target_type, delivery.target_id, now))
       .catch((error) => {
-        console.error(`webhook retry: could not enqueue delivery ${id}, the sweeper will:`, error);
+        console.error(`retry: could not enqueue delivery ${id}, the sweeper will:`, error);
       });
 
     return { success: true };

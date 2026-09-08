@@ -51,6 +51,42 @@ export interface WebhookSendResult {
   error: string | null;
   /** True when retrying cannot help, so the ladder is skipped. */
   permanent: boolean;
+  /** What was sent, for the delivery log. Redacted; see `redactHeaders`. */
+  request_headers: Record<string, string> | null;
+  request_body: string | null;
+  duration_ms: number | null;
+}
+
+/**
+ * Strips anything from the outgoing headers that a reader must not see.
+ *
+ * The signature is the obvious one: it is derived from the endpoint's secret,
+ * and while an HMAC does not reveal the key, publishing signatures next to the
+ * bodies they sign hands an attacker a free oracle. Custom headers are the more
+ * likely problem in practice, because that is where operators put bearer tokens
+ * for the receiving system.
+ *
+ * The allow-list is deliberately the other way round from the audit log's
+ * deny-list: here every header worth showing is known in advance, so anything
+ * unrecognised is a custom one and redacted by default.
+ */
+export function redactHeaders(headers: Record<string, string>): Record<string, string> {
+  const SAFE = new Set([
+    "content-type",
+    "accept",
+    "user-agent",
+    "kener-event-id",
+    "kener-event-type",
+    "kener-delivery-seq",
+  ]);
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    const lower = key.toLowerCase();
+    if (SAFE.has(lower)) out[key] = value;
+    else if (lower === "kener-signature") out[key] = value.replace(/v1=[0-9a-f]+/g, "v1=[redacted]");
+    else out[key] = "[redacted]";
+  }
+  return out;
 }
 
 /**
@@ -218,7 +254,16 @@ export async function sendWebhook(
   const check = await checkWebhookUrl(endpoint.url);
   if (!check.allowed) {
     // Permanent: the URL will still be pointing at the same place next time.
-    return { ok: false, status: null, body: null, error: check.reason, permanent: true };
+    return {
+      ok: false,
+      status: null,
+      body: null,
+      error: check.reason,
+      permanent: true,
+      request_headers: null,
+      request_body: null,
+      duration_ms: null,
+    };
   }
 
   const secrets = activeSecrets(endpoint, now);
@@ -231,6 +276,9 @@ export async function sendWebhook(
       body: null,
       error: "Endpoint secret could not be decrypted; re-save the endpoint to set a new one",
       permanent: true,
+      request_headers: null,
+      request_body: null,
+      duration_ms: null,
     };
   }
 
@@ -263,6 +311,8 @@ export async function sendWebhook(
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), endpoint.timeout_ms);
+  const sent = { request_headers: redactHeaders(headers), request_body: rawBody };
+  const startedAt = Date.now();
 
   try {
     const response = await fetch(url, {
@@ -279,7 +329,15 @@ export async function sendWebhook(
     const body = text.length > MAX_CAPTURED_BODY ? text.slice(0, MAX_CAPTURED_BODY) : text;
 
     if (response.status >= 200 && response.status < 300) {
-      return { ok: true, status: response.status, body, error: null, permanent: false };
+      return {
+        ok: true,
+        status: response.status,
+        body,
+        error: null,
+        permanent: false,
+        ...sent,
+        duration_ms: Date.now() - startedAt,
+      };
     }
 
     // 4xx except 408 and 429 will say the same thing on every attempt: the
@@ -293,6 +351,8 @@ export async function sendWebhook(
       body,
       error: `Endpoint responded ${response.status}`,
       permanent,
+      ...sent,
+      duration_ms: Date.now() - startedAt,
     };
   } catch (error) {
     const aborted = error instanceof Error && error.name === "AbortError";
@@ -304,6 +364,8 @@ export async function sendWebhook(
       // reason (ECONNREFUSED, certificate failure) actually lives.
       error: aborted ? `Timed out after ${endpoint.timeout_ms}ms` : describeError(error),
       permanent: false,
+      ...sent,
+      duration_ms: Date.now() - startedAt,
     };
   } finally {
     clearTimeout(timer);

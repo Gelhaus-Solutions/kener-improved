@@ -6,6 +6,7 @@ import dailyCleanupScheduler from "./schedulers/dailyCleanup.js";
 import eventRelayQueue from "./queues/eventRelayQueue.js";
 import { registerConsumer } from "./events/consumers.js";
 import webhookConsumer from "./events/consumers/webhooks.js";
+import emailConsumer from "./events/consumers/email.js";
 import { InstallEnvProxy } from "./proxy.js";
 import { InvalidateSiteDataCache } from "./cache/siteDataCache.js";
 
@@ -25,6 +26,10 @@ async function Startup(): Promise<void> {
   // Consumers must be registered before the relay starts, or the first pass
   // publishes events with no delivery rows and they are never reconsidered.
   registerConsumer(webhookConsumer);
+  // Registered so an emailed delivery can be retried from the delivery log. It
+  // routes nothing on its own; subscriberQueue still owns the send. See the
+  // header of events/consumers/email.ts.
+  registerConsumer(emailConsumer);
 
   // Last of the schedulers, and only in this process: the relay and its dispatch
   // worker belong together, and the web process must never become one.

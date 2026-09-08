@@ -555,6 +555,8 @@ export const UpdateCommentByID = async (
 const notifySubscribersOfComment = async (
   incident: Pick<IncidentRecord, "id" | "title">,
   comment: IncidentCommentRecord,
+  /** The `incident.comment_added` event this notification belongs to. */
+  eventId?: string,
 ): Promise<void> => {
   try {
     const siteData = await GetAllSiteData();
@@ -570,9 +572,13 @@ const notifySubscribersOfComment = async (
     };
     // Stable dedup id per comment so a retried/double push notifies once — without
     // it subscriberQueue falls back to a Date.now()-suffixed id that never dedupes.
-    await subscriberQueue.push(variables, {
-      deduplication: { id: `subscriber-incidents-${comment.id}` },
-    });
+    await subscriberQueue.push(
+      variables,
+      { deduplication: { id: `subscriber-incidents-${comment.id}` } },
+      // Ties each recipient's delivery row back to the event, which is what puts
+      // a failed subscriber email on the same screen as a failed webhook.
+      { event_id: eventId, org_id: currentOrgId() },
+    );
   } catch (err) {
     console.error(`Error sending subscriber notification for incident ${incident.id}:`, err);
   }
@@ -598,7 +604,7 @@ export const AddIncidentComment = async (
   return await db.withTransaction(async () => {
     const c = await db.insertIncidentComment(incident_id, comment, state, commented_at);
 
-    await emit({
+    const commentEvent = await emit({
       org_id: currentOrgId(),
       type: "incident.comment_added",
       aggregate_id: incident_id,
@@ -625,7 +631,7 @@ export const AddIncidentComment = async (
       // Deferred past the commit rather than awaited here. A queue push inside a
       // transaction can be picked up by a worker before the transaction commits,
       // and the worker then reads a comment that does not exist yet.
-      afterCommit(() => notifySubscribersOfComment(incidentExists, c));
+      afterCommit(() => notifySubscribersOfComment(incidentExists, c, commentEvent.event_id));
     }
 
     return c;

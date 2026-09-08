@@ -51,7 +51,6 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   // Outbound webhooks (E10). The delivery log is a read; everything that can
   // change where events are sent, or cause a send, is a write.
   getWebhookEndpoints: "webhooks.read",
-  getWebhookDeliveries: "webhooks.read",
   createWebhookEndpoint: "webhooks.write",
   updateWebhookEndpoint: "webhooks.write",
   deleteWebhookEndpoint: "webhooks.write",
@@ -59,7 +58,12 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   // A test causes an outbound request to a URL the caller chose, so it is a
   // write even though it changes nothing in the database.
   testWebhookEndpoint: "webhooks.write",
-  retryWebhookDelivery: "webhooks.write",
+
+  // The delivery log (E9). Not webhook-specific: one screen covers every
+  // outbound channel, because they all write to event_deliveries.
+  getEventDeliveries: "webhooks.read",
+  retryEventDelivery: "webhooks.write",
+  retryDeliveriesForTarget: "webhooks.write",
 };
 
 /**
@@ -69,6 +73,7 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
  */
 export const ORG_ROUTE_PERMISSION_MAP: Record<string, string | null> = {
   "/(manage)/manage/app/audit": "audit.read",
+  "/(manage)/manage/app/deliveries": "webhooks.read",
 };
 
 /** Permission ids the fork owns. Used by the seeds to tell them from upstream's. */

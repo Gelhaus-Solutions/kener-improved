@@ -142,7 +142,7 @@ Respond `2xx` within the endpoint timeout (10s by default). Anything else is a f
 
 - Retries follow 10s → 1m → 5m → 30m → 2h → 6h, with jitter. Seven attempts over roughly nine hours.
 - A `4xx` other than `408` and `429` is treated as permanent and not retried.
-- Exhausted deliveries are marked `DEAD` and can be retried by hand from **Manage → Webhooks → Deliveries**.
+- Exhausted deliveries are marked `DEAD` and can be retried by hand from **Manage → Delivery Log**, which also shows what was sent and what came back.
 
 Deliver idempotently: use `id` to discard a duplicate, since a delivery can arrive twice after a crash.
 
@@ -174,7 +174,7 @@ See [environment variables](/docs/v4/setup/environment-variables).
 | Signature never matches        | The body was parsed and re-serialized. Sign the raw bytes.                                   |
 | Nothing is delivered           | The event type is not subscribed. A misspelled wildcard is rejected at save time.            |
 | `URL resolves to a private address` | The receiver is on a private range; set `KENER_ALLOW_PRIVATE_WEBHOOKS=true`.            |
-| Endpoint became `DISABLED_AUTO` | 20 consecutive failures. Fix the receiver and re-enable it.                                  |
+| Endpoint became `DISABLED_AUTO` | 20 consecutive failures. Fix the receiver and re-enable it, then use **Retry all dead for this target** on the delivery log. |
 | `Endpoint secret could not be decrypted` | `KENER_SECRET_KEY` changed. Rotate the endpoint's secret to set a new one.        |
 
 > [!WARNING]

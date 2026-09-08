@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createHmac } from "node:crypto";
-import { signPayload, checkWebhookUrl } from "./webhook_delivery.js";
+import { signPayload, checkWebhookUrl, redactHeaders } from "./webhook_delivery.js";
 
 describe("webhook signing", () => {
   const body = JSON.stringify({ id: "01ABC", type: "incident.created" });
@@ -88,5 +88,49 @@ describe("webhook SSRF guard", () => {
     // The boundary the /12 mask makes easy to get wrong in both directions.
     expect((await checkWebhookUrl("http://172.15.0.1/x")).allowed).toBe(true);
     expect((await checkWebhookUrl("http://172.32.0.1/x")).allowed).toBe(true);
+  });
+});
+
+describe("outgoing header redaction", () => {
+  it("keeps the headers a reader needs", () => {
+    const out = redactHeaders({
+      "content-type": "application/json",
+      accept: "application/json",
+      "user-agent": "Kener/4.1.5",
+      "kener-event-id": "01ABC",
+      "kener-event-type": "incident.created",
+      "kener-delivery-seq": "42",
+    });
+    expect(out["content-type"]).toBe("application/json");
+    expect(out["kener-event-type"]).toBe("incident.created");
+    expect(out["kener-delivery-seq"]).toBe("42");
+  });
+
+  it("strips the signature digest but keeps its timestamp", () => {
+    const out = redactHeaders({ "kener-signature": `t=1700000000,v1=${"a".repeat(64)}` });
+    // The timestamp is useful for debugging skew; the digest is an oracle.
+    expect(out["kener-signature"]).toBe("t=1700000000,v1=[redacted]");
+  });
+
+  it("strips every digest during a rotation, not just the first", () => {
+    const out = redactHeaders({ "kener-signature": `t=1,v1=${"a".repeat(64)},v1=${"b".repeat(64)}` });
+    expect(out["kener-signature"]).toBe("t=1,v1=[redacted],v1=[redacted]");
+  });
+
+  it("redacts anything it does not recognise, because that is where tokens live", () => {
+    const out = redactHeaders({
+      Authorization: "Bearer super-secret",
+      "X-Api-Key": "abc123",
+      Cookie: "session=xyz",
+    });
+    expect(Object.values(out)).toEqual(["[redacted]", "[redacted]", "[redacted]"]);
+    expect(JSON.stringify(out)).not.toContain("super-secret");
+    expect(JSON.stringify(out)).not.toContain("abc123");
+  });
+
+  it("is case-insensitive about the safe list", () => {
+    const out = redactHeaders({ "Content-Type": "application/json", "Kener-Event-Type": "incident.resolved" });
+    expect(out["Content-Type"]).toBe("application/json");
+    expect(out["Kener-Event-Type"]).toBe("incident.resolved");
   });
 });

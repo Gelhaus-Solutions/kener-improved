@@ -17,6 +17,12 @@ import type { DeliveryResult, EventDeliveryRecord } from "./types.js";
 /** Response bodies are stored for debugging, not archived. */
 const MAX_RESPONSE_BODY = 2000;
 
+/**
+ * Request bodies get far more room than responses, because a retry rebuilds from
+ * this: a truncated request body is not merely less useful, it is unreplayable.
+ */
+const MAX_REQUEST_BODY = 64 * 1024;
+
 /** Ordered-consumer lock lifetime. Long enough for a slow HTTP delivery. */
 const ORDER_LOCK_TTL_MS = 60_000;
 
@@ -24,9 +30,9 @@ function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
 }
 
-function truncate(value: string | null | undefined): string | null {
+function truncate(value: string | null | undefined, max = MAX_RESPONSE_BODY): string | null {
   if (value === null || value === undefined) return null;
-  return value.length > MAX_RESPONSE_BODY ? value.slice(0, MAX_RESPONSE_BODY) : value;
+  return value.length > max ? value.slice(0, max) : value;
 }
 
 function orderLockKey(consumer: string, aggregateType: string, aggregateId: string): string {
@@ -59,6 +65,19 @@ async function releaseOrderLock(key: string, token: string): Promise<void> {
   }
 }
 
+/** The request side of an attempt, ready for the delivery row. */
+function requestColumns(result: DeliveryResult): {
+  request_headers: string | null;
+  request_body: string | null;
+  duration_ms: number | null;
+} {
+  return {
+    request_headers: result.request_headers ? JSON.stringify(result.request_headers) : null,
+    request_body: truncate(result.request_body, MAX_REQUEST_BODY),
+    duration_ms: result.duration_ms ?? null,
+  };
+}
+
 async function recordFailure(delivery: EventDeliveryRecord, result: DeliveryResult, now: number): Promise<void> {
   const attempts = delivery.attempts + 1;
   // A permanent failure skips the ladder entirely. Spending nine hours retrying
@@ -71,6 +90,7 @@ async function recordFailure(delivery: EventDeliveryRecord, result: DeliveryResu
     response_code: result.response_code ?? null,
     response_body: truncate(result.response_body),
     error: truncate(result.error) ?? null,
+    ...requestColumns(result),
     updated_at: now,
   });
 
@@ -180,6 +200,7 @@ export async function runDelivery(deliveryId: number): Promise<DispatchOutcome> 
         response_code: result.response_code ?? null,
         response_body: truncate(result.response_body),
         error: null,
+        ...requestColumns(result),
         updated_at: nowSeconds(),
       });
       return "delivered";

@@ -133,6 +133,9 @@ export const webhookConsumer: EventConsumer = {
       response_body: result.body,
       error: result.error,
       permanent: result.permanent,
+      request_headers: result.request_headers,
+      request_body: result.request_body,
+      duration_ms: result.duration_ms,
     };
   },
 };

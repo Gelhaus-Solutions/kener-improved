@@ -358,13 +358,47 @@ export async function AdminAddSubscriber(
  * Used for sending notification emails to subscribers
  */
 export async function GetActiveEmailsForEventType(eventType: SubscriptionEventType): Promise<string[]> {
+  return (await GetActiveEmailMethodsForEventType(eventType)).map((m) => m.email);
+}
+
+/** One deliverable email address, with the identifiers a delivery row needs. */
+export interface ActiveEmailMethod {
+  subscriber_user_id: number;
+  subscriber_method_id: number;
+  email: string;
+}
+
+/**
+ * The same recipients as `GetActiveEmailsForEventType`, but keeping the ids.
+ *
+ * The bare `string[]` that function returns is a real blocker rather than a
+ * style preference: without `subscriber_method_id` there is no stable identity
+ * for a recipient, so a per-recipient delivery row has nothing to key on and a
+ * per-recipient unsubscribe token cannot be minted. Two subscribers can also
+ * share an address, and deduplicating by string silently drops one of them.
+ *
+ * This is the minimal version. E1 rewrites the subscription query properly; the
+ * old function is kept and now delegates here, so nothing that calls it changes.
+ */
+export async function GetActiveEmailMethodsForEventType(
+  eventType: SubscriptionEventType,
+): Promise<ActiveEmailMethod[]> {
   const subscribers = await db.getSubscribersForEvent(eventType);
 
-  // Filter for email method type and extract unique email addresses
-  const emails = subscribers.filter((s) => s.method.method_type === "email").map((s) => s.method.method_value);
-
-  // Return unique emails
-  return [...new Set(emails)];
+  const seen = new Set<number>();
+  const methods: ActiveEmailMethod[] = [];
+  for (const s of subscribers) {
+    if (s.method.method_type !== "email") continue;
+    // Deduplicated by method, not by address: one method is one delivery.
+    if (seen.has(s.method.id)) continue;
+    seen.add(s.method.id);
+    methods.push({
+      subscriber_user_id: s.user.id,
+      subscriber_method_id: s.method.id,
+      email: s.method.method_value,
+    });
+  }
+  return methods;
 }
 
 // ============ Public Subscription Functions ============

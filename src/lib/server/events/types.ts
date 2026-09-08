@@ -114,6 +114,17 @@ export interface EventDeliveryInsert {
   response_code: number | null;
   response_body: string | null;
   error: string | null;
+  /** Redacted before storage. What was sent, so a failure can be explained. */
+  request_headers?: string | null;
+  /**
+   * The request body.
+   *
+   * Also the retry mechanism for channels that cannot rebuild their own message:
+   * a webhook can be regenerated from the event, a rendered subscriber email
+   * cannot.
+   */
+  request_body?: string | null;
+  duration_ms?: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -152,6 +163,10 @@ export interface DeliveryResult {
   response_code?: number | null;
   response_body?: string | null;
   error?: string | null;
+  /** What was sent. Recorded on the row so the delivery log can explain the failure. */
+  request_headers?: Record<string, string> | null;
+  request_body?: string | null;
+  duration_ms?: number | null;
   /**
    * True when retrying cannot possibly help: a 400 from a webhook, a subscriber
    * that no longer exists. Sends the delivery straight to DEAD instead of

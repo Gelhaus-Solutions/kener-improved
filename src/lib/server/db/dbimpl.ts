@@ -348,6 +348,8 @@ class DbImpl {
   getEventDeliveriesPaginated!: EventsRepository["getDeliveriesPaginated"];
   getEventDeliveriesCount!: EventsRepository["getDeliveriesCount"];
   resetEventDeliveryForRetry!: EventsRepository["resetDeliveryForRetry"];
+  getDeadDeliveriesForTarget!: EventsRepository["getDeadDeliveriesForTarget"];
+  getDeliveryConsumers!: EventsRepository["getDeliveryConsumers"];
   pruneEventDeliveries!: EventsRepository["pruneDeliveries"];
 
   // Outbound webhook endpoints (E10). Attempts live in event_deliveries.
@@ -1038,6 +1040,8 @@ class DbImpl {
     this.getEventDeliveriesPaginated = this.events.getDeliveriesPaginated.bind(this.events);
     this.getEventDeliveriesCount = this.events.getDeliveriesCount.bind(this.events);
     this.resetEventDeliveryForRetry = this.events.resetDeliveryForRetry.bind(this.events);
+    this.getDeadDeliveriesForTarget = this.events.getDeadDeliveriesForTarget.bind(this.events);
+    this.getDeliveryConsumers = this.events.getDeliveryConsumers.bind(this.events);
     this.pruneEventDeliveries = this.events.pruneDeliveries.bind(this.events);
   }
 

@@ -269,10 +269,48 @@ export class EventsRepository extends BaseRepository {
       response_code: number | null;
       response_body: string | null;
       error: string | null;
+      request_headers?: string | null;
+      request_body?: string | null;
+      duration_ms?: number | null;
       updated_at: number;
     },
   ): Promise<void> {
     await this.knex("event_deliveries").where("id", id).update(fields);
+  }
+
+  /**
+   * Every delivery for one target that ended up DEAD, oldest first.
+   *
+   * Backs the "retry everything this endpoint missed" action: after a receiver
+   * has been down for a day, retrying its dead letters one row at a time is not
+   * a workable operator experience.
+   */
+  async getDeadDeliveriesForTarget(
+    orgId: number,
+    consumer: string,
+    targetType: string,
+    targetId: string,
+    limit: number,
+  ): Promise<EventDeliveryRecord[]> {
+    const rows = (await this.knex("event_deliveries")
+      .select("*")
+      .where("org_id", orgId)
+      .andWhere("consumer", consumer)
+      .andWhere("target_type", targetType)
+      .andWhere("target_id", targetId)
+      .andWhere("status", "DEAD")
+      .orderBy("id", "asc")
+      .limit(limit)) as Record<string, unknown>[];
+    return rows.map((r) => this.mapDelivery(r));
+  }
+
+  /** Distinct consumers that have ever delivered, for the log's filter dropdown. */
+  async getDeliveryConsumers(orgId: number): Promise<string[]> {
+    const rows = (await this.knex("event_deliveries")
+      .distinct("consumer")
+      .where("org_id", orgId)
+      .orderBy("consumer", "asc")) as { consumer: string }[];
+    return rows.map((r) => r.consumer);
   }
 
   /** Records a delivery that was never attempted, e.g. a shadow-mode consumer. */
@@ -423,6 +461,7 @@ export class EventsRepository extends BaseRepository {
       id: Number(row.id),
       org_id: Number(row.org_id),
       attempts: Number(row.attempts),
+      duration_ms: row.duration_ms === null || row.duration_ms === undefined ? null : Number(row.duration_ms),
       created_at: Number(row.created_at),
       updated_at: Number(row.updated_at),
     };
