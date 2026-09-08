@@ -1,3 +1,4 @@
+import { ResolvePublicMonitor } from "$lib/server/controllers/publicMonitorResolver";
 import type { PageServerLoad } from "./$types";
 import { error } from "@sveltejs/kit";
 import db from "$lib/server/db/db";
@@ -27,7 +28,9 @@ export const load: PageServerLoad = async ({ params, url }) => {
     serverEndOfDayTodayAtTz = endOfDayAtTz("UTC");
   }
 
-  const monitor = await db.getMonitorByTag(tag);
+  // I3e: the embed URL carries the per-org slug; identical to the tag for the
+  // default org, so existing embed snippets keep working.
+  const monitor = await ResolvePublicMonitor(tag);
   if (!monitor) {
     throw error(404, { message: "Monitor not found" });
   }

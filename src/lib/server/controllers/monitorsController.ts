@@ -1,3 +1,4 @@
+import { ResolvePublicMonitorTag } from "./publicMonitorResolver.js";
 import {
   GetMinuteStartNowTimestampUTC,
   GetMinuteStartTimestampUTC,
@@ -359,7 +360,11 @@ export const GetLastHeartbeat = async (monitor_tag: string): Promise<MonitoringD
   return await db.getLastHeartbeat(monitor_tag);
 };
 
-export const RegisterHeartbeat = async (tag: string, secret: string): Promise<string> => {
+export const RegisterHeartbeat = async (nameInUrl: string, secret: string): Promise<string> => {
+  // I3e: a heartbeat URL carries the per-org slug like every other public URL.
+  // These live in external cron jobs and uptime pingers for years, so the
+  // default org resolving slug to the identical tag is what keeps them working.
+  const tag = (await ResolvePublicMonitorTag(nameInUrl)) ?? nameInUrl;
   let monitor = (await GetMonitorsParsed({ tag, status: "ACTIVE", monitor_type: "HEARTBEAT" }).then((monitors) =>
     monitors.length > 0 ? monitors[0] : null,
   )) as HeartbeatMonitor | null;
@@ -554,13 +559,22 @@ function formatDuration(rangeInSeconds: number): string {
 }
 
 export const GetBadge = async (badgeType: BadgeType, params: BadgeParams): Promise<Response> => {
-  const { tag } = params;
+  const nameInUrl = params.tag;
 
-  if (!tag) {
+  if (!nameInUrl) {
     return new Response(ErrorSvg, {
       headers: { "Content-Type": "image/svg+xml" },
     });
   }
+
+  // I3e: badge URLs carry the monitor's per-org slug. Resolved here rather than
+  // in each of the four badge routes, because all four funnel through this
+  // function and a fifth badge type would otherwise have to remember.
+  //
+  // `_` is the reserved "all monitors" token and is not a monitor name, so it is
+  // passed through untouched. For the default org every other name resolves to
+  // itself, which is what keeps a badge embedded in somebody's README working.
+  const tag = nameInUrl === "_" ? nameInUrl : ((await ResolvePublicMonitorTag(nameInUrl)) ?? nameInUrl);
 
   let name: string;
   let message: string;

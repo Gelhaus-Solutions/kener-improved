@@ -7,6 +7,7 @@ import { eventContextHandle } from "$lib/server/http/eventContext";
 import { auditApiKeyAuthFailure, auditApiKeyScopeDenied } from "$lib/server/audit/events";
 import { AuthenticateAPIKey, ApiKeyHasScope, TouchAPIKey } from "$lib/server/controllers/apiController";
 import { requiredScopeForRoute } from "$lib/server/api/routeScopes";
+import { ResolvePublicMonitorTag } from "$lib/server/controllers/publicMonitorResolver";
 import db from "$lib/server/db/db";
 import type { UnauthorizedResponse, ForbiddenResponse, NotFoundResponse } from "$lib/types/api";
 import { GetMonitorsParsed } from "$lib/server/controllers/monitorsController";
@@ -198,7 +199,11 @@ const apiAuthHandle: Handle = async ({ event, resolve }) => {
     // Validate monitor tag exists for /api/(vX/)?monitors/:monitor_tag/* routes
     const monitorTag = extractMonitorTag(pathname);
     if (monitorTag) {
-      const monitor = await GetMonitorsParsed({ tag: monitorTag }).then((monitors) => monitors[0]);
+      // I3e: the URL segment is a *slug*, resolved within the org the key
+      // established a moment ago. For the default org slug and tag are the same
+      // string, so every existing API URL is unaffected.
+      const resolvedTag = (await ResolvePublicMonitorTag(monitorTag)) ?? monitorTag;
+      const monitor = await GetMonitorsParsed({ tag: resolvedTag }).then((monitors) => monitors[0]);
       if (!monitor) {
         const errorResponse: NotFoundResponse = {
           error: {

@@ -124,6 +124,21 @@ export class MonitorsRepository extends BaseRepository {
     return await this.table("monitors").where("tag", tag).first();
   }
 
+  /**
+   * The monitor with this per-org slug (I3e).
+   *
+   * `tag` is the physical key - globally unique, and the thing that appears in
+   * `monitoring_data`, Redis keys and BullMQ job ids - while `slug` is the name a
+   * tenant chose and the one that belongs in a public URL. For the default org
+   * the two are identical, which is what makes every existing badge, embed and
+   * monitor URL keep working unchanged.
+   *
+   * Org-scoped like everything else here, so two orgs may both have `api`.
+   */
+  async getMonitorBySlug(slug: string): Promise<MonitorRecord | undefined> {
+    return await this.table("monitors").where("slug", slug).first();
+  }
+
   async deleteMonitorsByTag(tag: string): Promise<number> {
     return await this.table("monitors").where("tag", tag).del();
   }

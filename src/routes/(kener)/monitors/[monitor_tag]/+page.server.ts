@@ -13,13 +13,17 @@ import { GetNowTimestampUTC, UptimeCalculator } from "$lib/server/tool";
 import GC from "$lib/global-constants.js";
 import { GetStatusColor, GetStatusSummary, ParseLatency } from "$lib/clientTools";
 import { GetMonitorsParsed } from "$lib/server/controllers/monitorsController";
+import { ResolvePublicMonitorTag } from "$lib/server/controllers/publicMonitorResolver";
 import type { GroupMonitorTypeData } from "$lib/server/types/monitor";
 
 export const load: PageServerLoad = async ({ params, parent }) => {
   const { monitor_tag } = params;
   const parentData = await parent();
+  // I3e: the URL carries the monitor's per-org slug. Identical to the tag for
+  // the default org, so existing links are unaffected.
+  const resolvedTag = (await ResolvePublicMonitorTag(monitor_tag)) ?? monitor_tag;
   // Validate monitor exists
-  const monitors = await GetMonitorsParsed({ tag: monitor_tag, status: "ACTIVE", is_hidden: "NO" });
+  const monitors = await GetMonitorsParsed({ tag: resolvedTag, status: "ACTIVE", is_hidden: "NO" });
   if (!monitors || monitors.length === 0) {
     throw error(404, { message: "Monitor not found" });
   }
