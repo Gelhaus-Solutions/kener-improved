@@ -1066,6 +1066,29 @@ export interface AuditLogFilter {
   end?: number;
 }
 
+// ---------------------------------------------------------------- MFA
+
+export interface MfaTotpRecord {
+  user_id: number;
+  /** A `secretBox` envelope over the base32 TOTP secret. Never the secret. */
+  secret_enc: string;
+  confirmed_at: number | null;
+  last_used_step: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface MfaRecoveryCodeRecord {
+  id: number;
+  user_id: number;
+  code_hash: string;
+  used_at: number | null;
+  created_at: number;
+}
+
+/** Who has to present a second factor. Stored in `site_data.mfaPolicy`. */
+export type MfaPolicy = "none" | "local_only" | "all";
+
 // ---------------------------------------------------------------- sessions
 
 /** How strongly the user authenticated. Written by A2; `none` until then. */

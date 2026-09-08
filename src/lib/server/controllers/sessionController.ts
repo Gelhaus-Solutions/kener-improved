@@ -245,6 +245,17 @@ export async function RevokeUserSessions(userId: number, reason: string, exceptS
   return await db.revokeUserSessions(userId, reason, nowSeconds(), exceptSessionId);
 }
 
+/**
+ * Raises the MFA level recorded on a session.
+ *
+ * Called when the user proves a factor, which is how step-up auth becomes
+ * possible later without a new table: gating a sensitive action is then a check
+ * on this column.
+ */
+export async function setSessionMfa(sessionId: string, level: string): Promise<void> {
+  await db.setSessionMfaLevel(sessionId, level);
+}
+
 export async function GetUserSessions(userId: number): Promise<SessionRecord[]> {
   return await db.getSessionsForUser(userId);
 }

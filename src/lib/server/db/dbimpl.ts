@@ -22,6 +22,7 @@ import { AuditRepository } from "./repositories/audit.js";
 import { EventsRepository } from "./repositories/events.js";
 import { WebhooksRepository } from "./repositories/webhooks.js";
 import { SessionsRepository } from "./repositories/sessions.js";
+import { MfaRepository } from "./repositories/mfa.js";
 import { SubscriptionSystemRepository } from "./repositories/subscriptionSystem.js";
 import { EmailTemplateConfigRepository } from "./repositories/emailTemplateConfig.js";
 
@@ -58,6 +59,7 @@ class DbImpl {
   private events!: EventsRepository;
   private webhooks!: WebhooksRepository;
   private sessions!: SessionsRepository;
+  private mfa!: MfaRepository;
   private subscriptionSystem!: SubscriptionSystemRepository;
   private emailTemplateConfig!: EmailTemplateConfigRepository;
 
@@ -358,6 +360,18 @@ class DbImpl {
   pruneEventDeliveries!: EventsRepository["pruneDeliveries"];
 
   // Outbound webhook endpoints (E10). Attempts live in event_deliveries.
+  // ============ MFA (A2) ============
+  getTotp!: MfaRepository["getTotp"];
+  putUnconfirmedTotp!: MfaRepository["putUnconfirmedTotp"];
+  confirmTotp!: MfaRepository["confirmTotp"];
+  consumeTotpStep!: MfaRepository["consumeTotpStep"];
+  deleteTotp!: MfaRepository["deleteTotp"];
+  replaceRecoveryCodes!: MfaRepository["replaceRecoveryCodes"];
+  getUnusedRecoveryCodes!: MfaRepository["getUnusedRecoveryCodes"];
+  useRecoveryCode!: MfaRepository["useRecoveryCode"];
+  countRecoveryCodes!: MfaRepository["countRecoveryCodes"];
+  deleteRecoveryCodes!: MfaRepository["deleteRecoveryCodes"];
+
   // ============ Sessions (A9) ============
   createSession!: SessionsRepository["createSession"];
   getLiveSession!: SessionsRepository["getLiveSession"];
@@ -486,6 +500,7 @@ class DbImpl {
     this.events = new EventsRepository(this.knex);
     this.webhooks = new WebhooksRepository(this.knex);
     this.sessions = new SessionsRepository(this.knex);
+    this.mfa = new MfaRepository(this.knex);
     this.subscriptionSystem = new SubscriptionSystemRepository(this.knex);
     this.emailTemplateConfig = new EmailTemplateConfigRepository(this.knex);
 
@@ -505,6 +520,7 @@ class DbImpl {
     this.bindEventsMethods();
     this.bindWebhooksMethods();
     this.bindSessionsMethods();
+    this.bindMfaMethods();
 
     this.init();
   }
@@ -1066,6 +1082,19 @@ class DbImpl {
     this.getShadowDiffEventIds = this.events.getShadowDiffEventIds.bind(this.events);
     this.getShadowDiffEventCount = this.events.getShadowDiffEventCount.bind(this.events);
     this.pruneEventDeliveries = this.events.pruneDeliveries.bind(this.events);
+  }
+
+  private bindMfaMethods(): void {
+    this.getTotp = this.mfa.getTotp.bind(this.mfa);
+    this.putUnconfirmedTotp = this.mfa.putUnconfirmedTotp.bind(this.mfa);
+    this.confirmTotp = this.mfa.confirmTotp.bind(this.mfa);
+    this.consumeTotpStep = this.mfa.consumeTotpStep.bind(this.mfa);
+    this.deleteTotp = this.mfa.deleteTotp.bind(this.mfa);
+    this.replaceRecoveryCodes = this.mfa.replaceRecoveryCodes.bind(this.mfa);
+    this.getUnusedRecoveryCodes = this.mfa.getUnusedRecoveryCodes.bind(this.mfa);
+    this.useRecoveryCode = this.mfa.useRecoveryCode.bind(this.mfa);
+    this.countRecoveryCodes = this.mfa.countRecoveryCodes.bind(this.mfa);
+    this.deleteRecoveryCodes = this.mfa.deleteRecoveryCodes.bind(this.mfa);
   }
 
   private bindSessionsMethods(): void {

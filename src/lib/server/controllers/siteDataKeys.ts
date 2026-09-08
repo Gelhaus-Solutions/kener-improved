@@ -1,6 +1,7 @@
 import {
   IsValidAnalytics,
   IsValidConsumerModes,
+  IsValidMfaPolicy,
   IsValidColors,
   IsValidHero,
   IsValidI18n,
@@ -340,5 +341,13 @@ export const siteDataKeys: SiteDataKey[] = [
     key: "eventBusConsumers",
     isValid: IsValidConsumerModes,
     data_type: "object",
+  },
+  {
+    // Who must hold a second factor: none | local_only | all. Defaults to
+    // local_only, which exempts users who authenticate at an identity provider,
+    // since their factors are the provider's business.
+    key: "mfaPolicy",
+    isValid: IsValidMfaPolicy,
+    data_type: "string",
   },
 ];

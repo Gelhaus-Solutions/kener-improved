@@ -150,3 +150,15 @@ export function IsValidConsumerModes(value: string): boolean {
   }
   return true;
 }
+
+/**
+ * The MFA policy: who is expected to hold a Kener-managed second factor.
+ *
+ * A plain string rather than JSON, so it is validated against the closed set
+ * directly. Registered for the same reason `IsValidConsumerModes` is: the read
+ * path falls back to `local_only` on anything it does not recognise, so a bad
+ * write would otherwise take effect as "no change" with nothing to say so.
+ */
+export function IsValidMfaPolicy(value: string): boolean {
+  return value === "none" || value === "local_only" || value === "all";
+}

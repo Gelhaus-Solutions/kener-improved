@@ -18,3 +18,4 @@ export { EmailTemplateConfigRepository } from "./emailTemplateConfig.js";
 export { EventsRepository } from "./events.js";
 export { WebhooksRepository } from "./webhooks.js";
 export { SessionsRepository } from "./sessions.js";
+export { MfaRepository } from "./mfa.js";

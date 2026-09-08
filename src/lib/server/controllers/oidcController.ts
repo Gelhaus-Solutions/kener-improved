@@ -158,6 +158,7 @@ export async function HandleCallback(
   email: string;
   name: string;
   groups: string[];
+  mfaAsserted: boolean;
 }> {
   const config = await getOidcConfig(settings);
 
@@ -214,7 +215,38 @@ export async function HandleCallback(
     email: email.toLowerCase().trim(),
     name: name.trim() || email,
     groups,
+    // Whether the provider says a second factor was actually used for this
+    // login. Recorded on the session so an SSO user under a strict policy is
+    // credited for the factor they already cleared, instead of being asked for
+    // a second, Kener-managed one on top.
+    mfaAsserted: assertsMfa(claims),
   };
+}
+
+/**
+ * Whether an ID token claims multi-factor authentication took place.
+ *
+ * Two standard claims say so and providers disagree about which they emit, so
+ * both are read:
+ *
+ *   `amr` - the methods used. `mfa` is the explicit one; `otp`, `hwk` and
+ *           `swk` name second factors directly and are treated as equivalent,
+ *           because a provider that reports "otp" without also reporting "mfa"
+ *           is describing the same event.
+ *   `acr` - a context class. There is no universal vocabulary here, so this
+ *           only matches the widely used `...loa-2`/`loa-3` and `mfa` forms.
+ *
+ * A false answer is safe: it means the user is treated as not having asserted a
+ * factor, which under the default `local_only` policy changes nothing at all.
+ */
+function assertsMfa(claims: Record<string, unknown>): boolean {
+  const amr = claims.amr;
+  if (Array.isArray(amr)) {
+    const methods = amr.map((m) => String(m).toLowerCase());
+    if (methods.some((m) => m === "mfa" || m === "otp" || m === "hwk" || m === "swk")) return true;
+  }
+  const acr = typeof claims.acr === "string" ? claims.acr.toLowerCase() : "";
+  return acr.includes("mfa") || acr.endsWith("loa-2") || acr.endsWith("loa-3");
 }
 
 /**

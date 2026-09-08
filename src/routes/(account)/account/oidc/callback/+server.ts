@@ -1,4 +1,14 @@
 import { redirect, error } from "@sveltejs/kit";
+
+/** See the identical helper on the sign-in route: an address is never worth failing a login over. */
+function safeClientAddress(event: { getClientAddress: () => string }): string | null {
+  try {
+    return event.getClientAddress();
+  } catch {
+    return null;
+  }
+}
+
 import type { RequestHandler } from "./$types";
 import {
   GetOidcSettings,
@@ -63,7 +73,14 @@ export const GET: RequestHandler = async (event) => {
 
     auditOidcCallback(event, { outcome: "ok", userId: user.id, email: user.email, reason: "oidc" });
 
-    const { token, cookieConfig } = await GenerateOidcSession(user);
+    const { token, cookieConfig } = await GenerateOidcSession(user, {
+      ip: safeClientAddress(event),
+      userAgent: event.request.headers.get("user-agent"),
+      // "idp" rather than "totp": the factor was cleared at the provider, not
+      // here. Recording which it was matters for step-up decisions later, and
+      // conflating them would claim Kener verified something it did not.
+      mfaLevel: oidcData.mfaAsserted ? "idp" : "none",
+    });
 
     cookies.set(cookieConfig.name, token, {
       path: cookieConfig.path,

@@ -8,6 +8,8 @@ import {
 } from "$lib/server/controllers/userController";
 import { VerifyPassword } from "$lib/server/controllers/commonController";
 import { CreateSession } from "$lib/server/controllers/sessionController";
+import { RequiresMfa } from "$lib/server/controllers/mfaController";
+import { IssueMfaChallenge } from "$lib/server/controllers/mfaChallenge";
 import { GetOidcSettings } from "$lib/server/controllers/oidcController";
 import serverResolve from "$lib/server/resolver.js";
 import GC from "$lib/global-constants";
@@ -141,6 +143,22 @@ export const actions: Actions = {
         email,
         userDB.id,
       );
+    }
+
+    // A correct password is not a sign-in when a second factor is enrolled. No
+    // session is minted here: the user gets a five-minute challenge instead, and
+    // only a valid code turns that into a session. Minting first and checking
+    // after would make the factor optional for anyone holding the password.
+    if (await RequiresMfa(userDB.id)) {
+      auditSignIn(event, {
+        outcome: "ok",
+        email,
+        userId: userDB.id,
+        reason: "password_mfa_required",
+        statusCode: 302,
+      });
+      IssueMfaChallenge(cookies, userDB.id);
+      throw redirect(302, serverResolve("/account/mfa"));
     }
 
     auditSignIn(event, { outcome: "ok", email, userId: userDB.id, reason: "password", statusCode: 302 });

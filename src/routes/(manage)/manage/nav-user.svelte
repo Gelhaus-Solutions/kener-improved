@@ -244,6 +244,106 @@
     return os ? `${browser} on ${os}` : browser;
   }
 
+  // --- Two-factor authentication -------------------------------------------
+  interface MfaStatus {
+    enabled: boolean;
+    pending: boolean;
+    recovery_total: number;
+    recovery_unused: number;
+    policy: string;
+    applies: boolean;
+  }
+
+  let mfa = $state<MfaStatus | null>(null);
+  let mfaLoading = $state(false);
+  let mfaError = $state("");
+  let mfaBusy = $state(false);
+  let mfaPassword = $state("");
+  // Set while enrolling; cleared once confirmed. Holding the QR in state rather
+  // than refetching keeps the secret out of a second round trip.
+  let enrolment = $state<{ secret: string; qrDataUrl: string } | null>(null);
+  let enrolCode = $state("");
+  // Shown exactly once. There is deliberately no way to retrieve them later:
+  // they are stored only as bcrypt hashes.
+  let recoveryCodes = $state<string[] | null>(null);
+  let showDisable = $state(false);
+
+  async function loadMfa() {
+    mfaLoading = true;
+    mfaError = "";
+    try {
+      mfa = await callApi("getMfaStatus", {});
+    } catch (e) {
+      mfaError = e instanceof Error ? e.message : "Could not load two-factor status";
+    } finally {
+      mfaLoading = false;
+    }
+  }
+
+  async function beginEnrolment() {
+    mfaBusy = true;
+    mfaError = "";
+    try {
+      const resp = await callApi("beginMfaEnrolment", { password: mfaPassword });
+      enrolment = { secret: resp.secret, qrDataUrl: resp.qrDataUrl };
+      mfaPassword = "";
+    } catch (e) {
+      mfaError = e instanceof Error ? e.message : "Could not start enrolment";
+    } finally {
+      mfaBusy = false;
+    }
+  }
+
+  async function confirmEnrolment() {
+    mfaBusy = true;
+    mfaError = "";
+    try {
+      const resp = await callApi("confirmMfaEnrolment", { code: enrolCode });
+      recoveryCodes = resp.recoveryCodes ?? [];
+      enrolment = null;
+      enrolCode = "";
+      await loadMfa();
+      // Every other device was signed out by the confirm, which is the point of
+      // turning this on. Reflect that in the list the user is looking at.
+      await loadSessions();
+    } catch (e) {
+      mfaError = e instanceof Error ? e.message : "Could not confirm the code";
+    } finally {
+      mfaBusy = false;
+    }
+  }
+
+  async function disableMfa() {
+    mfaBusy = true;
+    mfaError = "";
+    try {
+      await callApi("disableMfa", { password: mfaPassword });
+      mfaPassword = "";
+      showDisable = false;
+      recoveryCodes = null;
+      await loadMfa();
+    } catch (e) {
+      mfaError = e instanceof Error ? e.message : "Could not turn two-factor off";
+    } finally {
+      mfaBusy = false;
+    }
+  }
+
+  async function regenerateCodes() {
+    mfaBusy = true;
+    mfaError = "";
+    try {
+      const resp = await callApi("regenerateRecoveryCodes", { password: mfaPassword });
+      recoveryCodes = resp.recoveryCodes ?? [];
+      mfaPassword = "";
+      await loadMfa();
+    } catch (e) {
+      mfaError = e instanceof Error ? e.message : "Could not generate new recovery codes";
+    } finally {
+      mfaBusy = false;
+    }
+  }
+
   function openAccountDialog() {
     myName = user.name;
     myPassword = "";
@@ -253,7 +353,14 @@
     nameSuccess = false;
     passwordSuccess = false;
     accountDialogOpen = true;
+    mfaError = "";
+    mfaPassword = "";
+    enrolment = null;
+    enrolCode = "";
+    recoveryCodes = null;
+    showDisable = false;
     loadSessions();
+    loadMfa();
   }
 </script>
 
@@ -440,6 +547,154 @@
           <p class="text-destructive text-sm">{passwordError}</p>
         {/if}
       </form>
+
+      <!-- Two-factor authentication -->
+      {#if mfa?.applies}
+        <div class="flex flex-col gap-3 border-t pt-4">
+          <div class="flex items-center justify-between">
+            <Label>Two-factor authentication</Label>
+            {#if mfa.enabled}
+              <span
+                class="rounded bg-emerald-100 px-1.5 py-0.5 text-xs text-emerald-800 dark:bg-emerald-900 dark:text-emerald-300"
+              >
+                On
+              </span>
+            {/if}
+          </div>
+
+          {#if mfaLoading}
+            <p class="text-muted-foreground text-sm">Loading…</p>
+          {:else if recoveryCodes}
+            <!-- Shown once, never again. -->
+            <div class="flex flex-col gap-2">
+              <p class="text-sm font-medium">Save your recovery codes</p>
+              <p class="text-muted-foreground text-xs">
+                Each code works once, and lets you sign in if you lose your authenticator. They will not be shown again.
+              </p>
+              <div class="bg-muted grid grid-cols-2 gap-1 rounded p-2 font-mono text-xs">
+                {#each recoveryCodes as rc (rc)}
+                  <span>{rc}</span>
+                {/each}
+              </div>
+              <div class="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onclick={() => navigator.clipboard?.writeText(recoveryCodes!.join("\n"))}
+                >
+                  Copy
+                </Button>
+                <Button size="sm" onclick={() => (recoveryCodes = null)}>I have saved them</Button>
+              </div>
+            </div>
+          {:else if enrolment}
+            <div class="flex flex-col gap-2">
+              <p class="text-muted-foreground text-xs">
+                Scan this with your authenticator app, then enter the 6-digit code it shows.
+              </p>
+              <img src={enrolment.qrDataUrl} alt="Two-factor QR code" class="self-center rounded bg-white p-2" />
+              <p class="text-muted-foreground text-center text-xs">
+                Cannot scan? Enter this key instead:
+                <span class="font-mono break-all">{enrolment.secret}</span>
+              </p>
+              <div class="flex gap-2">
+                <Input bind:value={enrolCode} placeholder="000000" inputmode="numeric" class="flex-1" />
+                <Button disabled={mfaBusy || !enrolCode.trim()} onclick={() => confirmEnrolment()}>
+                  {#if mfaBusy}<LoaderIcon class="size-4 animate-spin" />{/if}
+                  Confirm
+                </Button>
+              </div>
+              <Button variant="ghost" size="sm" onclick={() => (enrolment = null)}>Cancel</Button>
+            </div>
+          {:else if mfa.enabled}
+            <p class="text-muted-foreground text-xs">
+              {mfa.recovery_unused} of {mfa.recovery_total} recovery codes remaining.
+            </p>
+            {#if showDisable}
+              <form
+                class="flex flex-col gap-2"
+                onsubmit={(e) => {
+                  e.preventDefault();
+                  disableMfa();
+                }}
+              >
+                <Input
+                  type="password"
+                  bind:value={mfaPassword}
+                  placeholder="Current password"
+                  autocomplete="current-password"
+                />
+                <div class="flex gap-2">
+                  <Button type="submit" variant="destructive" size="sm" disabled={mfaBusy || !mfaPassword}>
+                    {#if mfaBusy}<LoaderIcon class="size-4 animate-spin" />{/if}
+                    Turn off
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onclick={() => {
+                      showDisable = false;
+                      mfaPassword = "";
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </form>
+            {:else}
+              <form
+                class="flex flex-col gap-2"
+                onsubmit={(e) => {
+                  e.preventDefault();
+                  regenerateCodes();
+                }}
+              >
+                <Input
+                  type="password"
+                  bind:value={mfaPassword}
+                  placeholder="Current password"
+                  autocomplete="current-password"
+                />
+                <div class="flex gap-2">
+                  <Button type="submit" variant="outline" size="sm" disabled={mfaBusy || !mfaPassword}>
+                    {#if mfaBusy}<LoaderIcon class="size-4 animate-spin" />{/if}
+                    New recovery codes
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" onclick={() => (showDisable = true)}>Turn off</Button>
+                </div>
+              </form>
+            {/if}
+          {:else}
+            <p class="text-muted-foreground text-xs">
+              Protect your account with a code from an authenticator app, in addition to your password.
+            </p>
+            <form
+              class="flex gap-2"
+              onsubmit={(e) => {
+                e.preventDefault();
+                beginEnrolment();
+              }}
+            >
+              <Input
+                type="password"
+                bind:value={mfaPassword}
+                placeholder="Current password"
+                autocomplete="current-password"
+                class="flex-1"
+              />
+              <Button type="submit" disabled={mfaBusy || !mfaPassword}>
+                {#if mfaBusy}<LoaderIcon class="size-4 animate-spin" />{/if}
+                Set up
+              </Button>
+            </form>
+          {/if}
+
+          {#if mfaError}
+            <p class="text-destructive text-sm">{mfaError}</p>
+          {/if}
+        </div>
+      {/if}
 
       <!-- Active sessions -->
       <div class="flex flex-col gap-3 border-t pt-4">

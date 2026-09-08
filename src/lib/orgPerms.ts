@@ -87,6 +87,16 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   revokeMySession: null,
   // Acting on somebody else's sessions is the one that needs a permission.
   revokeUserSessions: "sessions.admin",
+
+  // MFA (A2). All self-scoped, all taking the user id from the session. The
+  // sensitive ones are guarded by the current password rather than by a
+  // permission: this is about proving who is at the keyboard, not what role they
+  // hold, and an admin must not be able to enrol a factor on somebody else.
+  getMfaStatus: null,
+  beginMfaEnrolment: null,
+  confirmMfaEnrolment: null,
+  disableMfa: null,
+  regenerateRecoveryCodes: null,
 };
 
 /**
