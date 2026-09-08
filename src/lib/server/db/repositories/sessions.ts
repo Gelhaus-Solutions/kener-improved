@@ -11,7 +11,7 @@ import type { SessionInsert, SessionRecord } from "../../types/db.js";
 
 export class SessionsRepository extends BaseRepository {
   async createSession(row: SessionInsert): Promise<void> {
-    await this.knex("sessions").insert(row);
+    await this.table("sessions").insert(row);
   }
 
   /**
@@ -31,7 +31,7 @@ export class SessionsRepository extends BaseRepository {
     id: string,
     now: number,
   ): Promise<(SessionRecord & { user_epoch: number; user_is_active: boolean }) | undefined> {
-    const row = (await this.knex("sessions as s")
+    const row = (await this.table("sessions as s")
       .join("users as u", "u.id", "s.user_id")
       .select("s.*", "u.session_epoch as user_epoch", "u.is_active as user_is_active")
       .where("s.id", id)
@@ -50,7 +50,7 @@ export class SessionsRepository extends BaseRepository {
 
   /** Every session for a user, newest first. Includes revoked and expired ones. */
   async getSessionsForUser(userId: number, limit = 100): Promise<SessionRecord[]> {
-    const rows = (await this.knex("sessions")
+    const rows = (await this.table("sessions")
       .select("*")
       .where("user_id", userId)
       .orderBy("issued_at", "desc")
@@ -67,10 +67,10 @@ export class SessionsRepository extends BaseRepository {
    * about afterwards.
    */
   async revokeSession(id: string, reason: string, now: number): Promise<boolean> {
-    const updated = await this.knex("sessions")
+    const updated = await this.table("sessions")
       .where("id", id)
       .whereNull("revoked_at")
-      .update({ revoked_at: now, revoked_reason: reason, updated_at: this.knex.fn.now() })
+      .update({ revoked_at: now, revoked_reason: reason, updated_at: this.knexUnscoped.fn.now() })
       .then((n) => Number(n));
     return updated > 0;
   }
@@ -82,10 +82,10 @@ export class SessionsRepository extends BaseRepository {
    * signing the caller out of the device they are asking from.
    */
   async revokeUserSessions(userId: number, reason: string, now: number, exceptId?: string): Promise<number> {
-    let query = this.knex("sessions").where("user_id", userId).whereNull("revoked_at");
+    let query = this.table("sessions").where("user_id", userId).whereNull("revoked_at");
     if (exceptId) query = query.andWhereNot("id", exceptId);
     return await query
-      .update({ revoked_at: now, revoked_reason: reason, updated_at: this.knex.fn.now() })
+      .update({ revoked_at: now, revoked_reason: reason, updated_at: this.knexUnscoped.fn.now() })
       .then((n) => Number(n));
   }
 
@@ -98,7 +98,7 @@ export class SessionsRepository extends BaseRepository {
    * request in the product.
    */
   async touchSession(id: string, now: number, staleBefore: number): Promise<void> {
-    await this.knex("sessions")
+    await this.table("sessions")
       .where("id", id)
       .andWhere("last_seen_at", "<", staleBefore)
       .update({ last_seen_at: now });
@@ -106,12 +106,14 @@ export class SessionsRepository extends BaseRepository {
 
   /** Sets the org a session is acting in. P4 uses this for org switching. */
   async setSessionOrg(id: string, orgId: number | null): Promise<void> {
-    await this.knex("sessions").where("id", id).update({ active_org_id: orgId, updated_at: this.knex.fn.now() });
+    await this.table("sessions")
+      .where("id", id)
+      .update({ active_org_id: orgId, updated_at: this.knexUnscoped.fn.now() });
   }
 
   /** Raises the MFA level of a live session, for A2's enrolment and challenge flows. */
   async setSessionMfaLevel(id: string, level: string): Promise<void> {
-    await this.knex("sessions").where("id", id).update({ mfa_level: level, updated_at: this.knex.fn.now() });
+    await this.table("sessions").where("id", id).update({ mfa_level: level, updated_at: this.knexUnscoped.fn.now() });
   }
 
   /**
@@ -122,13 +124,13 @@ export class SessionsRepository extends BaseRepository {
    * created concurrently with the change.
    */
   async bumpUserSessionEpoch(userId: number): Promise<number> {
-    await this.knex("users").where("id", userId).increment("session_epoch", 1);
-    const row = await this.knex("users").select("session_epoch").where("id", userId).first();
+    await this.table("users").where("id", userId).increment("session_epoch", 1);
+    const row = await this.table("users").select("session_epoch").where("id", userId).first();
     return Number((row as { session_epoch?: number } | undefined)?.session_epoch ?? 0);
   }
 
   async getUserSessionEpoch(userId: number): Promise<number> {
-    const row = await this.knex("users").select("session_epoch").where("id", userId).first();
+    const row = await this.table("users").select("session_epoch").where("id", userId).first();
     return Number((row as { session_epoch?: number } | undefined)?.session_epoch ?? 0);
   }
 
@@ -140,7 +142,7 @@ export class SessionsRepository extends BaseRepository {
    * after an incident, not during one.
    */
   async pruneSessions(expiredBefore: number): Promise<number> {
-    return await this.knex("sessions")
+    return await this.table("sessions")
       .where("expires_at", "<", expiredBefore)
       .del()
       .then((n) => Number(n));

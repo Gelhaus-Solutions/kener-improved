@@ -69,12 +69,12 @@ export class EventsRepository extends BaseRepository {
     if (!row.idempotency_key) {
       // event_id is a fresh ULID, so a conflict here is a bug worth surfacing
       // rather than swallowing. No conflict clause, on purpose.
-      await this.knex("event_outbox").insert(row);
+      await this.table("event_outbox").insert(row);
       return { inserted: true, event_id: row.event_id };
     }
 
-    await this.knex("event_outbox").insert(row).onConflict("idempotency_key").ignore();
-    const stored = (await this.knex("event_outbox")
+    await this.table("event_outbox").insert(row).onConflict("idempotency_key").ignore();
+    const stored = (await this.table("event_outbox")
       .select("event_id")
       .where("idempotency_key", row.idempotency_key)
       .first()) as { event_id: string } | undefined;
@@ -116,8 +116,8 @@ export class EventsRepository extends BaseRepository {
   ): Promise<OutboxEvent[]> {
     const expiredBefore = now - claimTtlSeconds;
 
-    if (dialectOf(this.knex) === "postgresql") {
-      const result = await this.knex.raw(
+    if (dialectOf(this.knexUnscoped) === "postgresql") {
+      const result = await this.knexUnscoped.raw(
         `update event_outbox
             set claimed_at = ?, claimed_by = ?
           where id in (
@@ -139,7 +139,7 @@ export class EventsRepository extends BaseRepository {
     // table)`, which MySQL rejects outright (error 1093). Selecting the ids
     // first sidesteps that and costs one extra round trip on a path that runs
     // once a second.
-    const candidates = (await this.knex("event_outbox")
+    const candidates = (await this.table("event_outbox")
       .select("id")
       .whereNull("published_at")
       .andWhere((qb) => qb.whereNull("claimed_at").orWhere("claimed_at", "<", expiredBefore))
@@ -147,7 +147,7 @@ export class EventsRepository extends BaseRepository {
       .limit(limit)) as { id: number }[];
     if (candidates.length === 0) return [];
 
-    await this.knex("event_outbox")
+    await this.table("event_outbox")
       .whereIn(
         "id",
         candidates.map((c) => c.id),
@@ -156,7 +156,7 @@ export class EventsRepository extends BaseRepository {
       .andWhere((qb) => qb.whereNull("claimed_at").orWhere("claimed_at", "<", expiredBefore))
       .update({ claimed_at: now, claimed_by: claimToken });
 
-    const rows = (await this.knex("event_outbox")
+    const rows = (await this.table("event_outbox")
       .select("*")
       .where("claimed_by", claimToken)
       .whereNull("published_at")
@@ -167,16 +167,16 @@ export class EventsRepository extends BaseRepository {
   /** Marks claimed events as published. The last step of a relay pass. */
   async markPublished(eventIds: string[], now: number): Promise<void> {
     if (eventIds.length === 0) return;
-    await this.knex("event_outbox").whereIn("event_id", eventIds).update({ published_at: now, claimed_at: null });
+    await this.table("event_outbox").whereIn("event_id", eventIds).update({ published_at: now, claimed_at: null });
   }
 
   async getEventByEventId(eventId: string): Promise<OutboxEvent | undefined> {
-    const row = await this.knex("event_outbox").select("*").where("event_id", eventId).first();
+    const row = await this.table("event_outbox").select("*").where("event_id", eventId).first();
     return row ? this.mapEvent(row as Record<string, unknown>) : undefined;
   }
 
   async getEventsPaginated(filter: OutboxFilter, page: number, limit: number): Promise<OutboxEvent[]> {
-    const rows = (await this.applyOutboxFilter(this.knex("event_outbox").select("*"), filter)
+    const rows = (await this.applyOutboxFilter(this.table("event_outbox").select("*"), filter)
       .orderBy("id", "desc")
       .limit(limit)
       .offset((page - 1) * limit)) as Record<string, unknown>[];
@@ -184,12 +184,12 @@ export class EventsRepository extends BaseRepository {
   }
 
   async getEventsCount(filter: OutboxFilter): Promise<CountResult | undefined> {
-    return await this.applyOutboxFilter(this.knex("event_outbox").count("* as count"), filter).first<CountResult>();
+    return await this.applyOutboxFilter(this.table("event_outbox").count("* as count"), filter).first<CountResult>();
   }
 
   /** Unpublished rows, for a health check. A number that only ever grows is an alert. */
   async getUnpublishedCount(): Promise<number> {
-    const row = await this.knex("event_outbox").whereNull("published_at").count("* as count").first<CountResult>();
+    const row = await this.table("event_outbox").whereNull("published_at").count("* as count").first<CountResult>();
     return Number(row?.count ?? 0);
   }
 
@@ -201,7 +201,7 @@ export class EventsRepository extends BaseRepository {
    * needs to see, and deleting it would hide the outage that caused it.
    */
   async pruneEvents(cutoffTs: number): Promise<number> {
-    return await this.knex("event_outbox").where("occurred_at", "<", cutoffTs).whereNotNull("published_at").del();
+    return await this.table("event_outbox").where("occurred_at", "<", cutoffTs).whereNotNull("published_at").del();
   }
 
   // ------------------------------------------------------------ deliveries
@@ -218,7 +218,7 @@ export class EventsRepository extends BaseRepository {
     // Chunked because SQLite caps bound variables per statement and one event
     // can fan out to a lot of webhook endpoints.
     for (let i = 0; i < rows.length; i += 100) {
-      await this.knex("event_deliveries")
+      await this.table("event_deliveries")
         .insert(rows.slice(i, i + 100))
         .onConflict(["event_id", "consumer", "target_type", "target_id"])
         .ignore();
@@ -234,7 +234,7 @@ export class EventsRepository extends BaseRepository {
    * double-send everything that merely takes longer than a minute to deliver.
    */
   async getDueDeliveries(now: number, limit: number): Promise<EventDeliveryRecord[]> {
-    const rows = (await this.knex("event_deliveries")
+    const rows = (await this.table("event_deliveries")
       .select("*")
       .whereIn("status", ["PENDING", "FAILED"])
       .andWhere((qb) => qb.whereNull("next_attempt_at").orWhere("next_attempt_at", "<=", now))
@@ -252,7 +252,7 @@ export class EventsRepository extends BaseRepository {
    * endpoint.
    */
   async beginDeliveryAttempt(id: number, now: number): Promise<boolean> {
-    const updated = await this.knex("event_deliveries")
+    const updated = await this.table("event_deliveries")
       .where("id", id)
       .whereIn("status", ["PENDING", "FAILED"])
       .update({ status: "IN_FLIGHT", last_attempt_at: now, updated_at: now })
@@ -275,7 +275,7 @@ export class EventsRepository extends BaseRepository {
       updated_at: number;
     },
   ): Promise<void> {
-    await this.knex("event_deliveries").where("id", id).update(fields);
+    await this.table("event_deliveries").where("id", id).update(fields);
   }
 
   /**
@@ -292,7 +292,7 @@ export class EventsRepository extends BaseRepository {
     targetId: string,
     limit: number,
   ): Promise<EventDeliveryRecord[]> {
-    const rows = (await this.knex("event_deliveries")
+    const rows = (await this.table("event_deliveries")
       .select("*")
       .where("org_id", orgId)
       .andWhere("consumer", consumer)
@@ -306,7 +306,7 @@ export class EventsRepository extends BaseRepository {
 
   /** Distinct consumers that have ever delivered, for the log's filter dropdown. */
   async getDeliveryConsumers(orgId: number): Promise<string[]> {
-    const rows = (await this.knex("event_deliveries")
+    const rows = (await this.table("event_deliveries")
       .distinct("consumer")
       .where("org_id", orgId)
       .orderBy("consumer", "asc")) as { consumer: string }[];
@@ -315,7 +315,7 @@ export class EventsRepository extends BaseRepository {
 
   /** Records a delivery that was never attempted, e.g. a shadow-mode consumer. */
   async setDeliveryStatus(id: number, status: DeliveryStatus, now: number): Promise<void> {
-    await this.knex("event_deliveries").where("id", id).update({ status, updated_at: now });
+    await this.table("event_deliveries").where("id", id).update({ status, updated_at: now });
   }
 
   /**
@@ -326,7 +326,7 @@ export class EventsRepository extends BaseRepository {
    * delivery, because the cost of getting it wrong is a duplicate webhook.
    */
   async reviveStuckDeliveries(olderThan: number, now: number): Promise<number> {
-    return await this.knex("event_deliveries")
+    return await this.table("event_deliveries")
       .where("status", "IN_FLIGHT")
       .andWhere("last_attempt_at", "<", olderThan)
       .update({ status: "FAILED", next_attempt_at: now, updated_at: now })
@@ -344,7 +344,7 @@ export class EventsRepository extends BaseRepository {
    */
   async getPendingDeliveriesForEvents(eventIds: string[]): Promise<EventDeliveryRecord[]> {
     if (eventIds.length === 0) return [];
-    const rows = (await this.knex("event_deliveries")
+    const rows = (await this.table("event_deliveries")
       .select("*")
       .whereIn("event_id", eventIds)
       .where("status", "PENDING")
@@ -372,7 +372,7 @@ export class EventsRepository extends BaseRepository {
     aggregateId: string,
     outboxId: number,
   ): Promise<boolean> {
-    const row = await this.knex("event_deliveries as d")
+    const row = await this.table("event_deliveries as d")
       .join("event_outbox as e", "e.event_id", "d.event_id")
       .select("d.id")
       .where("d.consumer", consumer)
@@ -385,12 +385,12 @@ export class EventsRepository extends BaseRepository {
   }
 
   async getDeliveryById(id: number): Promise<EventDeliveryRecord | undefined> {
-    const row = await this.knex("event_deliveries").select("*").where("id", id).first();
+    const row = await this.table("event_deliveries").select("*").where("id", id).first();
     return row ? this.mapDelivery(row as Record<string, unknown>) : undefined;
   }
 
   async getDeliveriesByEventId(eventId: string): Promise<EventDeliveryRecord[]> {
-    const rows = (await this.knex("event_deliveries")
+    const rows = (await this.table("event_deliveries")
       .select("*")
       .where("event_id", eventId)
       .orderBy("id", "asc")) as Record<string, unknown>[];
@@ -402,7 +402,7 @@ export class EventsRepository extends BaseRepository {
     page: number,
     limit: number,
   ): Promise<EventDeliveryRecord[]> {
-    const rows = (await this.applyDeliveryFilter(this.knex("event_deliveries").select("*"), filter)
+    const rows = (await this.applyDeliveryFilter(this.table("event_deliveries").select("*"), filter)
       .orderBy("id", "desc")
       .limit(limit)
       .offset((page - 1) * limit)) as Record<string, unknown>[];
@@ -411,7 +411,7 @@ export class EventsRepository extends BaseRepository {
 
   async getDeliveriesCount(filter: EventDeliveryFilter): Promise<CountResult | undefined> {
     return await this.applyDeliveryFilter(
-      this.knex("event_deliveries").count("* as count"),
+      this.table("event_deliveries").count("* as count"),
       filter,
     ).first<CountResult>();
   }
@@ -421,7 +421,7 @@ export class EventsRepository extends BaseRepository {
    * behind E9's dead-letter screen.
    */
   async resetDeliveryForRetry(id: number, now: number): Promise<boolean> {
-    const updated = await this.knex("event_deliveries")
+    const updated = await this.table("event_deliveries")
       .where("id", id)
       .where("status", "DEAD")
       .update({ status: "PENDING", attempts: 0, next_attempt_at: now, error: null, updated_at: now })
@@ -437,7 +437,7 @@ export class EventsRepository extends BaseRepository {
    * render one page.
    */
   async getDeliveryCountsByConsumer(orgId: number): Promise<Record<string, Record<string, number>>> {
-    const rows = (await this.knex("event_deliveries")
+    const rows = (await this.table("event_deliveries")
       .select("consumer", "status")
       .count("* as count")
       .where("org_id", orgId)
@@ -465,7 +465,7 @@ export class EventsRepository extends BaseRepository {
    * `occurred_at`, which ties at one-second resolution.
    */
   private shadowDiffEventQuery(orgId: number, shadowConsumer: string, legacyConsumer: string) {
-    return this.knex("event_deliveries as d")
+    return this.table("event_deliveries as d")
       .join("event_outbox as e", "e.event_id", "d.event_id")
       .where("d.org_id", orgId)
       .whereIn("d.consumer", [shadowConsumer, legacyConsumer]);
@@ -500,7 +500,7 @@ export class EventsRepository extends BaseRepository {
   async pruneDeliveries(cutoffTs: number): Promise<number> {
     // DEAD rows survive retention: they are the record of what never reached its
     // destination, and that is worth more than the bytes it costs.
-    return await this.knex("event_deliveries").where("created_at", "<", cutoffTs).whereNot("status", "DEAD").del();
+    return await this.table("event_deliveries").where("created_at", "<", cutoffTs).whereNot("status", "DEAD").del();
   }
 
   // ---------------------------------------------------------------- mapping

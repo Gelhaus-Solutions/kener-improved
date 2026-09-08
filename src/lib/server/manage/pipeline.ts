@@ -82,7 +82,10 @@ export async function runAction(event: RequestEvent): Promise<Response> {
     // thing. See requireMfa.ts for why the admin API needs its own guard at all.
     await requireMfaEnrolment(action, ctx);
 
-    await requireOrg(ctx);
+    // Returns the org and establishes it for the rest of this request, so every
+    // repository call below - the audit snapshot included - is scoped without
+    // anything else having to know about tenancy.
+    const orgId = await requireOrg(ctx);
 
     // Deliberately after authenticate, not before it. The inherited chain
     // resolved the session first and only then consulted the permission map, so
@@ -124,8 +127,7 @@ export async function runAction(event: RequestEvent): Promise<Response> {
       actor_id: actionCtx.user.id,
       actor_label: actionCtx.user.email ?? String(actionCtx.user.id),
       correlation_id: requestId,
-      // P4 replaces this with the org requireOrg resolved.
-      org_id: DEFAULT_ORG_ID,
+      org_id: orgId,
       emitted,
     };
     const result = await runWithEventContext(eventCtx, async () => await def.handler(validated, actionCtx));

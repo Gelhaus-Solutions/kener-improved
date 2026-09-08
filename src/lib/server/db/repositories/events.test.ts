@@ -4,6 +4,7 @@ import type { Knex as KnexType } from "knex";
 import { EventsRepository, type OutboxInsert } from "./events.js";
 import { up as createEventTables } from "../../../../../migrations/20260908160000_add_event_outbox.js";
 import type { EventDeliveryInsert } from "../../events/types.js";
+import { unscoped } from "./testSupport";
 
 // Repository-level checks against in-memory SQLite, using the real migration to
 // build the schema rather than a hand-written copy: the UNIQUE constraints are
@@ -64,7 +65,7 @@ describe("EventsRepository", () => {
   beforeEach(async () => {
     db = Knex({ client: "better-sqlite3", connection: { filename: ":memory:" }, useNullAsDefault: true });
     await createEventTables(db);
-    repo = new EventsRepository(db);
+    repo = unscoped(new EventsRepository(db));
   });
 
   afterEach(async () => {

@@ -8,7 +8,7 @@ export class AlertsRepository extends BaseRepository {
   // ============ Monitor Alerts ============
 
   async insertAlert(data: MonitorAlertInsert): Promise<number[]> {
-    return await this.knex("monitor_alerts").insert({
+    return await this.table("monitor_alerts").insert({
       monitor_tag: data.monitor_tag,
       monitor_status: data.monitor_status,
       alert_status: data.alert_status,
@@ -17,7 +17,7 @@ export class AlertsRepository extends BaseRepository {
   }
 
   async alertExistsIncident(incident_number: number): Promise<boolean> {
-    const result = await this.knex("monitor_alerts")
+    const result = await this.table("monitor_alerts")
       .count("* as count")
       .where({ incident_number })
       .first<CountResult>();
@@ -35,14 +35,14 @@ export class AlertsRepository extends BaseRepository {
    */
   async alertExistsForIncidents(incident_numbers: number[]): Promise<number[]> {
     if (incident_numbers.length === 0) return [];
-    const rows = await this.knex("monitor_alerts")
+    const rows = await this.table("monitor_alerts")
       .distinct("incident_number")
       .whereIn("incident_number", incident_numbers);
     return rows.map((row: { incident_number: number }) => Number(row.incident_number));
   }
 
   async alertExists(monitor_tag: string, monitor_status: string, alert_status: string): Promise<boolean> {
-    const result = await this.knex("monitor_alerts")
+    const result = await this.table("monitor_alerts")
       .count("* as count")
       .where({ monitor_tag, monitor_status, alert_status })
       .first<CountResult>();
@@ -54,11 +54,11 @@ export class AlertsRepository extends BaseRepository {
     monitor_status: string,
     incident_number: number,
   ): Promise<MonitorAlert | undefined> {
-    return await this.knex("monitor_alerts").where({ monitor_tag, monitor_status, incident_number }).first();
+    return await this.table("monitor_alerts").where({ monitor_tag, monitor_status, incident_number }).first();
   }
 
   async getAllActiveAlertIncidents(monitor_tag: string): Promise<MonitorAlert[]> {
-    return await this.knex("monitor_alerts")
+    return await this.table("monitor_alerts")
       .where({ monitor_tag, alert_status: "TRIGGERED" })
       .andWhere("incident_number", ">", 0)
       .orderBy("id", "desc");
@@ -69,72 +69,72 @@ export class AlertsRepository extends BaseRepository {
     monitor_status: string,
     alert_status: string,
   ): Promise<MonitorAlert | undefined> {
-    return await this.knex("monitor_alerts").where({ monitor_tag, monitor_status, alert_status }).first();
+    return await this.table("monitor_alerts").where({ monitor_tag, monitor_status, alert_status }).first();
   }
 
   async getMonitorAlertsPaginated(page: number, limit: number): Promise<MonitorAlert[]> {
-    return await this.knex("monitor_alerts")
+    return await this.table("monitor_alerts")
       .orderBy("id", "desc")
       .limit(limit)
       .offset((page - 1) * limit);
   }
 
   async getMonitorAlertsCount(): Promise<CountResult | undefined> {
-    return await this.knex("monitor_alerts").count("* as count").first<CountResult>();
+    return await this.table("monitor_alerts").count("* as count").first<CountResult>();
   }
 
   async updateAlertStatus(id: number, alert_status: string): Promise<number> {
-    return await this.knex("monitor_alerts").where({ id }).update({
+    return await this.table("monitor_alerts").where({ id }).update({
       alert_status,
-      updated_at: this.knex.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     });
   }
 
   async incrementAlertHealthChecks(id: number): Promise<number> {
-    return await this.knex("monitor_alerts")
+    return await this.table("monitor_alerts")
       .where({ id })
       .increment("health_checks", 1)
-      .update({ updated_at: this.knex.fn.now() });
+      .update({ updated_at: this.knexUnscoped.fn.now() });
   }
 
   async addIncidentNumberToAlert(id: number, incident_number: number): Promise<number> {
-    return await this.knex("monitor_alerts").where({ id }).update({
+    return await this.table("monitor_alerts").where({ id }).update({
       incident_number,
-      updated_at: this.knex.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     });
   }
 
   async deleteMonitorAlertsByTag(tag: string): Promise<number> {
-    return await this.knex("monitor_alerts").where("monitor_tag", tag).del();
+    return await this.table("monitor_alerts").where("monitor_tag", tag).del();
   }
 
   // ============ Triggers ============
 
   async createNewTrigger(data: TriggerRecordInsert): Promise<number[]> {
-    return await this.knex("triggers").insert({
+    return await this.table("triggers").insert({
       name: data.name,
       trigger_type: data.trigger_type,
       trigger_status: data.trigger_status,
       trigger_meta: data.trigger_meta,
       trigger_desc: data.trigger_desc,
-      created_at: this.knex.fn.now(),
-      updated_at: this.knex.fn.now(),
+      created_at: this.knexUnscoped.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     });
   }
 
   async updateTrigger(data: TriggerRecord): Promise<number> {
-    return await this.knex("triggers").where({ id: data.id }).update({
+    return await this.table("triggers").where({ id: data.id }).update({
       name: data.name,
       trigger_type: data.trigger_type,
       trigger_status: data.trigger_status,
       trigger_desc: data.trigger_desc,
       trigger_meta: data.trigger_meta,
-      updated_at: this.knex.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     });
   }
 
   async getTriggers(data: TriggerFilter): Promise<TriggerRecord[]> {
-    let query = this.knex("triggers").whereRaw("1=1");
+    let query = this.table("triggers").whereRaw("1=1");
     if (!!data.status) {
       query = query.andWhere("trigger_status", data.status);
     }
@@ -145,17 +145,17 @@ export class AlertsRepository extends BaseRepository {
   }
 
   async getTriggerByID(id: number): Promise<TriggerRecord | undefined> {
-    return await this.knex("triggers").where("id", id).first();
+    return await this.table("triggers").where("id", id).first();
   }
   //get by ids
   async getTriggersByIDs(ids: number[]): Promise<TriggerRecord[]> {
-    return await this.knex("triggers").whereIn("id", ids);
+    return await this.table("triggers").whereIn("id", ids);
   }
 
   async deleteTrigger(id: number): Promise<number> {
     // First delete any references in monitor_alerts_config_triggers
-    await this.knex("monitor_alerts_config_triggers").where("trigger_id", id).del();
+    await this.table("monitor_alerts_config_triggers").where("trigger_id", id).del();
     // Then delete the trigger itself
-    return await this.knex("triggers").where("id", id).del();
+    return await this.table("triggers").where("id", id).del();
   }
 }

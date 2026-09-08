@@ -1,4 +1,5 @@
 import db from "../db/db.js";
+import { runAcrossOrgs } from "../db/orgContext.js";
 import crypto from "crypto";
 import { MaskString, CreateHash } from "./commonController.js";
 import { API_KEY_SCOPES, WILDCARD_SCOPE, isKnownScope, parseScopes, scopeSatisfies } from "../../apiScopes.js";
@@ -266,7 +267,12 @@ export const RotateApiKey = async (
  */
 export const AuthenticateAPIKey = async (apiKey: string): Promise<ApiKeyPrincipal | null> => {
   const hashed_key = CreateHash(apiKey);
-  const record = await db.getApiKeyByHashedKey(hashed_key);
+  // The one genuinely unscoped read of `api_keys`, and it has to be: the key is
+  // what *determines* the org, so looking it up inside an org context would mean
+  // deciding the answer before asking the question. `hashed_key` stays globally
+  // unique precisely so this lookup needs no tenant. Everything after this line
+  // runs inside the key's org.
+  const record = await runAcrossOrgs(() => db.getApiKeyByHashedKey(hashed_key));
   if (!record) return null;
 
   if (record.status !== "ACTIVE") return null;

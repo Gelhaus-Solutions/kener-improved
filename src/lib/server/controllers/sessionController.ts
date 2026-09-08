@@ -1,3 +1,4 @@
+import { runAcrossOrgs, DEFAULT_ORG_ID } from "../db/orgContext.js";
 import { nanoid } from "nanoid";
 import type { Cookies } from "@sveltejs/kit";
 import jwt from "jsonwebtoken";
@@ -120,6 +121,18 @@ export interface CreateSessionInput {
  * a permission change made a moment later invalidates this session like any
  * other.
  */
+/**
+ * The org a new session starts in: the user's first membership, else the default.
+ *
+ * "First" is by org id, which is stable and puts the default org first for
+ * everyone who belongs to it - so an existing single-tenant install behaves
+ * exactly as it did. The org switcher (I3f) is what changes it afterwards.
+ */
+export async function DefaultOrgForUser(userId: number): Promise<number> {
+  const orgs = await runAcrossOrgs(() => db.getOrgsForUser(userId));
+  return orgs[0]?.id ?? DEFAULT_ORG_ID;
+}
+
 export async function CreateSession(input: CreateSessionInput): Promise<{
   sessionId: string;
   token: string;
@@ -133,10 +146,21 @@ export async function CreateSession(input: CreateSessionInput): Promise<{
   const epoch = await db.getUserSessionEpoch(input.userId);
   const expiresAt = now + SESSION_TTL_SECONDS;
 
+  // I3d: which org this session acts in.
+  //
+  // `requireOrg` reads this on every admin action and 403s a session pointing at
+  // an org the user does not belong to. Leaving it null would mean falling back
+  // to the default org, which is wrong for anyone who is not a member of it: a
+  // user belonging only to org 2 would be locked out of the entire admin the
+  // moment they signed in. So a session lands in the caller's first org unless
+  // one was named, and `org_members` is read across orgs because it is what
+  // determines the org.
+  const activeOrgId = input.activeOrgId ?? (await DefaultOrgForUser(input.userId));
+
   await db.createSession({
     id: sessionId,
     user_id: input.userId,
-    active_org_id: input.activeOrgId ?? null,
+    active_org_id: activeOrgId,
     issued_at: now,
     last_seen_at: now,
     expires_at: expiresAt,

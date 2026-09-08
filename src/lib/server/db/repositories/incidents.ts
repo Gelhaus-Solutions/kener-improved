@@ -80,7 +80,7 @@ export class IncidentsRepository extends BaseRepository {
     filter: IncidentFilter | null,
     direction: "after" | "before" = "after",
   ): Promise<IncidentRecord[]> {
-    let query = this.knex("incidents").select("*").whereRaw("1=1");
+    let query = this.table("incidents").select("*").whereRaw("1=1");
     if (filter && filter.status) {
       query = query.andWhere("status", filter.status);
     }
@@ -131,20 +131,20 @@ export class IncidentsRepository extends BaseRepository {
       end_date_time: data.end_date_time,
       status: data.status,
       state: data.state,
-      created_at: this.knex.fn.now(),
-      updated_at: this.knex.fn.now(),
+      created_at: this.knexUnscoped.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
       incident_type: data.incident_type,
       incident_source: data.incident_source,
       is_global: data.is_global || "YES",
     };
 
     if (dbType === "postgresql") {
-      const [incident] = await this.knex("incidents").insert(insertData).returning("*");
+      const [incident] = await this.table("incidents").insert(insertData).returning("*");
       return incident;
     } else {
-      const result = await this.knex("incidents").insert(insertData);
+      const result = await this.table("incidents").insert(insertData);
       const id = result[0];
-      const incident = await this.knex("incidents").where("id", id).first();
+      const incident = await this.table("incidents").where("id", id).first();
       return incident;
     }
   }
@@ -154,7 +154,7 @@ export class IncidentsRepository extends BaseRepository {
     limit: number,
     filter: IncidentFilter | null,
   ): Promise<IncidentRecord[]> {
-    let query = this.knex("incidents").select("*").whereRaw("1=1");
+    let query = this.table("incidents").select("*").whereRaw("1=1");
 
     if (filter && filter.status) {
       query = query.andWhere("status", filter.status);
@@ -181,7 +181,7 @@ export class IncidentsRepository extends BaseRepository {
   }
 
   async getRecentUpdatedIncidents(limit: number, start: number, end: number): Promise<IncidentRecord[]> {
-    return await this.knex("incidents")
+    return await this.table("incidents")
       .where("status", "OPEN")
       .andWhere("start_date_time", ">=", start)
       .andWhere("start_date_time", "<=", end)
@@ -190,7 +190,7 @@ export class IncidentsRepository extends BaseRepository {
   }
 
   async getPreviousIncidentId(start_date_time: number): Promise<{ id: number } | undefined> {
-    return await this.knex("incidents")
+    return await this.table("incidents")
       .select("id")
       .where("start_date_time", "<", start_date_time)
       .orderBy("start_date_time", "desc")
@@ -198,7 +198,7 @@ export class IncidentsRepository extends BaseRepository {
   }
 
   async getIncidentsBetween(start: number, end: number): Promise<IncidentRecord[]> {
-    return await this.knex("incidents")
+    return await this.table("incidents")
       .where("status", "OPEN")
       .andWhere("start_date_time", ">=", start)
       .andWhere("start_date_time", "<=", end)
@@ -206,7 +206,7 @@ export class IncidentsRepository extends BaseRepository {
   }
 
   async getIncidentsCount(filter: { status?: string } | null): Promise<CountResult | undefined> {
-    let query = this.knex("incidents").count("* as count");
+    let query = this.table("incidents").count("* as count");
     if (filter && filter.status) {
       query = query.where("status", filter.status);
     }
@@ -218,7 +218,7 @@ export class IncidentsRepository extends BaseRepository {
     start_date: number,
     end_date: number,
   ): Promise<CountResult | undefined> {
-    return await this.knex("incidents")
+    return await this.table("incidents")
       .count("* as count")
       .where("incident_type", incident_type)
       .andWhere("start_date_time", ">=", start_date)
@@ -227,30 +227,30 @@ export class IncidentsRepository extends BaseRepository {
   }
 
   async updateIncident(data: IncidentRecord): Promise<number> {
-    return await this.knex("incidents").where({ id: data.id }).update({
+    return await this.table("incidents").where({ id: data.id }).update({
       title: data.title,
       start_date_time: data.start_date_time,
       end_date_time: data.end_date_time,
       status: data.status,
       state: data.state,
       is_global: data.is_global,
-      updated_at: this.knex.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     });
   }
 
   async deleteIncident(id: number): Promise<number> {
-    return await this.knex("incidents").where({ id }).delete();
+    return await this.table("incidents").where({ id }).delete();
   }
 
   async setIncidentEndTimeToNull(id: number): Promise<number> {
-    return await this.knex("incidents").where({ id }).update({
+    return await this.table("incidents").where({ id }).update({
       end_date_time: null,
-      updated_at: this.knex.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     });
   }
 
   async getIncidentById(id: number): Promise<Omit<IncidentRecord, "incident_source"> | undefined> {
-    return await this.knex("incidents")
+    return await this.table("incidents")
       .select(
         "id",
         "title",
@@ -268,7 +268,7 @@ export class IncidentsRepository extends BaseRepository {
   }
 
   async getIncidentsByIds(ids: number[]): Promise<IncidentRecord[]> {
-    return await this.knex("incidents").whereIn("id", ids).andWhere("status", "OPEN");
+    return await this.table("incidents").whereIn("id", ids).andWhere("status", "OPEN");
   }
 
   async getIncidentsByMonitorTag(
@@ -276,7 +276,7 @@ export class IncidentsRepository extends BaseRepository {
     start: number,
     end: number,
   ): Promise<Array<IncidentRecord & { monitor_impact: string | null }>> {
-    return await this.knex("incidents as i")
+    return await this.table("incidents as i")
       .select(
         "i.id as id",
         "i.title as title",
@@ -302,7 +302,7 @@ export class IncidentsRepository extends BaseRepository {
   ): Promise<
     Array<{ id: number; start_date_time: number; end_date_time: number | null; monitor_impact: string | null }>
   > {
-    return await this.knex("incidents as i")
+    return await this.table("incidents as i")
       .select(
         "i.id as id",
         "i.start_date_time as start_date_time",
@@ -324,7 +324,7 @@ export class IncidentsRepository extends BaseRepository {
   ): Promise<
     Array<{ id: number; start_date_time: number; end_date_time: number | null; monitor_impact: string | null }>
   > {
-    return await this.knex("incidents as i")
+    return await this.table("incidents as i")
       .select(
         "i.id as id",
         "i.start_date_time as start_date_time",
@@ -343,7 +343,7 @@ export class IncidentsRepository extends BaseRepository {
 
   // Status-related queries
   async getOngoingMaintenances(timestamp: number): Promise<IncidentRecord[]> {
-    return await this.knex("incidents")
+    return await this.table("incidents")
       .where("incident_type", "MAINTENANCE")
       .andWhere("status", "OPEN")
       .andWhere("start_date_time", "<=", timestamp)
@@ -354,7 +354,7 @@ export class IncidentsRepository extends BaseRepository {
   }
 
   async getUpcomingMaintenances(currentTimestamp: number, futureTimestamp: number): Promise<IncidentRecord[]> {
-    return await this.knex("incidents")
+    return await this.table("incidents")
       .where("incident_type", "MAINTENANCE")
       .andWhere("status", "OPEN")
       .andWhere("start_date_time", ">", currentTimestamp)
@@ -363,7 +363,7 @@ export class IncidentsRepository extends BaseRepository {
   }
 
   async getLastMaintenance(): Promise<IncidentRecord | undefined> {
-    return await this.knex("incidents")
+    return await this.table("incidents")
       .where("incident_type", "MAINTENANCE")
       .andWhere("status", "OPEN")
       .orderBy("start_date_time", "desc")
@@ -371,7 +371,7 @@ export class IncidentsRepository extends BaseRepository {
   }
 
   async getOngoingIncidents(timestamp: number): Promise<IncidentRecord[]> {
-    return await this.knex("incidents")
+    return await this.table("incidents")
       .where("incident_type", "INCIDENT")
       .andWhere("status", "OPEN")
       .andWhere("start_date_time", "<=", timestamp)
@@ -382,7 +382,7 @@ export class IncidentsRepository extends BaseRepository {
   }
 
   async getLastIncident(): Promise<IncidentRecord | undefined> {
-    return await this.knex("incidents")
+    return await this.table("incidents")
       .where("incident_type", "INCIDENT")
       .andWhere("status", "OPEN")
       .orderBy("start_date_time", "desc")
@@ -390,7 +390,7 @@ export class IncidentsRepository extends BaseRepository {
   }
 
   async getOngoingMaintenancesByMonitorTags(timestamp: number, monitorTags: string[]): Promise<IncidentRecord[]> {
-    return await this.knex("incidents")
+    return await this.table("incidents")
       .distinct("incidents.*")
       .join("incident_monitors", "incidents.id", "incident_monitors.incident_id")
       .whereIn("incident_monitors.monitor_tag", monitorTags)
@@ -408,7 +408,7 @@ export class IncidentsRepository extends BaseRepository {
     futureTimestamp: number,
     monitorTags: string[],
   ): Promise<IncidentRecord[]> {
-    return await this.knex("incidents")
+    return await this.table("incidents")
       .distinct("incidents.*")
       .join("incident_monitors", "incidents.id", "incident_monitors.incident_id")
       .whereIn("incident_monitors.monitor_tag", monitorTags)
@@ -420,7 +420,7 @@ export class IncidentsRepository extends BaseRepository {
   }
 
   async getLastMaintenanceByMonitorTags(monitorTags: string[]): Promise<IncidentRecord | undefined> {
-    return await this.knex("incidents")
+    return await this.table("incidents")
       .distinct("incidents.*")
       .join("incident_monitors", "incidents.id", "incident_monitors.incident_id")
       .whereIn("incident_monitors.monitor_tag", monitorTags)
@@ -435,7 +435,7 @@ export class IncidentsRepository extends BaseRepository {
     monitorTags: string[],
     incidentType: string,
   ): Promise<IncidentRecord[]> {
-    return await this.knex("incidents")
+    return await this.table("incidents")
       .distinct("incidents.*")
       .join("incident_monitors", "incidents.id", "incident_monitors.incident_id")
       .whereIn("incident_monitors.monitor_tag", monitorTags)
@@ -449,7 +449,7 @@ export class IncidentsRepository extends BaseRepository {
   }
 
   async getOngoingIncidentsForMonitorList(timestamp: number, monitorTags: string[]): Promise<IncidentForMonitorList[]> {
-    const rows = await this.knex("incidents")
+    const rows = await this.table("incidents")
       .select(
         "incidents.id",
         "incidents.title",
@@ -481,7 +481,7 @@ export class IncidentsRepository extends BaseRepository {
   }
 
   async geAllGlobalOngoingIncidents(timestamp: number, tags?: string[]): Promise<IncidentForMonitorList[]> {
-    const query = this.knex("incidents")
+    const query = this.table("incidents")
       .select(
         "incidents.id",
         "incidents.title",
@@ -531,7 +531,7 @@ export class IncidentsRepository extends BaseRepository {
     }
 
     const incidentIds = incidents.map((incident) => incident.id);
-    const comments = await this.knex("incident_comments")
+    const comments = await this.table("incident_comments")
       .select("*")
       .whereIn("incident_id", incidentIds)
       .andWhere("status", "ACTIVE")
@@ -561,7 +561,7 @@ export class IncidentsRepository extends BaseRepository {
     }
 
     const incidentIds = incidents.map((incident) => incident.id);
-    const comments = await this.knex("incident_comments")
+    const comments = await this.table("incident_comments")
       .select("*")
       .whereIn("incident_id", incidentIds)
       .andWhere("status", "ACTIVE")
@@ -590,7 +590,7 @@ export class IncidentsRepository extends BaseRepository {
     const pastTimestamp = timestamp - daysInPast * 24 * 60 * 60;
 
     // First get distinct incident IDs with limit
-    const incidentIds = await this.knex("incidents")
+    const incidentIds = await this.table("incidents")
       .distinct("incidents.id")
       .leftJoin("incident_monitors", "incidents.id", "incident_monitors.incident_id")
       .where(function () {
@@ -608,7 +608,7 @@ export class IncidentsRepository extends BaseRepository {
       return [];
     }
 
-    const rows = await this.knex("incidents")
+    const rows = await this.table("incidents")
       .select(
         "incidents.id",
         "incidents.title",
@@ -644,7 +644,7 @@ export class IncidentsRepository extends BaseRepository {
     }
 
     const incidentIds = incidents.map((incident) => incident.id);
-    const comments = await this.knex("incident_comments")
+    const comments = await this.table("incident_comments")
       .select("*")
       .whereIn("incident_id", incidentIds)
       .andWhere("status", "ACTIVE")
@@ -664,7 +664,7 @@ export class IncidentsRepository extends BaseRepository {
   }
 
   async getLastIncidentByMonitorTags(monitorTags: string[]): Promise<IncidentRecord | undefined> {
-    return await this.knex("incidents")
+    return await this.table("incidents")
       .distinct("incidents.*")
       .join("incident_monitors", "incidents.id", "incident_monitors.incident_id")
       .whereIn("incident_monitors.monitor_tag", monitorTags)
@@ -680,7 +680,7 @@ export class IncidentsRepository extends BaseRepository {
     end_date: number,
     monitorTags: string[],
   ): Promise<CountResult | undefined> {
-    return await this.knex("incidents")
+    return await this.table("incidents")
       .countDistinct("incidents.id as count")
       .join("incident_monitors", "incidents.id", "incident_monitors.incident_id")
       .whereIn("incident_monitors.monitor_tag", monitorTags)
@@ -693,7 +693,7 @@ export class IncidentsRepository extends BaseRepository {
   // ============ Incident Monitors ============
 
   async insertIncidentMonitor(data: IncidentMonitorRecordInsert): Promise<number[]> {
-    return await this.knex("incident_monitors").insert({
+    return await this.table("incident_monitors").insert({
       monitor_tag: data.monitor_tag,
       monitor_impact: data.monitor_impact,
       incident_id: data.incident_id,
@@ -703,7 +703,7 @@ export class IncidentsRepository extends BaseRepository {
   async getIncidentMonitorsByIncidentID(
     incident_id: number,
   ): Promise<Array<{ monitor_tag: string; monitor_impact: string | null }>> {
-    return await this.knex("incident_monitors")
+    return await this.table("incident_monitors")
       .select("monitor_tag", "monitor_impact")
       .where("incident_id", incident_id);
   }
@@ -719,13 +719,13 @@ export class IncidentsRepository extends BaseRepository {
     incident_ids: number[],
   ): Promise<Array<{ incident_id: number; monitor_tag: string; monitor_impact: string | null }>> {
     if (incident_ids.length === 0) return [];
-    return await this.knex("incident_monitors")
+    return await this.table("incident_monitors")
       .select("incident_id", "monitor_tag", "monitor_impact")
       .whereIn("incident_id", incident_ids);
   }
 
   async getIncidentMonitors(filter?: { incident_id?: number; monitor_tag?: string }): Promise<IncidentMonitorRecord[]> {
-    let query = this.knex("incident_monitors").select("*");
+    let query = this.table("incident_monitors").select("*");
 
     if (filter?.incident_id) {
       query = query.where("incident_id", filter.incident_id);
@@ -739,7 +739,7 @@ export class IncidentsRepository extends BaseRepository {
   }
 
   async getMonitorsByIncidentId(incident_id: number): Promise<IncidentMonitorDetailRecord[]> {
-    return await this.knex("incident_monitors")
+    return await this.table("incident_monitors")
       .join("monitors", "incident_monitors.monitor_tag", "monitors.tag")
       .where("incident_monitors.incident_id", incident_id)
       .select(
@@ -751,22 +751,22 @@ export class IncidentsRepository extends BaseRepository {
   }
 
   async removeIncidentMonitor(incident_id: number, monitor_tag: string): Promise<number> {
-    return await this.knex("incident_monitors").where({ incident_id, monitor_tag }).del();
+    return await this.table("incident_monitors").where({ incident_id, monitor_tag }).del();
   }
 
   async insertIncidentMonitorWithMerge(data: IncidentMonitorRecordInsert): Promise<number[]> {
-    return await this.knex("incident_monitors")
+    return await this.table("incident_monitors")
       .insert({
         monitor_tag: data.monitor_tag,
         monitor_impact: data.monitor_impact,
         incident_id: data.incident_id,
       })
       .onConflict(["monitor_tag", "incident_id"])
-      .merge({ monitor_impact: data.monitor_impact, updated_at: this.knex.fn.now() });
+      .merge({ monitor_impact: data.monitor_impact, updated_at: this.knexUnscoped.fn.now() });
   }
 
   async deleteIncidentMonitorsByTag(tag: string): Promise<number> {
-    return await this.knex("incident_monitors").where("monitor_tag", tag).del();
+    return await this.table("incident_monitors").where("monitor_tag", tag).del();
   }
 
   // ============ Incident Comments ============
@@ -784,27 +784,27 @@ export class IncidentsRepository extends BaseRepository {
       incident_id,
       state,
       commented_at,
-      created_at: this.knex.fn.now(),
-      updated_at: this.knex.fn.now(),
+      created_at: this.knexUnscoped.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     };
 
     if (dbType === "postgresql") {
-      const [createdComment] = await this.knex("incident_comments").insert(insertData).returning("*");
+      const [createdComment] = await this.table("incident_comments").insert(insertData).returning("*");
       return createdComment;
     } else {
-      const result = await this.knex("incident_comments").insert(insertData);
+      const result = await this.table("incident_comments").insert(insertData);
       const id = result[0];
-      const createdComment = await this.knex("incident_comments").where("id", id).first();
+      const createdComment = await this.table("incident_comments").where("id", id).first();
       return createdComment;
     }
   }
 
   async getIncidentComments(incident_id: number): Promise<IncidentCommentRecord[]> {
-    return await this.knex("incident_comments").where("incident_id", incident_id).orderBy("commented_at", "desc");
+    return await this.table("incident_comments").where("incident_id", incident_id).orderBy("commented_at", "desc");
   }
 
   async getActiveIncidentComments(incident_id: number): Promise<IncidentCommentRecord[]> {
-    return await this.knex("incident_comments")
+    return await this.table("incident_comments")
       .where("incident_id", incident_id)
       .andWhere("status", "ACTIVE")
       .orderBy("commented_at", "desc")
@@ -812,31 +812,31 @@ export class IncidentsRepository extends BaseRepository {
   }
 
   async getIncidentCommentByIDAndIncident(incident_id: number, id: number): Promise<IncidentCommentRecord | undefined> {
-    return await this.knex("incident_comments").where({ incident_id, id }).first();
+    return await this.table("incident_comments").where({ incident_id, id }).first();
   }
 
   async updateIncidentCommentByID(id: number, comment: string, state: string, commented_at: number): Promise<number> {
-    return await this.knex("incident_comments").where({ id }).update({
+    return await this.table("incident_comments").where({ id }).update({
       comment,
       state,
       commented_at,
-      updated_at: this.knex.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     });
   }
 
   async updateIncidentCommentStatusByID(id: number, status: string): Promise<number> {
-    return await this.knex("incident_comments").where({ id }).update({
+    return await this.table("incident_comments").where({ id }).update({
       status,
-      updated_at: this.knex.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     });
   }
 
   async getIncidentCommentByID(id: number): Promise<IncidentCommentRecord | undefined> {
-    return await this.knex("incident_comments").where({ id }).first();
+    return await this.table("incident_comments").where({ id }).first();
   }
 
   async deleteIncidentCommentsByIncidentID(incident_id: number): Promise<number> {
-    return await this.knex("incident_comments").where({ incident_id }).del();
+    return await this.table("incident_comments").where({ incident_id }).del();
   }
 
   /**
@@ -849,7 +849,7 @@ export class IncidentsRepository extends BaseRepository {
     endTs: number,
     monitorTags?: string[],
   ): Promise<IncidentForMonitorListWithComments[]> {
-    const query = this.knex("incidents")
+    const query = this.table("incidents")
       .select(
         "incidents.id",
         "incidents.title",
@@ -887,7 +887,7 @@ export class IncidentsRepository extends BaseRepository {
     }
 
     const incidentIds = incidents.map((incident) => incident.id);
-    const comments = await this.knex("incident_comments")
+    const comments = await this.table("incident_comments")
       .select("*")
       .whereIn("incident_id", incidentIds)
       .andWhere("status", "ACTIVE")
@@ -912,7 +912,7 @@ export class IncidentsRepository extends BaseRepository {
     endTs: number,
     monitorTag: string,
   ): Promise<IncidentForMonitorListWithComments[]> {
-    const rows = await this.knex("incidents")
+    const rows = await this.table("incidents")
       .select(
         "incidents.id",
         "incidents.title",
@@ -944,7 +944,7 @@ export class IncidentsRepository extends BaseRepository {
     }
 
     const incidentIds = incidents.map((incident) => incident.id);
-    const comments = await this.knex("incident_comments")
+    const comments = await this.table("incident_comments")
       .select("*")
       .whereIn("incident_id", incidentIds)
       .andWhere("status", "ACTIVE")

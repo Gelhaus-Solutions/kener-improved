@@ -18,15 +18,15 @@ function clampConfirmationThreshold(value: number | null | undefined): number {
  */
 export class MonitorsRepository extends BaseRepository {
   async getMonitorsByTags(tags: string[]): Promise<MonitorRecord[]> {
-    return await this.knex("monitors").whereIn("tag", tags);
+    return await this.table("monitors").whereIn("tag", tags);
   }
 
   async getMonitorsByTag(tag: string): Promise<MonitorRecord | undefined> {
-    return await this.knex("monitors").where("tag", tag).first();
+    return await this.table("monitors").where("tag", tag).first();
   }
 
   async insertMonitor(data: MonitorRecordInsert): Promise<number[]> {
-    return await this.knex("monitors").insert({
+    return await this.table("monitors").insert({
       tag: data.tag,
       name: data.name,
       description: data.description,
@@ -43,33 +43,35 @@ export class MonitorsRepository extends BaseRepository {
       include_degraded_in_downtime: data.include_degraded_in_downtime,
       is_hidden: data.is_hidden || "NO",
       monitor_settings_json: data.monitor_settings_json,
-      created_at: this.knex.fn.now(),
-      updated_at: this.knex.fn.now(),
+      created_at: this.knexUnscoped.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
       external_url: data.external_url,
     });
   }
 
   async updateMonitor(data: MonitorRecord): Promise<number> {
-    return await this.knex("monitors").where({ id: data.id }).update({
-      tag: data.tag,
-      name: data.name,
-      description: data.description,
-      image: data.image,
-      cron: data.cron,
-      default_status: data.default_status,
-      status: data.status,
-      category_name: data.category_name,
-      monitor_type: data.monitor_type,
-      type_data: data.type_data,
-      day_degraded_minimum_count: data.day_degraded_minimum_count,
-      day_down_minimum_count: data.day_down_minimum_count,
-      confirmation_threshold: clampConfirmationThreshold(data.confirmation_threshold),
-      include_degraded_in_downtime: data.include_degraded_in_downtime,
-      is_hidden: data.is_hidden,
-      monitor_settings_json: data.monitor_settings_json,
-      updated_at: this.knex.fn.now(),
-      external_url: data.external_url,
-    });
+    return await this.table("monitors")
+      .where({ id: data.id })
+      .update({
+        tag: data.tag,
+        name: data.name,
+        description: data.description,
+        image: data.image,
+        cron: data.cron,
+        default_status: data.default_status,
+        status: data.status,
+        category_name: data.category_name,
+        monitor_type: data.monitor_type,
+        type_data: data.type_data,
+        day_degraded_minimum_count: data.day_degraded_minimum_count,
+        day_down_minimum_count: data.day_down_minimum_count,
+        confirmation_threshold: clampConfirmationThreshold(data.confirmation_threshold),
+        include_degraded_in_downtime: data.include_degraded_in_downtime,
+        is_hidden: data.is_hidden,
+        monitor_settings_json: data.monitor_settings_json,
+        updated_at: this.knexUnscoped.fn.now(),
+        external_url: data.external_url,
+      });
   }
 
   async updateMonitorTrigger(data: {
@@ -77,15 +79,15 @@ export class MonitorsRepository extends BaseRepository {
     down_trigger: string | null;
     degraded_trigger: string | null;
   }): Promise<number> {
-    return await this.knex("monitors").where({ id: data.id }).update({
+    return await this.table("monitors").where({ id: data.id }).update({
       down_trigger: data.down_trigger,
       degraded_trigger: data.degraded_trigger,
-      updated_at: this.knex.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     });
   }
 
   async getMonitors(data: MonitorFilter): Promise<MonitorRecord[]> {
-    let query = this.knex("monitors").whereRaw("1=1");
+    let query = this.table("monitors").whereRaw("1=1");
     if (!!data.status) {
       query = query.andWhere("status", data.status);
     }
@@ -119,10 +121,10 @@ export class MonitorsRepository extends BaseRepository {
   }
 
   async getMonitorByTag(tag: string): Promise<MonitorRecord | undefined> {
-    return await this.knex("monitors").where("tag", tag).first();
+    return await this.table("monitors").where("tag", tag).first();
   }
 
   async deleteMonitorsByTag(tag: string): Promise<number> {
-    return await this.knex("monitors").where("tag", tag).del();
+    return await this.table("monitors").where("tag", tag).del();
   }
 }

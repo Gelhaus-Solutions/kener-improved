@@ -20,11 +20,11 @@ export class AuditRepository extends BaseRepository {
     if (rows.length === 0) return;
     // Chunked because SQLite caps bound variables per statement and a burst of
     // admin activity can flush a large batch.
-    await this.knex.batchInsert("audit_log", rows, 100);
+    await this.knexUnscoped.batchInsert("audit_log", rows, 100);
   }
 
   async getAuditLogPaginated(filter: AuditLogFilter, page: number, limit: number): Promise<AuditLogRecord[]> {
-    return await this.applyFilter(this.knex("audit_log").select("*"), filter)
+    return await this.applyFilter(this.table("audit_log").select("*"), filter)
       .orderBy("ts", "desc")
       .orderBy("id", "desc")
       .limit(limit)
@@ -32,12 +32,12 @@ export class AuditRepository extends BaseRepository {
   }
 
   async getAuditLogCount(filter: AuditLogFilter): Promise<CountResult | undefined> {
-    return await this.applyFilter(this.knex("audit_log").count("* as count"), filter).first<CountResult>();
+    return await this.applyFilter(this.table("audit_log").count("* as count"), filter).first<CountResult>();
   }
 
   /** Every row written by one request, for tracing a single admin operation. */
   async getAuditLogByRequestId(requestId: string): Promise<AuditLogRecord[]> {
-    return await this.knex("audit_log").select("*").where("request_id", requestId).orderBy("id", "asc");
+    return await this.table("audit_log").select("*").where("request_id", requestId).orderBy("id", "asc");
   }
 
   /**
@@ -49,12 +49,12 @@ export class AuditRepository extends BaseRepository {
    * a plain delete, because there is no privilege to route around.
    */
   async prune(cutoffTs: number): Promise<number> {
-    if (hasDeclarativePartitioning(this.knex)) {
+    if (hasDeclarativePartitioning(this.knexUnscoped)) {
       // Same capability, same dialect: Postgres. Others delete directly below.
-      const result = await this.knex.raw("SELECT audit_log_prune(?) AS removed", [cutoffTs]);
+      const result = await this.knexUnscoped.raw("SELECT audit_log_prune(?) AS removed", [cutoffTs]);
       return Number(result?.rows?.[0]?.removed ?? 0);
     }
-    return await this.knex("audit_log").where("ts", "<", cutoffTs).del();
+    return await this.table("audit_log").where("ts", "<", cutoffTs).del();
   }
 
   private applyFilter<T extends { where: (...args: never[]) => T }>(query: T, filter: AuditLogFilter): T {

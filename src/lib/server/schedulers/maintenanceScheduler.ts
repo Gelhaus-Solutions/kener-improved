@@ -1,3 +1,4 @@
+import { runWithOrg } from "../db/orgContext.js";
 import { Queue, Worker, Job, type JobSchedulerTemplateOptions } from "bullmq";
 import q from "../queues/q.js";
 import db from "../db/db.js";
@@ -86,7 +87,8 @@ const processAllMaintenances = async (): Promise<{ total: number; eventsCreated:
   let totalEventsCreated = 0;
 
   try {
-    // Get all active maintenances
+    // Get all active maintenances. Unscoped on purpose: the caller has already
+    // entered one org's context, so this returns that org's maintenances.
     const maintenances = await db.getMaintenancesPaginated(1, 1000, { status: "ACTIVE" });
 
     for (const maintenance of maintenances) {
@@ -111,7 +113,27 @@ const addWorker = () => {
 
   worker = q.createWorker(getQueue(), async (job: Job) => {
     console.log("Running maintenance event scheduler...");
-    const result = await processAllMaintenances();
+
+    // I3d: cross-tenant, so a loop over orgs rather than one sweep.
+    //
+    // Generating a maintenance event writes into `maintenances_events` and emits
+    // onto the bus, and both need to know whose maintenance it is. Running the
+    // whole sweep unscoped would produce events with no owning org.
+    const orgIds = await db.getActiveOrgIds();
+    const result = { total: 0, eventsCreated: 0 };
+
+    for (const orgId of orgIds) {
+      // One tenant's bad recurrence rule must not stop every other tenant's
+      // maintenances from being scheduled.
+      try {
+        const perOrg = await runWithOrg(orgId, () => processAllMaintenances());
+        result.total += perOrg.total;
+        result.eventsCreated += perOrg.eventsCreated;
+      } catch (error) {
+        console.error(`Maintenance scheduler failed for org ${orgId}:`, error);
+      }
+    }
+
     console.log(
       `Maintenance scheduler completed. Processed ${result.total} maintenances, created ${result.eventsCreated} events.`,
     );

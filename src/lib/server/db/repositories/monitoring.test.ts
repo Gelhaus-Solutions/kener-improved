@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import Knex from "knex";
 import type { Knex as KnexType } from "knex";
 import { MonitoringRepository } from "./monitoring.js";
+import { unscoped } from "./testSupport";
 
 // Repository-level check against in-memory SQLite: getLatestMonitoringDataAllActive
 // must return exactly the newest row per requested tag, regardless of insert order.
@@ -36,7 +37,7 @@ describe("MonitoringRepository.getLatestMonitoringDataAllActive", () => {
       { monitor_tag: "beta", timestamp: 150, status: "UP", latency: 8, type: "REALTIME" },
       { monitor_tag: "ignored", timestamp: 999, status: "UP", latency: 1, type: "REALTIME" },
     ]);
-    repo = new MonitoringRepository(db);
+    repo = unscoped(new MonitoringRepository(db));
   });
 
   afterAll(async () => {

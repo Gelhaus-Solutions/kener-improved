@@ -1,3 +1,4 @@
+import { runWithOrg } from "../db/orgContext.js";
 import type { MonitorRecordTyped } from "../types/db";
 
 import { Queue, Worker, Job, type JobsOptions, type JobSchedulerTemplateOptions } from "bullmq";
@@ -72,8 +73,19 @@ const addWorker = () => {
       }
     }
 
-    //we have to update the maintenances events also
-    await UpdateMaintenanceEventStatuses();
+    // I3d: cross-tenant, so a loop over orgs.
+    //
+    // This transitions maintenance events between states, which emits onto the
+    // bus, and an event with no owning org is not something any consumer can
+    // route. The monitor sweep above needs no such loop: each monitor record
+    // carries its own `org_id`, so the job it enqueues is already scoped.
+    for (const orgId of await db.getActiveOrgIds()) {
+      try {
+        await runWithOrg(orgId, () => UpdateMaintenanceEventStatuses());
+      } catch (error) {
+        console.error(`Maintenance status update failed for org ${orgId}:`, error);
+      }
+    }
 
     // Refresh the index alertingQueue.push uses to skip monitors with no alert
     // config. One query here replaces two per monitor per minute there. Failures

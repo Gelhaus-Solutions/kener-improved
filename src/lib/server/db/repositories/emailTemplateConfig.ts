@@ -26,7 +26,7 @@ export class EmailTemplateConfigRepository extends BaseRepository {
     template: GeneralEmailTemplateRecordInsert,
     orgId: number = currentOrgId(),
   ): Promise<string[]> {
-    return await this.knex("general_email_templates").insert({ org_id: orgId, ...template });
+    return await this.table("general_email_templates").insert({ org_id: orgId, ...template });
   }
 
   /**
@@ -37,14 +37,14 @@ export class EmailTemplateConfigRepository extends BaseRepository {
     updates: Partial<Omit<GeneralEmailTemplateRecordInsert, "template_id">>,
     orgId: number = currentOrgId(),
   ): Promise<number> {
-    return await this.knex("general_email_templates").where({ template_id, org_id: orgId }).update(updates);
+    return await this.table("general_email_templates").where({ template_id, org_id: orgId }).update(updates);
   }
 
   /**
    * Get all email templates
    */
   async getAllEmailTemplates(orgId: number = currentOrgId()): Promise<GeneralEmailTemplateRecord[]> {
-    return await this.knex("general_email_templates").where({ org_id: orgId }).select("*");
+    return await this.table("general_email_templates").where({ org_id: orgId }).select("*");
   }
 
   /**
@@ -54,14 +54,14 @@ export class EmailTemplateConfigRepository extends BaseRepository {
     template_id: string,
     orgId: number = currentOrgId(),
   ): Promise<GeneralEmailTemplateRecord | undefined> {
-    return await this.knex("general_email_templates").where({ template_id, org_id: orgId }).first();
+    return await this.table("general_email_templates").where({ template_id, org_id: orgId }).first();
   }
 
   /**
    * Delete an email template by template_id
    */
   async deleteEmailTemplate(template_id: string, orgId: number = currentOrgId()): Promise<number> {
-    return await this.knex("general_email_templates").where({ template_id, org_id: orgId }).delete();
+    return await this.table("general_email_templates").where({ template_id, org_id: orgId }).delete();
   }
 
   /**
@@ -73,7 +73,7 @@ export class EmailTemplateConfigRepository extends BaseRepository {
   ): Promise<number[]> {
     // The conflict target must name both primary key columns, or Postgres has no
     // arbiter to match and the upsert throws instead of merging.
-    return await this.knex("general_email_templates")
+    return await this.table("general_email_templates")
       .insert({ org_id: orgId, ...template })
       .onConflict(["org_id", "template_id"])
       .merge({

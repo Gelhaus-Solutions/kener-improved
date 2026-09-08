@@ -17,70 +17,70 @@ export class PagesRepository extends BaseRepository {
       page_subheader: data.page_subheader,
       page_logo: data.page_logo,
       page_settings_json: data.page_settings_json,
-      created_at: this.knex.fn.now(),
-      updated_at: this.knex.fn.now(),
+      created_at: this.knexUnscoped.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     };
 
     if (dbType === "postgresql") {
-      const result = await this.knex("pages").insert(insertData).returning("*");
+      const result = await this.table("pages").insert(insertData).returning("*");
       const page = Array.isArray(result) ? result[0] : result;
       return page;
     }
 
-    const result = await this.knex("pages").insert(insertData);
+    const result = await this.table("pages").insert(insertData);
     const insertedId = result[0];
     const id = typeof insertedId === "object" ? (insertedId as { id: number }).id : insertedId;
     return (await this.getPageById(id))!;
   }
 
   async getPageById(id: number): Promise<PageRecord | undefined> {
-    return await this.knex("pages").where("id", id).first();
+    return await this.table("pages").where("id", id).first();
   }
 
   async getPageByPath(page_path: string): Promise<PageRecord | undefined> {
-    return await this.knex("pages").where("page_path", page_path).first();
+    return await this.table("pages").where("page_path", page_path).first();
   }
 
   async getAllPages(): Promise<PageRecord[]> {
-    return await this.knex("pages").orderBy("id", "asc");
+    return await this.table("pages").orderBy("id", "asc");
   }
 
   async updatePage(id: number, data: Partial<PageRecordInsert>): Promise<number> {
-    return await this.knex("pages")
+    return await this.table("pages")
       .where("id", id)
       .update({
         ...data,
-        updated_at: this.knex.fn.now(),
+        updated_at: this.knexUnscoped.fn.now(),
       });
   }
 
   async deletePage(id: number): Promise<number> {
-    return await this.knex("pages").where("id", id).del();
+    return await this.table("pages").where("id", id).del();
   }
 
   // ============ Pages Monitors ============
 
   async addMonitorToPage(data: PageMonitorRecordInsert): Promise<void> {
-    await this.knex("pages_monitors").insert({
+    await this.table("pages_monitors").insert({
       page_id: data.page_id,
       monitor_tag: data.monitor_tag,
       monitor_settings_json: data.monitor_settings_json,
       position: data.position ?? 0,
-      created_at: this.knex.fn.now(),
-      updated_at: this.knex.fn.now(),
+      created_at: this.knexUnscoped.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     });
   }
 
   async removeMonitorFromPage(page_id: number, monitor_tag: string): Promise<number> {
-    return await this.knex("pages_monitors").where({ page_id, monitor_tag }).del();
+    return await this.table("pages_monitors").where({ page_id, monitor_tag }).del();
   }
 
   async getPageMonitors(page_id: number): Promise<PageMonitorRecord[]> {
-    return await this.knex("pages_monitors").where("page_id", page_id).orderBy("position", "asc");
+    return await this.table("pages_monitors").where("page_id", page_id).orderBy("position", "asc");
   }
 
   async getPageMonitorsExcludeHidden(page_id: number): Promise<PageMonitorRecord[]> {
-    return await this.knex("pages_monitors")
+    return await this.table("pages_monitors")
       .join("monitors", "pages_monitors.monitor_tag", "monitors.tag")
       .where("pages_monitors.page_id", page_id)
       .andWhere("monitors.is_hidden", "NO")
@@ -90,7 +90,7 @@ export class PagesRepository extends BaseRepository {
   }
 
   async getPagesByMonitorTag(monitor_tag: string): Promise<PageMonitorRecord[]> {
-    return await this.knex("pages_monitors").where("monitor_tag", monitor_tag);
+    return await this.table("pages_monitors").where("monitor_tag", monitor_tag);
   }
 
   async updatePageMonitorSettings(
@@ -98,30 +98,30 @@ export class PagesRepository extends BaseRepository {
     monitor_tag: string,
     monitor_settings_json: string | null,
   ): Promise<number> {
-    return await this.knex("pages_monitors").where({ page_id, monitor_tag }).update({
+    return await this.table("pages_monitors").where({ page_id, monitor_tag }).update({
       monitor_settings_json,
-      updated_at: this.knex.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     });
   }
 
   async monitorExistsOnPage(page_id: number, monitor_tag: string): Promise<boolean> {
-    const result = await this.knex("pages_monitors").where({ page_id, monitor_tag }).first();
+    const result = await this.table("pages_monitors").where({ page_id, monitor_tag }).first();
     return !!result;
   }
 
   async deletePageMonitorsByTag(monitor_tag: string): Promise<number> {
-    return await this.knex("pages_monitors").where({ monitor_tag }).del();
+    return await this.table("pages_monitors").where({ monitor_tag }).del();
   }
 
   async deletePageMonitorsByPageId(page_id: number): Promise<number> {
-    return await this.knex("pages_monitors").where({ page_id }).del();
+    return await this.table("pages_monitors").where({ page_id }).del();
   }
 
   async updatePageMonitorPositions(
     page_id: number,
     monitorPositions: { monitor_tag: string; position: number }[],
   ): Promise<void> {
-    await this.knex.transaction(async (trx) => {
+    await this.knexUnscoped.transaction(async (trx) => {
       for (const mp of monitorPositions) {
         await trx("pages_monitors")
           .where({ page_id, monitor_tag: mp.monitor_tag })

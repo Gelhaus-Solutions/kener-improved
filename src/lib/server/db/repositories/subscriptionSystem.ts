@@ -29,46 +29,46 @@ export class SubscriptionSystemRepository extends BaseRepository {
       status: data.status || "PENDING",
       verification_code: data.verification_code || null,
       verification_expires_at: data.verification_expires_at || null,
-      created_at: this.knex.fn.now(),
-      updated_at: this.knex.fn.now(),
+      created_at: this.knexUnscoped.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     };
 
     if (dbType === "postgresql") {
-      const [user] = await this.knex("subscriber_users").insert(insertData).returning("*");
+      const [user] = await this.table("subscriber_users").insert(insertData).returning("*");
       return user;
     } else {
-      const result = await this.knex("subscriber_users").insert(insertData);
+      const result = await this.table("subscriber_users").insert(insertData);
       const id = result[0];
       return (await this.getSubscriberUserById(id))!;
     }
   }
 
   async getSubscriberUserById(id: number): Promise<SubscriberUserRecord | undefined> {
-    return await this.knex("subscriber_users").where("id", id).first();
+    return await this.table("subscriber_users").where("id", id).first();
   }
 
   async getSubscriberUserByEmail(email: string): Promise<SubscriberUserRecord | undefined> {
-    return await this.knex("subscriber_users").where("email", email.toLowerCase().trim()).first();
+    return await this.table("subscriber_users").where("email", email.toLowerCase().trim()).first();
   }
 
   async updateSubscriberUser(id: number, data: Partial<SubscriberUserRecordInsert>): Promise<number> {
     const updateData: Record<string, unknown> = {
-      updated_at: this.knex.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     };
     if (data.email !== undefined) updateData.email = data.email.toLowerCase().trim();
     if (data.status !== undefined) updateData.status = data.status;
     if (data.verification_code !== undefined) updateData.verification_code = data.verification_code;
     if (data.verification_expires_at !== undefined) updateData.verification_expires_at = data.verification_expires_at;
 
-    return await this.knex("subscriber_users").where("id", id).update(updateData);
+    return await this.table("subscriber_users").where("id", id).update(updateData);
   }
 
   async deleteSubscriberUser(id: number): Promise<number> {
-    return await this.knex("subscriber_users").where("id", id).del();
+    return await this.table("subscriber_users").where("id", id).del();
   }
 
   async getSubscriberUsersCount(status?: SubscriberUserStatus): Promise<number> {
-    let query = this.knex("subscriber_users").count("id as count");
+    let query = this.table("subscriber_users").count("id as count");
     if (status) {
       query = query.where("status", status);
     }
@@ -81,7 +81,7 @@ export class SubscriptionSystemRepository extends BaseRepository {
     limit: number,
     status?: SubscriberUserStatus,
   ): Promise<SubscriberUserRecord[]> {
-    let query = this.knex("subscriber_users").select("*");
+    let query = this.table("subscriber_users").select("*");
     if (status) {
       query = query.where("status", status);
     }
@@ -101,26 +101,26 @@ export class SubscriptionSystemRepository extends BaseRepository {
       method_value: data.method_value.trim(),
       status: data.status || "ACTIVE",
       meta: data.meta || null,
-      created_at: this.knex.fn.now(),
-      updated_at: this.knex.fn.now(),
+      created_at: this.knexUnscoped.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     };
 
     if (dbType === "postgresql") {
-      const [method] = await this.knex("subscriber_methods").insert(insertData).returning("*");
+      const [method] = await this.table("subscriber_methods").insert(insertData).returning("*");
       return method;
     } else {
-      const result = await this.knex("subscriber_methods").insert(insertData);
+      const result = await this.table("subscriber_methods").insert(insertData);
       const id = result[0];
       return (await this.getSubscriberMethodById(id))!;
     }
   }
 
   async getSubscriberMethodById(id: number): Promise<SubscriberMethodRecord | undefined> {
-    return await this.knex("subscriber_methods").where("id", id).first();
+    return await this.table("subscriber_methods").where("id", id).first();
   }
 
   async getSubscriberMethodsByUserId(subscriberUserId: number): Promise<SubscriberMethodRecord[]> {
-    return await this.knex("subscriber_methods")
+    return await this.table("subscriber_methods")
       .where("subscriber_user_id", subscriberUserId)
       .orderBy("created_at", "asc");
   }
@@ -130,7 +130,7 @@ export class SubscriptionSystemRepository extends BaseRepository {
     methodType: SubscriptionMethodType,
     methodValue?: string,
   ): Promise<SubscriberMethodRecord | undefined> {
-    let query = this.knex("subscriber_methods")
+    let query = this.table("subscriber_methods")
       .where("subscriber_user_id", subscriberUserId)
       .andWhere("method_type", methodType);
 
@@ -143,21 +143,21 @@ export class SubscriptionSystemRepository extends BaseRepository {
 
   async updateSubscriberMethod(id: number, data: Partial<SubscriberMethodRecordInsert>): Promise<number> {
     const updateData: Record<string, unknown> = {
-      updated_at: this.knex.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     };
     if (data.method_value !== undefined) updateData.method_value = data.method_value.trim();
     if (data.status !== undefined) updateData.status = data.status;
     if (data.meta !== undefined) updateData.meta = data.meta;
 
-    return await this.knex("subscriber_methods").where("id", id).update(updateData);
+    return await this.table("subscriber_methods").where("id", id).update(updateData);
   }
 
   async deleteSubscriberMethod(id: number): Promise<number> {
-    return await this.knex("subscriber_methods").where("id", id).del();
+    return await this.table("subscriber_methods").where("id", id).del();
   }
 
   async getActiveMethodsByType(methodType: SubscriptionMethodType): Promise<SubscriberMethodRecord[]> {
-    return await this.knex("subscriber_methods").where("method_type", methodType).andWhere("status", "ACTIVE");
+    return await this.table("subscriber_methods").where("method_type", methodType).andWhere("status", "ACTIVE");
   }
 
   // ============ User Subscriptions V2 ============
@@ -169,26 +169,26 @@ export class SubscriptionSystemRepository extends BaseRepository {
       subscriber_method_id: data.subscriber_method_id,
       event_type: data.event_type,
       status: data.status || "ACTIVE",
-      created_at: this.knex.fn.now(),
-      updated_at: this.knex.fn.now(),
+      created_at: this.knexUnscoped.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     };
 
     if (dbType === "postgresql") {
-      const [sub] = await this.knex("user_subscriptions_v2").insert(insertData).returning("*");
+      const [sub] = await this.table("user_subscriptions_v2").insert(insertData).returning("*");
       return sub;
     } else {
-      const result = await this.knex("user_subscriptions_v2").insert(insertData);
+      const result = await this.table("user_subscriptions_v2").insert(insertData);
       const id = result[0];
       return (await this.getUserSubscriptionV2ById(id))!;
     }
   }
 
   async getUserSubscriptionV2ById(id: number): Promise<UserSubscriptionV2Record | undefined> {
-    return await this.knex("user_subscriptions_v2").where("id", id).first();
+    return await this.table("user_subscriptions_v2").where("id", id).first();
   }
 
   async getUserSubscriptionsV2(filter: UserSubscriptionV2Filter): Promise<UserSubscriptionV2Record[]> {
-    let query = this.knex("user_subscriptions_v2").select("*");
+    let query = this.table("user_subscriptions_v2").select("*");
 
     if (filter.subscriber_user_id !== undefined) {
       query = query.where("subscriber_user_id", filter.subscriber_user_id);
@@ -209,15 +209,15 @@ export class SubscriptionSystemRepository extends BaseRepository {
 
   async updateUserSubscriptionV2(id: number, data: Partial<UserSubscriptionV2RecordInsert>): Promise<number> {
     const updateData: Record<string, unknown> = {
-      updated_at: this.knex.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     };
     if (data.status !== undefined) updateData.status = data.status;
 
-    return await this.knex("user_subscriptions_v2").where("id", id).update(updateData);
+    return await this.table("user_subscriptions_v2").where("id", id).update(updateData);
   }
 
   async deleteUserSubscriptionV2(id: number): Promise<number> {
-    return await this.knex("user_subscriptions_v2").where("id", id).del();
+    return await this.table("user_subscriptions_v2").where("id", id).del();
   }
 
   async subscriptionV2Exists(
@@ -225,7 +225,7 @@ export class SubscriptionSystemRepository extends BaseRepository {
     subscriberMethodId: number,
     eventType: SubscriptionEventType,
   ): Promise<boolean> {
-    let query = this.knex("user_subscriptions_v2")
+    let query = this.table("user_subscriptions_v2")
       .where("subscriber_user_id", subscriberUserId)
       .andWhere("subscriber_method_id", subscriberMethodId)
       .andWhere("event_type", eventType);
@@ -245,7 +245,7 @@ export class SubscriptionSystemRepository extends BaseRepository {
       method: SubscriberMethodRecord;
     }>
   > {
-    const rows = await this.knex("user_subscriptions_v2 as us")
+    const rows = await this.table("user_subscriptions_v2 as us")
       .join("subscriber_methods as sm", "us.subscriber_method_id", "sm.id")
       .where("us.subscriber_user_id", subscriberUserId)
       .andWhere("us.status", "ACTIVE")
@@ -286,7 +286,7 @@ export class SubscriptionSystemRepository extends BaseRepository {
       subscription: UserSubscriptionV2Record;
     }>
   > {
-    let query = this.knex("user_subscriptions_v2 as us")
+    let query = this.table("user_subscriptions_v2 as us")
       .join("subscriber_users as su", "us.subscriber_user_id", "su.id")
       .join("subscriber_methods as sm", "us.subscriber_method_id", "sm.id")
       .where("us.event_type", eventType)
@@ -357,7 +357,7 @@ export class SubscriptionSystemRepository extends BaseRepository {
       subscription_count: number;
     }>
   > {
-    const users = await this.knex("subscriber_users")
+    const users = await this.table("subscriber_users")
       .select("*")
       .where("status", "ACTIVE")
       .orderBy("created_at", "desc")
@@ -367,7 +367,7 @@ export class SubscriptionSystemRepository extends BaseRepository {
     const result = [];
     for (const user of users) {
       const methods = await this.getSubscriberMethodsByUserId(user.id);
-      const subCount = await this.knex("user_subscriptions_v2")
+      const subCount = await this.table("user_subscriptions_v2")
         .where("subscriber_user_id", user.id)
         .andWhere("status", "ACTIVE")
         .count("id as count")
@@ -389,7 +389,7 @@ export class SubscriptionSystemRepository extends BaseRepository {
    * Get count of unique users with methods of a specific type
    */
   async getMethodsCountByType(methodType: SubscriptionMethodType): Promise<number> {
-    const result = await this.knex("subscriber_methods")
+    const result = await this.table("subscriber_methods")
       .countDistinct("subscriber_user_id as count")
       .where("method_type", methodType)
       .andWhere("status", "ACTIVE")
@@ -417,7 +417,7 @@ export class SubscriptionSystemRepository extends BaseRepository {
     }>
   > {
     // Get methods of this type with their users
-    const methods = await this.knex("subscriber_methods as sm")
+    const methods = await this.table("subscriber_methods as sm")
       .join("subscriber_users as su", "sm.subscriber_user_id", "su.id")
       .where("sm.method_type", methodType)
       .andWhere("sm.status", "ACTIVE")
@@ -430,13 +430,13 @@ export class SubscriptionSystemRepository extends BaseRepository {
     // Get subscription counts and event types for each method
     const result = [];
     for (const method of methods) {
-      const subCount = await this.knex("user_subscriptions_v2")
+      const subCount = await this.table("user_subscriptions_v2")
         .where("subscriber_method_id", method.method_id)
         .andWhere("status", "ACTIVE")
         .count("id as count")
         .first();
 
-      const eventTypes = await this.knex("user_subscriptions_v2")
+      const eventTypes = await this.table("user_subscriptions_v2")
         .where("subscriber_method_id", method.method_id)
         .andWhere("status", "ACTIVE")
         .distinct("event_type")
@@ -465,13 +465,13 @@ export class SubscriptionSystemRepository extends BaseRepository {
     method: SubscriberMethodRecord;
     subscriptions: UserSubscriptionV2Record[];
   } | null> {
-    const method = await this.knex("subscriber_methods").where("id", methodId).first();
+    const method = await this.table("subscriber_methods").where("id", methodId).first();
     if (!method) return null;
 
-    const user = await this.knex("subscriber_users").where("id", method.subscriber_user_id).first();
+    const user = await this.table("subscriber_users").where("id", method.subscriber_user_id).first();
     if (!user) return null;
 
-    const subscriptions = await this.knex("user_subscriptions_v2")
+    const subscriptions = await this.table("user_subscriptions_v2")
       .where("subscriber_method_id", methodId)
       .andWhere("status", "ACTIVE")
       .orderBy("created_at", "desc");

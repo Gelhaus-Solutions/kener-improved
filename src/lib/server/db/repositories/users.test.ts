@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import knex, { type Knex } from "knex";
 import { UsersRepository } from "./users";
+import { unscoped } from "./testSupport";
 
 describe("UsersRepository.getUserByEmail", () => {
   let db: Knex;
@@ -36,7 +37,7 @@ describe("UsersRepository.getUserByEmail", () => {
     });
     await db("roles").insert({ id: "admin", status: "ACTIVE" });
 
-    repo = new UsersRepository(db);
+    repo = unscoped(new UsersRepository(db));
 
     // Signup stores emails lowercased. This is the address from issue #815.
     const inserted = await db("users").insert({

@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { EventActorType } from "./types.js";
+import { DEFAULT_ORG_ID as ORG_DEFAULT, currentOrgIdOrDefault, runWithOrg } from "../db/orgContext.js";
 
 // Who is acting, and on whose behalf, for the duration of a request or a job.
 //
@@ -61,15 +62,24 @@ const storage = new AsyncLocalStorage<EventContext>();
 /**
  * The organisation everything belongs to until P4 says otherwise.
  *
- * Single-org installs are every install today, and the schema defaults to 1 to
- * match. This constant exists so P4 (I3a-I3d) has one symbol to change rather
- * than a scattering of literal `1`s to find.
+ * Re-exported from `db/orgContext.ts`, which owns it as of I3c. The name stays
+ * here because a dozen call sites import it from this module.
  */
-export const DEFAULT_ORG_ID = 1;
+export const DEFAULT_ORG_ID = ORG_DEFAULT;
 
-/** Runs `fn` with `context` as the ambient actor. Nests; the innermost wins. */
+/**
+ * Runs `fn` with `context` as the ambient actor. Nests; the innermost wins.
+ *
+ * When the context carries an org it also enters the **org** context, so the two
+ * cannot drift: `db/orgContext.ts` holds the single AsyncLocalStorage for the
+ * org, and this is one of the two places that establishes it. Anything that
+ * establishes an actor without an org - a queue worker for a system job, say -
+ * leaves the org context alone, and a repository query against a tenant table
+ * underneath it throws rather than quietly reading org 1.
+ */
 export function runWithEventContext<T>(context: EventContext, fn: () => Promise<T>): Promise<T> {
-  return storage.run(context, fn);
+  if (context.org_id === undefined) return storage.run(context, fn);
+  return runWithOrg(context.org_id, () => storage.run(context, fn));
 }
 
 export function getEventContext(): EventContext | undefined {
@@ -91,13 +101,18 @@ export function noteEmittedEvent(eventId: string): void {
  * it, which keeps `org_id` a mandatory parameter and keeps the compile error
  * that H8 wanted. What this removes is only the temptation to write `1`.
  *
- * **P4 must make this throw when no context is established.** Today it cannot,
- * because nothing establishes one outside the request pipeline and a scheduler
- * has no request. Once I3d wires the context into jobs and schedulers, the
- * fallback below becomes the bug it currently prevents.
+ * **Reads the org context, not this module's store** (I3c). The two used to be
+ * separate facts that happened to agree; now there is one, and it lives in
+ * `db/orgContext.ts` beside the repository chokepoint that enforces it.
+ *
+ * Still falls back to the default org rather than throwing, and that is now the
+ * right behaviour rather than a compromise: the strict version is
+ * `requireOrgId`, which the repository layer calls on every tenant query. This
+ * one is for stamping an `org_id` onto an event, where a system job with no org
+ * genuinely means the default org.
  */
 export function currentOrgId(): number {
-  return storage.getStore()?.org_id ?? DEFAULT_ORG_ID;
+  return currentOrgIdOrDefault();
 }
 
 /**

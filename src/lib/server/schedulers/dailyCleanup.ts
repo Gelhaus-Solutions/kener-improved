@@ -1,3 +1,4 @@
+import { runWithOrg } from "../db/orgContext.js";
 import { Queue, Worker, Job, type JobSchedulerTemplateOptions } from "bullmq";
 import q from "../queues/q.js";
 import db from "../db/db.js";
@@ -120,11 +121,46 @@ const addWorker = () => {
 
   worker = q.createWorker(getQueue(), async (_job: Job) => {
     console.log("Running daily monitoring_data cleanup...");
-    const result = await runDailyCleanup();
-    const prunedAuditRows = await pruneAuditLog();
+
+    // I3d: one of exactly three genuinely cross-tenant jobs.
+    //
+    // Retention is per-org configuration - `dataRetentionPolicy` and
+    // `auditRetentionDays` are `site_data` rows, and `site_data` is per-org as of
+    // I3b - so this cannot be one sweep over every row. It is a loop over orgs,
+    // each iteration inside that org's context, which is also what makes the
+    // pruning queries scoped without any of them changing.
+    //
+    // The job payload carries no `org_id`, so `createWorker` runs it under
+    // `runAcrossOrgs`; reading the org list is exactly what that is for.
+    const orgIds = await db.getActiveOrgIds();
+
+    let deletedRows = 0;
+    let prunedAuditRows = 0;
+    let skipped = true;
+    let retentionDays = defaultPolicy.retentionDays;
+
+    for (const orgId of orgIds) {
+      // One org failing must not stop the others: a bad retention value in one
+      // tenant is not a reason to stop pruning every other tenant's data.
+      try {
+        const perOrg = await runWithOrg(orgId, async () => {
+          const result = await runDailyCleanup();
+          const audit = await pruneAuditLog();
+          return { result, audit };
+        });
+        deletedRows += perOrg.result.deletedRows;
+        prunedAuditRows += perOrg.audit;
+        if (!perOrg.result.skipped) skipped = false;
+        retentionDays = perOrg.result.retentionDays;
+      } catch (error) {
+        console.error(`Daily cleanup failed for org ${orgId}:`, error);
+      }
+    }
+
+    // Sessions belong to users, not to orgs, so this one stays a single sweep.
     const prunedSessions = await pruneSessions();
 
-    return { ...result, prunedAuditRows, prunedSessions };
+    return { skipped, deletedRows, retentionDays, prunedAuditRows, prunedSessions };
   });
 
   worker.on("failed", (_job: Job | undefined, err: Error) => {

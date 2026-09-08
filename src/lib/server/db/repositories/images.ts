@@ -6,20 +6,20 @@ import type { ImageRecord, ImageRecordInsert } from "../../types/db.js";
  */
 export class ImagesRepository extends BaseRepository {
   async insertImage(data: ImageRecordInsert): Promise<string> {
-    await this.knex("images").insert(data);
+    await this.table("images").insert(data);
     return data.id;
   }
 
   async getImageById(id: string): Promise<ImageRecord | undefined> {
-    return await this.knex("images").where("id", id).first();
+    return await this.table("images").where("id", id).first();
   }
 
   async deleteImage(id: string): Promise<number> {
-    return await this.knex("images").where("id", id).del();
+    return await this.table("images").where("id", id).del();
   }
 
   async getAllImages(): Promise<ImageRecord[]> {
-    return await this.knex("images")
+    return await this.table("images")
       .select("id", "mime_type", "original_name", "width", "height", "size", "created_at")
       .orderBy("created_at", "desc");
   }

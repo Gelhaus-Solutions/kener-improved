@@ -40,19 +40,19 @@ export class MonitorAlertConfigRepository extends BaseRepository {
       create_incident: data.create_incident || "NO",
       is_active: data.is_active || "YES",
       severity: data.severity || "WARNING",
-      created_at: this.knex.fn.now(),
-      updated_at: this.knex.fn.now(),
+      created_at: this.knexUnscoped.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     };
 
     if (dbType === "postgresql") {
-      const result = await this.knex("monitor_alerts_config").insert(insertData).returning("id");
+      const result = await this.table("monitor_alerts_config").insert(insertData).returning("id");
       const inserted = Array.isArray(result) ? result[0] : result;
       return typeof inserted === "object" && inserted !== null
         ? Number((inserted as { id: number }).id)
         : Number(inserted);
     }
 
-    const result = await this.knex("monitor_alerts_config").insert(insertData);
+    const result = await this.table("monitor_alerts_config").insert(insertData);
     const inserted = Array.isArray(result) ? result[0] : result;
     return typeof inserted === "object" && inserted !== null
       ? Number((inserted as { id: number }).id)
@@ -64,7 +64,7 @@ export class MonitorAlertConfigRepository extends BaseRepository {
    */
   async updateMonitorAlertConfig(id: number, data: MonitorAlertConfigUpdate): Promise<number> {
     const updateData: Record<string, unknown> = {
-      updated_at: this.knex.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     };
 
     if (data.alert_for !== undefined) updateData.alert_for = data.alert_for;
@@ -76,21 +76,21 @@ export class MonitorAlertConfigRepository extends BaseRepository {
     if (data.is_active !== undefined) updateData.is_active = data.is_active;
     if (data.severity !== undefined) updateData.severity = data.severity;
 
-    return await this.knex("monitor_alerts_config").where({ id }).update(updateData);
+    return await this.table("monitor_alerts_config").where({ id }).update(updateData);
   }
 
   /**
    * Get a single monitor alert config by ID
    */
   async getMonitorAlertConfigById(id: number): Promise<MonitorAlertConfigRecord | undefined> {
-    return await this.knex("monitor_alerts_config").where({ id }).first();
+    return await this.table("monitor_alerts_config").where({ id }).first();
   }
 
   /**
    * Get monitor alert configs with optional filtering
    */
   async getMonitorAlertConfigs(filter: MonitorAlertConfigFilter): Promise<MonitorAlertConfigRecord[]> {
-    let query = this.knex("monitor_alerts_config as mac").select("mac.*").whereRaw("1=1");
+    let query = this.table("monitor_alerts_config as mac").select("mac.*").whereRaw("1=1");
 
     if (filter.id !== undefined) {
       query = query.andWhere("mac.id", filter.id);
@@ -114,7 +114,7 @@ export class MonitorAlertConfigRepository extends BaseRepository {
    * Get all monitor alert configs for a specific monitor tag
    */
   async getMonitorAlertConfigsByMonitorTag(monitorTag: string): Promise<MonitorAlertConfigRecord[]> {
-    return await this.knex("monitor_alerts_config as mac")
+    return await this.table("monitor_alerts_config as mac")
       .select("mac.*")
       .join("monitor_alerts_config_monitors as macm", "mac.id", "macm.monitor_alerts_id")
       .where("macm.monitor_tag", monitorTag)
@@ -125,7 +125,7 @@ export class MonitorAlertConfigRepository extends BaseRepository {
    * Get all active monitor alert configs
    */
   async getActiveMonitorAlertConfigs(): Promise<MonitorAlertConfigRecord[]> {
-    return await this.knex("monitor_alerts_config").where({ is_active: "YES" }).orderBy("id", "desc");
+    return await this.table("monitor_alerts_config").where({ is_active: "YES" }).orderBy("id", "desc");
   }
 
   /**
@@ -135,7 +135,7 @@ export class MonitorAlertConfigRepository extends BaseRepository {
    * per scheduler tick replaces two per monitor per minute.
    */
   async getMonitorTagsWithActiveAlertConfigs(): Promise<string[]> {
-    const rows = await this.knex("monitor_alerts_config_monitors as macm")
+    const rows = await this.table("monitor_alerts_config_monitors as macm")
       .distinct("macm.monitor_tag as monitor_tag")
       .join("monitor_alerts_config as mac", "mac.id", "macm.monitor_alerts_id")
       .where("mac.is_active", "YES");
@@ -146,7 +146,7 @@ export class MonitorAlertConfigRepository extends BaseRepository {
    * Get all active monitor alert configs for a specific monitor
    */
   async getActiveMonitorAlertConfigsByMonitorTag(monitorTag: string): Promise<MonitorAlertConfigRecord[]> {
-    return await this.knex("monitor_alerts_config as mac")
+    return await this.table("monitor_alerts_config as mac")
       .select("mac.*")
       .join("monitor_alerts_config_monitors as macm", "mac.id", "macm.monitor_alerts_id")
       .where("macm.monitor_tag", monitorTag)
@@ -163,10 +163,10 @@ export class MonitorAlertConfigRepository extends BaseRepository {
    * docs/adr/0008-explicit-deletes-over-fk-cascades.md.
    */
   async deleteMonitorAlertConfig(id: number): Promise<number> {
-    await this.knex("monitor_alerts_v2").where({ config_id: id }).del();
-    await this.knex("monitor_alerts_config_triggers").where({ monitor_alerts_id: id }).del();
-    await this.knex("monitor_alerts_config_monitors").where({ monitor_alerts_id: id }).del();
-    return await this.knex("monitor_alerts_config").where({ id }).del();
+    await this.table("monitor_alerts_v2").where({ config_id: id }).del();
+    await this.table("monitor_alerts_config_triggers").where({ monitor_alerts_id: id }).del();
+    await this.table("monitor_alerts_config_monitors").where({ monitor_alerts_id: id }).del();
+    return await this.table("monitor_alerts_config").where({ id }).del();
   }
 
   /**
@@ -174,7 +174,7 @@ export class MonitorAlertConfigRepository extends BaseRepository {
    */
   async deleteMonitorAlertConfigsByMonitorTag(monitorTag: string): Promise<number> {
     // Find all config IDs that have this monitor tag in the junction table
-    const configIds = await this.knex("monitor_alerts_config_monitors")
+    const configIds = await this.table("monitor_alerts_config_monitors")
       .select("monitor_alerts_id")
       .where({ monitor_tag: monitorTag });
 
@@ -184,14 +184,14 @@ export class MonitorAlertConfigRepository extends BaseRepository {
     // alert state — a shared config survives the detach, but its v2 rows for
     // this tag would otherwise dangle (see deleteMonitorAlertConfig on why
     // FK cascades can't be relied on)
-    await this.knex("monitor_alerts_v2").where({ monitor_tag: monitorTag }).del();
-    await this.knex("monitor_alerts_config_monitors").where({ monitor_tag: monitorTag }).del();
+    await this.table("monitor_alerts_v2").where({ monitor_tag: monitorTag }).del();
+    await this.table("monitor_alerts_config_monitors").where({ monitor_tag: monitorTag }).del();
 
     // Delete any configs that now have zero monitors
     const ids = configIds.map((r: { monitor_alerts_id: number }) => r.monitor_alerts_id);
     let deletedCount = 0;
     for (const id of ids) {
-      const remainingMonitors = await this.knex("monitor_alerts_config_monitors")
+      const remainingMonitors = await this.table("monitor_alerts_config_monitors")
         .count("* as count")
         .where({ monitor_alerts_id: id })
         .first<CountResult>();
@@ -207,7 +207,7 @@ export class MonitorAlertConfigRepository extends BaseRepository {
    * Count monitor alert configs with optional filtering
    */
   async getMonitorAlertConfigsCount(filter: MonitorAlertConfigFilter): Promise<CountResult | undefined> {
-    let query = this.knex("monitor_alerts_config as mac").count("* as count");
+    let query = this.table("monitor_alerts_config as mac").count("* as count");
 
     if (filter.id !== undefined) {
       query = query.andWhere("mac.id", filter.id);
@@ -236,7 +236,7 @@ export class MonitorAlertConfigRepository extends BaseRepository {
     filter?: MonitorAlertConfigFilter,
   ): Promise<{ configs: MonitorAlertConfigRecord[]; total: number }> {
     // Build count query
-    let countQuery = this.knex("monitor_alerts_config as mac").count("* as count");
+    let countQuery = this.table("monitor_alerts_config as mac").count("* as count");
     if (filter?.monitor_tag) {
       countQuery = countQuery
         .join("monitor_alerts_config_monitors as macm", "mac.id", "macm.monitor_alerts_id")
@@ -252,7 +252,7 @@ export class MonitorAlertConfigRepository extends BaseRepository {
     const total = totalResult ? Number(totalResult.count) : 0;
 
     // Build paginated query
-    let query = this.knex("monitor_alerts_config as mac").select("mac.*").orderBy("mac.id", "desc");
+    let query = this.table("monitor_alerts_config as mac").select("mac.*").orderBy("mac.id", "desc");
     if (filter?.monitor_tag) {
       query = query
         .join("monitor_alerts_config_monitors as macm", "mac.id", "macm.monitor_alerts_id")
@@ -275,11 +275,11 @@ export class MonitorAlertConfigRepository extends BaseRepository {
    * Add a trigger to a monitor alert config
    */
   async addTriggerToMonitorAlertConfig(data: MonitorAlertConfigTriggerInsert): Promise<number[]> {
-    return await this.knex("monitor_alerts_config_triggers").insert({
+    return await this.table("monitor_alerts_config_triggers").insert({
       monitor_alerts_id: data.monitor_alerts_id,
       trigger_id: data.trigger_id,
-      created_at: this.knex.fn.now(),
-      updated_at: this.knex.fn.now(),
+      created_at: this.knexUnscoped.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     });
   }
 
@@ -292,18 +292,18 @@ export class MonitorAlertConfigRepository extends BaseRepository {
     const inserts = triggerIds.map((triggerId) => ({
       monitor_alerts_id: monitorAlertsId,
       trigger_id: triggerId,
-      created_at: this.knex.fn.now(),
-      updated_at: this.knex.fn.now(),
+      created_at: this.knexUnscoped.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     }));
 
-    await this.knex("monitor_alerts_config_triggers").insert(inserts);
+    await this.table("monitor_alerts_config_triggers").insert(inserts);
   }
 
   /**
    * Remove a trigger from a monitor alert config
    */
   async removeTriggerFromMonitorAlertConfig(monitorAlertsId: number, triggerId: number): Promise<number> {
-    return await this.knex("monitor_alerts_config_triggers")
+    return await this.table("monitor_alerts_config_triggers")
       .where({ monitor_alerts_id: monitorAlertsId, trigger_id: triggerId })
       .del();
   }
@@ -312,14 +312,14 @@ export class MonitorAlertConfigRepository extends BaseRepository {
    * Remove all triggers from a monitor alert config
    */
   async removeAllTriggersFromMonitorAlertConfig(monitorAlertsId: number): Promise<number> {
-    return await this.knex("monitor_alerts_config_triggers").where({ monitor_alerts_id: monitorAlertsId }).del();
+    return await this.table("monitor_alerts_config_triggers").where({ monitor_alerts_id: monitorAlertsId }).del();
   }
 
   /**
    * Get all trigger associations for a monitor alert config
    */
   async getMonitorAlertConfigTriggers(monitorAlertsId: number): Promise<MonitorAlertConfigTriggerRecord[]> {
-    return await this.knex("monitor_alerts_config_triggers")
+    return await this.table("monitor_alerts_config_triggers")
       .where({ monitor_alerts_id: monitorAlertsId })
       .orderBy("trigger_id", "asc");
   }
@@ -328,7 +328,7 @@ export class MonitorAlertConfigRepository extends BaseRepository {
    * Get trigger IDs for a monitor alert config
    */
   async getMonitorAlertConfigTriggerIds(monitorAlertsId: number): Promise<number[]> {
-    const records = await this.knex("monitor_alerts_config_triggers")
+    const records = await this.table("monitor_alerts_config_triggers")
       .select("trigger_id")
       .where({ monitor_alerts_id: monitorAlertsId });
     return records.map((r: { trigger_id: number }) => r.trigger_id);
@@ -355,18 +355,18 @@ export class MonitorAlertConfigRepository extends BaseRepository {
     const inserts = monitorTags.map((monitorTag) => ({
       monitor_alerts_id: alertConfigId,
       monitor_tag: monitorTag,
-      created_at: this.knex.fn.now(),
-      updated_at: this.knex.fn.now(),
+      created_at: this.knexUnscoped.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     }));
 
-    await this.knex("monitor_alerts_config_monitors").insert(inserts);
+    await this.table("monitor_alerts_config_monitors").insert(inserts);
   }
 
   /**
    * Remove all monitors from an alert config
    */
   async removeAllMonitorsFromAlertConfig(alertConfigId: number): Promise<number> {
-    return await this.knex("monitor_alerts_config_monitors").where({ monitor_alerts_id: alertConfigId }).del();
+    return await this.table("monitor_alerts_config_monitors").where({ monitor_alerts_id: alertConfigId }).del();
   }
 
   /**
@@ -383,7 +383,7 @@ export class MonitorAlertConfigRepository extends BaseRepository {
    * Get monitor tags for an alert config
    */
   async getAlertConfigMonitorTags(alertConfigId: number): Promise<string[]> {
-    const records = await this.knex("monitor_alerts_config_monitors")
+    const records = await this.table("monitor_alerts_config_monitors")
       .select("monitor_tag")
       .where({ monitor_alerts_id: alertConfigId });
     return records.map((r: { monitor_tag: string }) => r.monitor_tag);
@@ -398,7 +398,7 @@ export class MonitorAlertConfigRepository extends BaseRepository {
     const config = await this.getMonitorAlertConfigById(id);
     if (!config) return undefined;
 
-    const triggerRecords = await this.knex("monitor_alerts_config_triggers as mact")
+    const triggerRecords = await this.table("monitor_alerts_config_triggers as mact")
       .join("triggers as t", "mact.trigger_id", "t.id")
       .select("t.*")
       .where("mact.monitor_alerts_id", id);
@@ -420,7 +420,7 @@ export class MonitorAlertConfigRepository extends BaseRepository {
 
     const result: MonitorAlertConfigWithTriggers[] = [];
     for (const config of configs) {
-      const triggerRecords = await this.knex("monitor_alerts_config_triggers as mact")
+      const triggerRecords = await this.table("monitor_alerts_config_triggers as mact")
         .join("triggers as t", "mact.trigger_id", "t.id")
         .select("t.*")
         .where("mact.monitor_alerts_id", config.id);
@@ -445,7 +445,7 @@ export class MonitorAlertConfigRepository extends BaseRepository {
 
     const result: MonitorAlertConfigWithTriggers[] = [];
     for (const config of configs) {
-      const triggerRecords = await this.knex("monitor_alerts_config_triggers as mact")
+      const triggerRecords = await this.table("monitor_alerts_config_triggers as mact")
         .join("triggers as t", "mact.trigger_id", "t.id")
         .select("t.*")
         .where("mact.monitor_alerts_id", config.id);
@@ -466,7 +466,7 @@ export class MonitorAlertConfigRepository extends BaseRepository {
    * Check if a trigger is associated with any monitor alert config
    */
   async isTriggerUsedInMonitorAlertConfig(triggerId: number): Promise<boolean> {
-    const result = await this.knex("monitor_alerts_config_triggers")
+    const result = await this.table("monitor_alerts_config_triggers")
       .count("* as count")
       .where({ trigger_id: triggerId })
       .first<CountResult>();
@@ -477,7 +477,7 @@ export class MonitorAlertConfigRepository extends BaseRepository {
    * Get all monitor alert configs that use a specific trigger
    */
   async getMonitorAlertConfigsByTriggerId(triggerId: number): Promise<MonitorAlertConfigRecord[]> {
-    return await this.knex("monitor_alerts_config as mac")
+    return await this.table("monitor_alerts_config as mac")
       .join("monitor_alerts_config_triggers as mact", "mac.id", "mact.monitor_alerts_id")
       .select("mac.*")
       .where("mact.trigger_id", triggerId)
@@ -496,16 +496,16 @@ export class MonitorAlertConfigRepository extends BaseRepository {
       monitor_tag: data.monitor_tag || null,
       incident_id: data.incident_id || null,
       alert_status: data.alert_status,
-      created_at: this.knex.fn.now(),
-      updated_at: this.knex.fn.now(),
+      created_at: this.knexUnscoped.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     };
 
     if (dbType === "postgresql") {
-      const [record] = await this.knex("monitor_alerts_v2").insert(insertData).returning("*");
+      const [record] = await this.table("monitor_alerts_v2").insert(insertData).returning("*");
       return record;
     } else {
-      const [id] = await this.knex("monitor_alerts_v2").insert(insertData);
-      const record = await this.knex("monitor_alerts_v2").where({ id }).first();
+      const [id] = await this.table("monitor_alerts_v2").insert(insertData);
+      const record = await this.table("monitor_alerts_v2").where({ id }).first();
       return record as MonitorAlertV2Record;
     }
   }
@@ -515,22 +515,22 @@ export class MonitorAlertConfigRepository extends BaseRepository {
    */
   async updateMonitorAlertV2(id: number, data: MonitorAlertV2Update): Promise<number> {
     const updateData: Record<string, unknown> = {
-      updated_at: this.knex.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     };
 
     if (data.incident_id !== undefined) updateData.incident_id = data.incident_id;
     if (data.alert_status !== undefined) updateData.alert_status = data.alert_status;
 
-    return await this.knex("monitor_alerts_v2").where({ id }).update(updateData);
+    return await this.table("monitor_alerts_v2").where({ id }).update(updateData);
   }
 
   /**
    * Update alert status by ID
    */
   async updateMonitorAlertV2Status(id: number, alertStatus: MonitorAlertStatusType): Promise<number> {
-    return await this.knex("monitor_alerts_v2").where({ id }).update({
+    return await this.table("monitor_alerts_v2").where({ id }).update({
       alert_status: alertStatus,
-      updated_at: this.knex.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     });
   }
 
@@ -538,14 +538,14 @@ export class MonitorAlertConfigRepository extends BaseRepository {
    * Get a single monitor alert v2 by ID
    */
   async getMonitorAlertV2ById(id: number): Promise<MonitorAlertV2Record | undefined> {
-    return await this.knex("monitor_alerts_v2").where({ id }).first();
+    return await this.table("monitor_alerts_v2").where({ id }).first();
   }
 
   /**
    * Get monitor alerts v2 with optional filtering
    */
   async getMonitorAlertsV2(filter: MonitorAlertV2Filter): Promise<MonitorAlertV2Record[]> {
-    let query = this.knex("monitor_alerts_v2").whereRaw("1=1");
+    let query = this.table("monitor_alerts_v2").whereRaw("1=1");
 
     if (filter.id !== undefined) {
       query = query.andWhere("id", filter.id);
@@ -570,14 +570,14 @@ export class MonitorAlertConfigRepository extends BaseRepository {
    * Get all monitor alerts v2 for a specific config
    */
   async getMonitorAlertsV2ByConfigId(configId: number): Promise<MonitorAlertV2Record[]> {
-    return await this.knex("monitor_alerts_v2").where({ config_id: configId }).orderBy("id", "desc");
+    return await this.table("monitor_alerts_v2").where({ config_id: configId }).orderBy("id", "desc");
   }
 
   /**
    * Check if a triggered alert exists for a specific config
    */
   async hasTriggeredAlertForConfig(configId: number): Promise<boolean> {
-    const result = await this.knex("monitor_alerts_v2")
+    const result = await this.table("monitor_alerts_v2")
       .count("* as count")
       .where({ config_id: configId, alert_status: "TRIGGERED" })
       .first<CountResult>();
@@ -588,7 +588,7 @@ export class MonitorAlertConfigRepository extends BaseRepository {
    * Get the active (TRIGGERED) alert for a specific config
    */
   async getActiveAlertForConfig(configId: number): Promise<MonitorAlertV2Record | undefined> {
-    return await this.knex("monitor_alerts_v2")
+    return await this.table("monitor_alerts_v2")
       .where({ config_id: configId, alert_status: "TRIGGERED" })
       .orderBy("id", "desc")
       .first();
@@ -598,21 +598,21 @@ export class MonitorAlertConfigRepository extends BaseRepository {
    * Get all triggered alerts
    */
   async getAllTriggeredAlerts(): Promise<MonitorAlertV2Record[]> {
-    return await this.knex("monitor_alerts_v2").where({ alert_status: "TRIGGERED" }).orderBy("id", "desc");
+    return await this.table("monitor_alerts_v2").where({ alert_status: "TRIGGERED" }).orderBy("id", "desc");
   }
 
   /**
    * Delete a monitor alert v2 by ID
    */
   async deleteMonitorAlertV2(id: number): Promise<number> {
-    return await this.knex("monitor_alerts_v2").where({ id }).del();
+    return await this.table("monitor_alerts_v2").where({ id }).del();
   }
 
   /**
    * Delete all monitor alerts v2 for a specific config
    */
   async deleteMonitorAlertsV2ByConfigId(configId: number): Promise<number> {
-    return await this.knex("monitor_alerts_v2").where({ config_id: configId }).del();
+    return await this.table("monitor_alerts_v2").where({ config_id: configId }).del();
   }
 
   /**
@@ -652,9 +652,9 @@ export class MonitorAlertConfigRepository extends BaseRepository {
    * Add incident ID to an alert
    */
   async addIncidentToAlert(alertId: number, incidentId: number): Promise<number> {
-    return await this.knex("monitor_alerts_v2").where({ id: alertId }).update({
+    return await this.table("monitor_alerts_v2").where({ id: alertId }).update({
       incident_id: incidentId,
-      updated_at: this.knex.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     });
   }
 
@@ -662,14 +662,14 @@ export class MonitorAlertConfigRepository extends BaseRepository {
    * Get alerts by incident ID
    */
   async getAlertsByIncidentId(incidentId: number): Promise<MonitorAlertV2Record[]> {
-    return await this.knex("monitor_alerts_v2").where({ incident_id: incidentId }).orderBy("id", "desc");
+    return await this.table("monitor_alerts_v2").where({ incident_id: incidentId }).orderBy("id", "desc");
   }
 
   /**
    * Count monitor alerts v2 with optional filtering
    */
   async getMonitorAlertsV2Count(filter: MonitorAlertV2Filter): Promise<CountResult | undefined> {
-    let query = this.knex("monitor_alerts_v2").count("* as count");
+    let query = this.table("monitor_alerts_v2").count("* as count");
 
     if (filter.id !== undefined) {
       query = query.andWhere("id", filter.id);
@@ -696,7 +696,7 @@ export class MonitorAlertConfigRepository extends BaseRepository {
     filter?: MonitorAlertV2Filter,
   ): Promise<{ alerts: MonitorAlertV2WithConfig[]; total: number }> {
     // Build count query
-    let countQuery = this.knex("monitor_alerts_v2").count("* as count");
+    let countQuery = this.table("monitor_alerts_v2").count("* as count");
     if (filter?.alert_status) {
       countQuery = countQuery.where("alert_status", filter.alert_status);
     }
@@ -707,7 +707,7 @@ export class MonitorAlertConfigRepository extends BaseRepository {
     const total = totalResult ? Number(totalResult.count) : 0;
 
     // Build paginated query
-    let query = this.knex("monitor_alerts_v2").orderBy("id", "desc");
+    let query = this.table("monitor_alerts_v2").orderBy("id", "desc");
     if (filter?.alert_status) {
       query = query.where("alert_status", filter.alert_status);
     }

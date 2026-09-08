@@ -43,7 +43,7 @@ export class MonitoringRepository extends BaseRepository {
   async insertMonitoringData(data: MonitoringDataInsert): Promise<MonitoringData | null> {
     const { monitor_tag, timestamp, status, latency, type, error_message, raw_status } = data;
 
-    const upsert = this.knex("monitoring_data")
+    const upsert = this.table("monitoring_data")
       .insert({ monitor_tag, timestamp, status, latency, type, error_message, raw_status })
       .onConflict(["monitor_tag", "timestamp"])
       .merge({ status, latency, type, error_message, raw_status });
@@ -51,14 +51,14 @@ export class MonitoringRepository extends BaseRepository {
     // This runs once per monitor per minute on the worker pool, so the second
     // round trip is worth avoiding. MySQL is the dialect without RETURNING; it
     // re-SELECTs below for the same result.
-    if (supportsInsertReturning(this.knex)) {
+    if (supportsInsertReturning(this.knexUnscoped)) {
       const rows = (await upsert.returning("*")) as MonitoringData[];
       return rows[0] ?? null;
     }
 
     await upsert;
 
-    const record = await this.knex("monitoring_data")
+    const record = await this.table("monitoring_data")
       .where("monitor_tag", monitor_tag)
       .where("timestamp", timestamp)
       .first();
@@ -67,7 +67,7 @@ export class MonitoringRepository extends BaseRepository {
   }
 
   async getMonitoringData(monitor_tag: string, start: number, end: number): Promise<MonitoringData[]> {
-    return await this.knex("monitoring_data")
+    return await this.table("monitoring_data")
       .where("monitor_tag", monitor_tag)
       .where("timestamp", ">=", start)
       .where("timestamp", "<", end)
@@ -75,7 +75,7 @@ export class MonitoringRepository extends BaseRepository {
   }
 
   async getLatestMonitoringData(monitor_tag: string): Promise<MonitoringData | undefined> {
-    return await this.knex("monitoring_data")
+    return await this.table("monitoring_data")
       .where("monitor_tag", monitor_tag)
       .orderBy("timestamp", "desc")
       .limit(1)
@@ -83,7 +83,7 @@ export class MonitoringRepository extends BaseRepository {
   }
 
   async getLatestMonitoringDataN(monitor_tag: string, limit: number): Promise<MonitoringData[]> {
-    return await this.knex("monitoring_data")
+    return await this.table("monitoring_data")
       .where("monitor_tag", monitor_tag)
       .orderBy("timestamp", "desc")
       .limit(limit);
@@ -94,7 +94,7 @@ export class MonitoringRepository extends BaseRepository {
     limit: number,
     filter?: { monitor_tag?: string; status?: MonitoringStatus; start_time?: number; end_time?: number },
   ): Promise<MonitoringData[]> {
-    let query = this.knex("monitoring_data").select("*");
+    let query = this.table("monitoring_data").select("*");
 
     if (filter?.monitor_tag) {
       query = query.where("monitor_tag", filter.monitor_tag);
@@ -124,7 +124,7 @@ export class MonitoringRepository extends BaseRepository {
     start_time?: number;
     end_time?: number;
   }): Promise<{ count: number }> {
-    let query = this.knex("monitoring_data").count("* as count");
+    let query = this.table("monitoring_data").count("* as count");
 
     if (filter?.monitor_tag) {
       query = query.where("monitor_tag", filter.monitor_tag);
@@ -147,7 +147,7 @@ export class MonitoringRepository extends BaseRepository {
   }
 
   async getMonitoringDataAt(monitor_tag: string, timestamp: number): Promise<MonitoringData | undefined> {
-    return await this.knex("monitoring_data")
+    return await this.table("monitoring_data")
       .where("monitor_tag", monitor_tag)
       .where("timestamp", timestamp)
       .orderBy("timestamp", "desc")
@@ -178,7 +178,7 @@ export class MonitoringRepository extends BaseRepository {
   }
 
   async getLastHeartbeat(monitor_tag: string): Promise<MonitoringData | undefined> {
-    return await this.knex("monitoring_data")
+    return await this.table("monitoring_data")
       .where("monitor_tag", monitor_tag)
       .where("type", GC.SIGNAL)
       .orderBy("timestamp", "desc")
@@ -191,14 +191,14 @@ export class MonitoringRepository extends BaseRepository {
     start: number,
     end: number,
   ): Promise<AggregatedMonitoringData | undefined> {
-    return await this.knex("monitoring_data")
+    return await this.table("monitoring_data")
       .select(
-        this.knex.raw("COUNT(CASE WHEN status = 'DEGRADED' THEN 1 END) as DEGRADED"),
-        this.knex.raw("COUNT(CASE WHEN status = 'UP' THEN 1 END) as UP"),
-        this.knex.raw("COUNT(CASE WHEN status = 'DOWN' THEN 1 END) as DOWN"),
-        this.knex.raw("AVG(latency) as avg_latency"),
-        this.knex.raw("MAX(latency) as max_latency"),
-        this.knex.raw("MIN(latency) as min_latency"),
+        this.knexUnscoped.raw("COUNT(CASE WHEN status = 'DEGRADED' THEN 1 END) as DEGRADED"),
+        this.knexUnscoped.raw("COUNT(CASE WHEN status = 'UP' THEN 1 END) as UP"),
+        this.knexUnscoped.raw("COUNT(CASE WHEN status = 'DOWN' THEN 1 END) as DOWN"),
+        this.knexUnscoped.raw("AVG(latency) as avg_latency"),
+        this.knexUnscoped.raw("MAX(latency) as max_latency"),
+        this.knexUnscoped.raw("MIN(latency) as min_latency"),
       )
       .where("monitor_tag", monitor_tag)
       .where("timestamp", ">=", start)
@@ -207,7 +207,7 @@ export class MonitoringRepository extends BaseRepository {
   }
 
   async getLastStatusBefore(monitor_tag: string, timestamp: number): Promise<MonitoringData | undefined> {
-    return await this.knex("monitoring_data")
+    return await this.table("monitoring_data")
       .where("monitor_tag", monitor_tag)
       .where("timestamp", "<", timestamp)
       .orderBy("timestamp", "desc")
@@ -216,7 +216,7 @@ export class MonitoringRepository extends BaseRepository {
   }
 
   async getLastStatusBeforeAll(monitor_tags: string[], timestamp: number): Promise<MonitoringData | undefined> {
-    return await this.knex("monitoring_data")
+    return await this.table("monitoring_data")
       .whereIn("monitor_tag", monitor_tags)
       .where("timestamp", "<", timestamp)
       .orderBy("timestamp", "desc")
@@ -229,7 +229,7 @@ export class MonitoringRepository extends BaseRepository {
     start: number,
     end: number,
   ): Promise<Array<{ timestamp: number; status: string; latency: number }>> {
-    return await this.knex("monitoring_data")
+    return await this.table("monitoring_data")
       .select("timestamp", "status", "latency")
       .where("monitor_tag", monitor_tag)
       .andWhere("timestamp", ">=", start)
@@ -242,12 +242,12 @@ export class MonitoringRepository extends BaseRepository {
     timestamp: number,
     minTimestamp: number | null,
   ): Promise<{ timestamp: number; total_entries: number; latency: number; status: string } | undefined> {
-    let query = this.knex("monitoring_data")
+    let query = this.table("monitoring_data")
       .select(
         "timestamp",
-        this.knex.raw("COUNT(*) as total_entries"),
-        this.knex.raw("AVG(latency) as latency"),
-        this.knex.raw(`
+        this.knexUnscoped.raw("COUNT(*) as total_entries"),
+        this.knexUnscoped.raw("AVG(latency) as latency"),
+        this.knexUnscoped.raw(`
           CASE 
           WHEN SUM(CASE WHEN status = 'DOWN' THEN 1 ELSE 0 END) > 0 THEN 'DOWN'
           WHEN SUM(CASE WHEN status = 'DEGRADED' THEN 1 ELSE 0 END) > 0 THEN 'DEGRADED'
@@ -274,11 +274,11 @@ export class MonitoringRepository extends BaseRepository {
   async background(retentionDays: number = 100): Promise<number> {
     const safeRetentionDays = Math.max(1, Math.floor(retentionDays || 100));
     const cutoffTimestamp = GetMinuteStartNowTimestampUTC() - 86400 * safeRetentionDays;
-    return await this.knex("monitoring_data").where("timestamp", "<", cutoffTimestamp).del();
+    return await this.table("monitoring_data").where("timestamp", "<", cutoffTimestamp).del();
   }
 
   async consecutivelyStatusFor(monitor_tag: string, status: string, lastX: number): Promise<boolean> {
-    const result = await this.knex
+    const result = await this.knexUnscoped
       .with("last_records", (qb: KnexType.QueryBuilder) => {
         qb.select("*")
           .from("monitoring_data")
@@ -288,7 +288,7 @@ export class MonitoringRepository extends BaseRepository {
           .limit(lastX);
       })
       .select(
-        this.knex.raw(
+        this.knexUnscoped.raw(
           "CASE WHEN COUNT(*) <= SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) THEN 1 ELSE 0 END as is_affected",
           [status],
         ),
@@ -304,7 +304,7 @@ export class MonitoringRepository extends BaseRepository {
     latencyThreshold: number,
     lastX: number,
   ): Promise<boolean> {
-    const result = await this.knex
+    const result = await this.knexUnscoped
       .with("last_records", (qb: KnexType.QueryBuilder) => {
         qb.select("*")
           .from("monitoring_data")
@@ -314,7 +314,7 @@ export class MonitoringRepository extends BaseRepository {
           .limit(lastX);
       })
       .select(
-        this.knex.raw(
+        this.knexUnscoped.raw(
           "CASE WHEN COUNT(*) <= SUM(CASE WHEN latency > ? THEN 1 ELSE 0 END) THEN 1 ELSE 0 END as is_affected",
           [latencyThreshold],
         ),
@@ -326,7 +326,7 @@ export class MonitoringRepository extends BaseRepository {
   }
 
   async consecutivelyLatencyLessThan(monitor_tag: string, latencyThreshold: number, lastX: number): Promise<boolean> {
-    const result = await this.knex
+    const result = await this.knexUnscoped
       .with("last_records", (qb: KnexType.QueryBuilder) => {
         qb.select("*")
           .from("monitoring_data")
@@ -336,7 +336,7 @@ export class MonitoringRepository extends BaseRepository {
           .limit(lastX);
       })
       .select(
-        this.knex.raw(
+        this.knexUnscoped.raw(
           "CASE WHEN COUNT(*) <= SUM(CASE WHEN latency < ? THEN 1 ELSE 0 END) THEN 1 ELSE 0 END as is_recovered",
           [latencyThreshold],
         ),
@@ -359,7 +359,7 @@ export class MonitoringRepository extends BaseRepository {
     beforeTs: number,
     limit: number,
   ): Promise<Array<{ timestamp: number; status: string | null; raw_status: string | null; type: string | null }>> {
-    return await this.knex("monitoring_data")
+    return await this.table("monitoring_data")
       .select("timestamp", "status", "raw_status", "type")
       .where("monitor_tag", monitor_tag)
       .where("timestamp", "<", beforeTs)
@@ -376,7 +376,7 @@ export class MonitoringRepository extends BaseRepository {
    * (issue #712). Returns null when there is no prior observation (cold start).
    */
   async getLastObservedStatus(monitor_tag: string, beforeTs: number): Promise<string | null> {
-    const row = await this.knex("monitoring_data")
+    const row = await this.table("monitoring_data")
       .select("status")
       .where("monitor_tag", monitor_tag)
       .where("timestamp", "<", beforeTs)
@@ -404,12 +404,12 @@ export class MonitoringRepository extends BaseRepository {
 
     // Recovery (confirmed UP): rows become the UP side — clear any held error text in one update.
     if (confirmThreshold === null) {
-      return await this.knex("monitoring_data")
+      return await this.table("monitoring_data")
         .where("monitor_tag", monitor_tag)
         .whereIn("timestamp", timestamps)
         .whereNotNull("raw_status")
         .update({
-          status: this.knex.ref("raw_status"),
+          status: this.knexUnscoped.ref("raw_status"),
           error_message: null,
         });
     }
@@ -420,7 +420,7 @@ export class MonitoringRepository extends BaseRepository {
     // SQLite/PG/MySQL), per-row severity wording, and idempotency if the backfill is replayed.
     // The whole read+update window runs in one transaction — a confirmation flip is one logical
     // write, so it must not leave the window half-confirmed/half-held if a row update fails.
-    return await this.knex.transaction(async (trx: KnexType.Transaction) => {
+    return await this.knexUnscoped.transaction(async (trx: KnexType.Transaction) => {
       const rows = await trx("monitoring_data")
         .select("timestamp", "error_message", "raw_status")
         .where("monitor_tag", monitor_tag)
@@ -477,7 +477,7 @@ export class MonitoringRepository extends BaseRepository {
 
     const batchSize = 500;
 
-    return await this.knex.transaction(async (trx: KnexType.Transaction) => {
+    return await this.knexUnscoped.transaction(async (trx: KnexType.Transaction) => {
       const results: unknown[] = [];
 
       for (let i = 0; i < records.length; i += batchSize) {
@@ -495,7 +495,7 @@ export class MonitoringRepository extends BaseRepository {
   }
 
   async deleteMonitorDataByTag(tag?: string, start?: number, end?: number, status?: MonitoringStatus): Promise<number> {
-    const query = this.knex("monitoring_data");
+    const query = this.table("monitoring_data");
     if (tag) {
       query.where("monitor_tag", tag);
     }
@@ -529,7 +529,7 @@ export class MonitoringRepository extends BaseRepository {
 
     // Determine database client to use appropriate timestamp arithmetic
     // SQLite uses CAST(... as INT), others (PG, MySQL) use FLOOR()
-    const tsExpression = hasFloorFunction(this.knex)
+    const tsExpression = hasFloorFunction(this.knexUnscoped)
       ? `FLOOR((timestamp - ?) / ?) * ? + ?`
       : `CAST((timestamp - ?) / ? AS INT) * ? + ?`;
 
@@ -566,7 +566,7 @@ export class MonitoringRepository extends BaseRepository {
       endTimestamp,
     ];
 
-    const result = await this.knex.raw(sql, bindings);
+    const result = await this.knexUnscoped.raw(sql, bindings);
 
     // Handle different database drivers:
     // - SQLite (better-sqlite3): returns array directly
@@ -613,7 +613,7 @@ export class MonitoringRepository extends BaseRepository {
     const endTimestamp = startTimestamp + numberOfPoints * intervalInSeconds;
 
     // SQLite has no FLOOR(); CAST(... AS INT) truncates the same way.
-    const tsExpression = hasFloorFunction(this.knex)
+    const tsExpression = hasFloorFunction(this.knexUnscoped)
       ? `FLOOR((timestamp - ?) / ?) * ? + ?`
       : `CAST((timestamp - ?) / ? AS INT) * ? + ?`;
 
@@ -644,7 +644,7 @@ export class MonitoringRepository extends BaseRepository {
       endTimestamp,
     ];
 
-    const result = await this.knex.raw(sql, bindings);
+    const result = await this.knexUnscoped.raw(sql, bindings);
 
     let rows: any[];
     if (Array.isArray(result)) {
@@ -675,7 +675,7 @@ export class MonitoringRepository extends BaseRepository {
   async getStatusCountsForLastN(monitorTag: string | string[], lastX: number): Promise<TimestampStatusCount> {
     const tags = Array.isArray(monitorTag) ? monitorTag : [monitorTag];
 
-    const result = await this.knex
+    const result = await this.knexUnscoped
       .with("last_records", (qb: KnexType.QueryBuilder) => {
         qb.select("status", "latency")
           .from("monitoring_data")
@@ -684,13 +684,13 @@ export class MonitoringRepository extends BaseRepository {
           .limit(lastX);
       })
       .select(
-        this.knex.raw("SUM(CASE WHEN status = 'UP' THEN 1 ELSE 0 END) AS count_of_up"),
-        this.knex.raw("SUM(CASE WHEN status = 'DOWN' THEN 1 ELSE 0 END) AS count_of_down"),
-        this.knex.raw("SUM(CASE WHEN status = 'DEGRADED' THEN 1 ELSE 0 END) AS count_of_degraded"),
-        this.knex.raw("SUM(CASE WHEN status = 'MAINTENANCE' THEN 1 ELSE 0 END) AS count_of_maintenance"),
-        this.knex.raw("AVG(latency) AS avg_latency"),
-        this.knex.raw("MAX(latency) AS max_latency"),
-        this.knex.raw("MIN(latency) AS min_latency"),
+        this.knexUnscoped.raw("SUM(CASE WHEN status = 'UP' THEN 1 ELSE 0 END) AS count_of_up"),
+        this.knexUnscoped.raw("SUM(CASE WHEN status = 'DOWN' THEN 1 ELSE 0 END) AS count_of_down"),
+        this.knexUnscoped.raw("SUM(CASE WHEN status = 'DEGRADED' THEN 1 ELSE 0 END) AS count_of_degraded"),
+        this.knexUnscoped.raw("SUM(CASE WHEN status = 'MAINTENANCE' THEN 1 ELSE 0 END) AS count_of_maintenance"),
+        this.knexUnscoped.raw("AVG(latency) AS avg_latency"),
+        this.knexUnscoped.raw("MAX(latency) AS max_latency"),
+        this.knexUnscoped.raw("MIN(latency) AS min_latency"),
       )
       .from("last_records")
       .first();
@@ -709,6 +709,6 @@ export class MonitoringRepository extends BaseRepository {
 
   //get the last known status for a monitor
   async getLastKnownStatus(monitor_tag: string): Promise<MonitoringData | undefined> {
-    return await this.knex("monitoring_data").where("monitor_tag", monitor_tag).orderBy("timestamp", "desc").first();
+    return await this.table("monitoring_data").where("monitor_tag", monitor_tag).orderBy("timestamp", "desc").first();
   }
 }

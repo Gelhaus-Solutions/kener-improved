@@ -31,31 +31,31 @@ export class MaintenancesRepository extends BaseRepository {
       duration_seconds: data.duration_seconds,
       status: data.status || GC.ACTIVE,
       is_global: data.is_global || "YES",
-      created_at: this.knex.fn.now(),
-      updated_at: this.knex.fn.now(),
+      created_at: this.knexUnscoped.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     };
 
     if (dbType === "postgresql") {
-      const [maintenance] = await this.knex("maintenances").insert(insertData).returning("*");
+      const [maintenance] = await this.table("maintenances").insert(insertData).returning("*");
       return maintenance;
     } else {
-      const result = await this.knex("maintenances").insert(insertData);
+      const result = await this.table("maintenances").insert(insertData);
       const id = result[0];
       return (await this.getMaintenanceById(id))!;
     }
   }
 
   async getMaintenanceById(id: number): Promise<MaintenanceRecord | undefined> {
-    return await this.knex("maintenances").where("id", id).first();
+    return await this.table("maintenances").where("id", id).first();
   }
 
   async getMaintenancesByIds(ids: number[]): Promise<MaintenanceRecord[]> {
     if (ids.length === 0) return [];
-    return await this.knex("maintenances").whereIn("id", ids);
+    return await this.table("maintenances").whereIn("id", ids);
   }
 
   async getAllMaintenances(filter?: MaintenanceFilter): Promise<MaintenanceRecord[]> {
-    let query = this.knex("maintenances").select("*").whereRaw("1=1");
+    let query = this.table("maintenances").select("*").whereRaw("1=1");
 
     if (filter?.status) {
       query = query.andWhere("status", filter.status);
@@ -72,7 +72,7 @@ export class MaintenancesRepository extends BaseRepository {
     limit: number,
     filter?: MaintenanceFilter,
   ): Promise<MaintenanceRecord[]> {
-    let query = this.knex("maintenances").select("*").whereRaw("1=1");
+    let query = this.table("maintenances").select("*").whereRaw("1=1");
 
     if (filter?.status) {
       query = query.andWhere("status", filter.status);
@@ -85,7 +85,7 @@ export class MaintenancesRepository extends BaseRepository {
   }
 
   async getMaintenancesCount(filter?: MaintenanceFilter): Promise<CountResult | undefined> {
-    let query = this.knex("maintenances").count("id as count").whereRaw("1=1");
+    let query = this.table("maintenances").count("id as count").whereRaw("1=1");
 
     if (filter?.status) {
       query = query.andWhere("status", filter.status);
@@ -95,27 +95,27 @@ export class MaintenancesRepository extends BaseRepository {
   }
 
   async updateMaintenance(id: number, data: Partial<MaintenanceRecordInsert>): Promise<number> {
-    return await this.knex("maintenances")
+    return await this.table("maintenances")
       .where("id", id)
       .update({
         ...data,
-        updated_at: this.knex.fn.now(),
+        updated_at: this.knexUnscoped.fn.now(),
       });
   }
 
   async deleteMaintenance(id: number): Promise<number> {
-    return await this.knex("maintenances").where("id", id).del();
+    return await this.table("maintenances").where("id", id).del();
   }
 
   // ============ Maintenance Monitors ============
 
   async addMonitorToMaintenance(data: MaintenanceMonitorRecordInsert): Promise<void> {
-    await this.knex("maintenance_monitors")
+    await this.table("maintenance_monitors")
       .insert({
         maintenance_id: data.maintenance_id,
         monitor_tag: data.monitor_tag,
-        created_at: this.knex.fn.now(),
-        updated_at: this.knex.fn.now(),
+        created_at: this.knexUnscoped.fn.now(),
+        updated_at: this.knexUnscoped.fn.now(),
       })
       .onConflict(["maintenance_id", "monitor_tag"])
       .ignore();
@@ -127,11 +127,11 @@ export class MaintenancesRepository extends BaseRepository {
     const insertData = monitor_tags.map((tag) => ({
       maintenance_id,
       monitor_tag: tag,
-      created_at: this.knex.fn.now(),
-      updated_at: this.knex.fn.now(),
+      created_at: this.knexUnscoped.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     }));
 
-    await this.knex("maintenance_monitors").insert(insertData).onConflict(["maintenance_id", "monitor_tag"]).ignore();
+    await this.table("maintenance_monitors").insert(insertData).onConflict(["maintenance_id", "monitor_tag"]).ignore();
   }
 
   async addMonitorsToMaintenanceWithStatus(
@@ -144,26 +144,26 @@ export class MaintenancesRepository extends BaseRepository {
       maintenance_id,
       monitor_tag: m.monitor_tag,
       monitor_impact: m.monitor_impact,
-      created_at: this.knex.fn.now(),
-      updated_at: this.knex.fn.now(),
+      created_at: this.knexUnscoped.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     }));
 
-    await this.knex("maintenance_monitors")
+    await this.table("maintenance_monitors")
       .insert(insertData)
       .onConflict(["maintenance_id", "monitor_tag"])
       .merge(["monitor_impact", "updated_at"]);
   }
 
   async removeMonitorFromMaintenance(maintenance_id: number, monitor_tag: string): Promise<number> {
-    return await this.knex("maintenance_monitors").where({ maintenance_id, monitor_tag }).del();
+    return await this.table("maintenance_monitors").where({ maintenance_id, monitor_tag }).del();
   }
 
   async removeAllMonitorsFromMaintenance(maintenance_id: number): Promise<number> {
-    return await this.knex("maintenance_monitors").where({ maintenance_id }).del();
+    return await this.table("maintenance_monitors").where({ maintenance_id }).del();
   }
 
   async deleteMaintenanceMonitorsByTag(monitor_tag: string): Promise<number> {
-    return await this.knex("maintenance_monitors").where({ monitor_tag }).del();
+    return await this.table("maintenance_monitors").where({ monitor_tag }).del();
   }
 
   //update monitor impact in maintenance_monitors table
@@ -172,18 +172,18 @@ export class MaintenancesRepository extends BaseRepository {
     monitor_tag: string,
     monitor_impact: string,
   ): Promise<number> {
-    return await this.knex("maintenance_monitors").where({ maintenance_id, monitor_tag }).update({
+    return await this.table("maintenance_monitors").where({ maintenance_id, monitor_tag }).update({
       monitor_impact,
-      updated_at: this.knex.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     });
   }
 
   async getMaintenanceMonitors(maintenance_id: number): Promise<MaintenanceMonitorRecord[]> {
-    return await this.knex("maintenance_monitors").where("maintenance_id", maintenance_id);
+    return await this.table("maintenance_monitors").where("maintenance_id", maintenance_id);
   }
 
   async getMonitorsByMaintenanceId(maintenance_id: number): Promise<MaintenanceMonitorDetailRecord[]> {
-    return await this.knex("maintenance_monitors")
+    return await this.table("maintenance_monitors")
       .join("monitors", "maintenance_monitors.monitor_tag", "monitors.tag")
       .where("maintenance_monitors.maintenance_id", maintenance_id)
       .select(
@@ -195,7 +195,7 @@ export class MaintenancesRepository extends BaseRepository {
   }
 
   async getMaintenancesForMonitor(monitor_tag: string, status?: "ACTIVE" | "INACTIVE"): Promise<MaintenanceRecord[]> {
-    let query = this.knex("maintenances")
+    let query = this.table("maintenances")
       .join("maintenance_monitors", "maintenances.id", "maintenance_monitors.maintenance_id")
       .where("maintenance_monitors.monitor_tag", monitor_tag)
       .select("maintenances.*");
@@ -216,26 +216,26 @@ export class MaintenancesRepository extends BaseRepository {
       start_date_time: data.start_date_time,
       end_date_time: data.end_date_time,
       status: data.status || GC.SCHEDULED,
-      created_at: this.knex.fn.now(),
-      updated_at: this.knex.fn.now(),
+      created_at: this.knexUnscoped.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     };
 
     if (dbType === "postgresql") {
-      const [event] = await this.knex("maintenances_events").insert(insertData).returning("*");
+      const [event] = await this.table("maintenances_events").insert(insertData).returning("*");
       return event;
     } else {
-      const result = await this.knex("maintenances_events").insert(insertData);
+      const result = await this.table("maintenances_events").insert(insertData);
       const id = result[0];
       return (await this.getMaintenanceEventById(id))!;
     }
   }
 
   async getMaintenanceEventById(id: number): Promise<MaintenanceEventRecord | undefined> {
-    return await this.knex("maintenances_events").where("id", id).first();
+    return await this.table("maintenances_events").where("id", id).first();
   }
 
   async getMaintenanceEventsByMaintenanceId(maintenance_id: number): Promise<MaintenanceEventRecord[]> {
-    return await this.knex("maintenances_events")
+    return await this.table("maintenances_events")
       .where("maintenance_id", maintenance_id)
       .orderBy("start_date_time", "asc");
   }
@@ -256,14 +256,14 @@ export class MaintenancesRepository extends BaseRepository {
     const futureTimestamp = currentTimestamp + daysInFuture * 24 * 60 * 60;
 
     // Get current/ongoing events (events that span the current time)
-    const currentEvents = await this.knex("maintenances_events")
+    const currentEvents = await this.table("maintenances_events")
       .where("maintenance_id", maintenance_id)
       .andWhere("start_date_time", "<=", currentTimestamp)
       .andWhere("end_date_time", ">=", currentTimestamp)
       .orderBy("start_date_time", "asc");
 
     // Get past events (limited) - events that ended before now
-    const pastEvents = await this.knex("maintenances_events")
+    const pastEvents = await this.table("maintenances_events")
       .where("maintenance_id", maintenance_id)
       .andWhere("end_date_time", "<", currentTimestamp)
       .andWhere("end_date_time", ">=", pastTimestamp)
@@ -271,7 +271,7 @@ export class MaintenancesRepository extends BaseRepository {
       .limit(pastLimit);
 
     // Get upcoming events (limited) - events that start after now
-    const upcomingEvents = await this.knex("maintenances_events")
+    const upcomingEvents = await this.table("maintenances_events")
       .where("maintenance_id", maintenance_id)
       .andWhere("start_date_time", ">", currentTimestamp)
       .andWhere("start_date_time", "<=", futureTimestamp)
@@ -284,7 +284,7 @@ export class MaintenancesRepository extends BaseRepository {
   }
 
   async getMaintenanceEvents(filter?: MaintenanceEventFilter): Promise<MaintenanceEventRecord[]> {
-    let query = this.knex("maintenances_events").select("*").whereRaw("1=1");
+    let query = this.table("maintenances_events").select("*").whereRaw("1=1");
 
     if (filter?.maintenance_id) {
       query = query.andWhere("maintenance_id", filter.maintenance_id);
@@ -300,7 +300,7 @@ export class MaintenancesRepository extends BaseRepository {
   }
 
   async getActiveMaintenanceEvents(start: number, end: number): Promise<MaintenanceEventRecord[]> {
-    return await this.knex("maintenances_events")
+    return await this.table("maintenances_events")
       .whereIn("status", [GC.SCHEDULED, GC.ONGOING])
       .andWhere("start_date_time", "<=", end)
       .andWhere("end_date_time", ">=", start)
@@ -312,7 +312,7 @@ export class MaintenancesRepository extends BaseRepository {
     start: number,
     end: number,
   ): Promise<MaintenanceEventRecord[]> {
-    return await this.knex("maintenances_events")
+    return await this.table("maintenances_events")
       .join("maintenance_monitors", "maintenances_events.maintenance_id", "maintenance_monitors.maintenance_id")
       .where("maintenance_monitors.monitor_tag", monitor_tag)
       .andWhere("maintenances_events.start_date_time", "<=", end)
@@ -326,7 +326,7 @@ export class MaintenancesRepository extends BaseRepository {
   ): Promise<
     Array<{ id: number; start_date_time: number; end_date_time: number | null; monitor_impact: string | null }>
   > {
-    return await this.knex("maintenances_events as me")
+    return await this.table("maintenances_events as me")
       .select(
         "me.id as id",
         "me.start_date_time as start_date_time",
@@ -351,12 +351,12 @@ export class MaintenancesRepository extends BaseRepository {
   async updateMaintenanceEvent(id: number, data: Partial<MaintenanceEventRecordInsert>): Promise<number> {
     const patch: Record<string, unknown> = {
       ...data,
-      updated_at: this.knex.fn.now(),
+      updated_at: this.knexUnscoped.fn.now(),
     };
     if (data.status !== undefined) {
-      patch.transition_seq = this.knex.raw("transition_seq + 1");
+      patch.transition_seq = this.knexUnscoped.raw("transition_seq + 1");
     }
-    return await this.knex("maintenances_events").where("id", id).update(patch);
+    return await this.table("maintenances_events").where("id", id).update(patch);
   }
 
   /**
@@ -371,16 +371,16 @@ export class MaintenancesRepository extends BaseRepository {
    * Returns 0 when no row matched.
    */
   async updateMaintenanceEventStatus(id: number, status: string): Promise<number> {
-    const updated = await this.knex("maintenances_events")
+    const updated = await this.table("maintenances_events")
       .where("id", id)
       .update({
         status,
-        transition_seq: this.knex.raw("transition_seq + 1"),
-        updated_at: this.knex.fn.now(),
+        transition_seq: this.knexUnscoped.raw("transition_seq + 1"),
+        updated_at: this.knexUnscoped.fn.now(),
       });
     if (!updated) return 0;
 
-    const row = (await this.knex("maintenances_events").select("transition_seq").where("id", id).first()) as
+    const row = (await this.table("maintenances_events").select("transition_seq").where("id", id).first()) as
       | { transition_seq: number }
       | undefined;
     return Number(row?.transition_seq ?? 0);
@@ -395,7 +395,7 @@ export class MaintenancesRepository extends BaseRepository {
     withinSeconds: number,
   ): Promise<MaintenanceEventRecordDetailed[]> {
     const futureTimestamp = currentTimestamp + withinSeconds;
-    return await this.knex("maintenances_events")
+    return await this.table("maintenances_events")
       .join("maintenances", "maintenances_events.maintenance_id", "maintenances.id")
       .where("maintenances_events.status", GC.SCHEDULED)
       .andWhere("maintenances.status", GC.ACTIVE)
@@ -410,7 +410,7 @@ export class MaintenancesRepository extends BaseRepository {
    * directly to ONGOING.
    */
   async getScheduledEventsAlreadyStarted(currentTimestamp: number): Promise<MaintenanceEventRecordDetailed[]> {
-    return await this.knex("maintenances_events")
+    return await this.table("maintenances_events")
       .join("maintenances", "maintenances_events.maintenance_id", "maintenances.id")
       .where("maintenances_events.status", GC.SCHEDULED)
       .andWhere("maintenances.status", GC.ACTIVE)
@@ -424,7 +424,7 @@ export class MaintenancesRepository extends BaseRepository {
    * These should be marked as ONGOING
    */
   async getReadyEventsInProgress(currentTimestamp: number): Promise<MaintenanceEventRecordDetailed[]> {
-    return await this.knex("maintenances_events")
+    return await this.table("maintenances_events")
       .join("maintenances", "maintenances_events.maintenance_id", "maintenances.id")
       .where("maintenances_events.status", GC.READY)
       .andWhere("maintenances.status", GC.ACTIVE)
@@ -438,7 +438,7 @@ export class MaintenancesRepository extends BaseRepository {
    * These should be marked as COMPLETED
    */
   async getOngoingEventsCompleted(currentTimestamp: number): Promise<MaintenanceEventRecordDetailed[]> {
-    return await this.knex("maintenances_events")
+    return await this.table("maintenances_events")
       .join("maintenances", "maintenances_events.maintenance_id", "maintenances.id")
       .where("maintenances_events.status", GC.ONGOING)
       .andWhere("maintenances_events.end_date_time", "<", currentTimestamp)
@@ -446,14 +446,14 @@ export class MaintenancesRepository extends BaseRepository {
   }
 
   async deleteMaintenanceEvent(id: number): Promise<number> {
-    return await this.knex("maintenances_events").where("id", id).del();
+    return await this.table("maintenances_events").where("id", id).del();
   }
 
   async getOngoingMaintenanceEventsByMonitorTags(
     timestamp: number,
     monitorTags: string[],
   ): Promise<MaintenanceEventRecordDetailed[]> {
-    return await this.knex("maintenances_events")
+    return await this.table("maintenances_events")
       .distinct("maintenances_events.*", "maintenances.title", "maintenances.description")
       .join("maintenances", "maintenances_events.maintenance_id", "maintenances.id")
       .join("maintenance_monitors", "maintenances_events.maintenance_id", "maintenance_monitors.maintenance_id")
@@ -471,7 +471,7 @@ export class MaintenancesRepository extends BaseRepository {
     monitorTags: string[],
     maxCount: number = 10,
   ): Promise<MaintenanceEventRecordDetailed[]> {
-    return await this.knex("maintenances_events")
+    return await this.table("maintenances_events")
       .distinct("maintenances_events.*", "maintenances.title", "maintenances.description")
       .join("maintenances", "maintenances_events.maintenance_id", "maintenances.id")
       .join("maintenance_monitors", "maintenances_events.maintenance_id", "maintenance_monitors.maintenance_id")
@@ -496,7 +496,7 @@ export class MaintenancesRepository extends BaseRepository {
     timestamp: number,
     monitorTags: string[],
   ): Promise<MaintenanceEventsMonitorList[]> {
-    const rows = await this.knex("maintenances_events")
+    const rows = await this.table("maintenances_events")
       .select(
         "maintenances_events.id",
         "maintenances.title",
@@ -530,7 +530,7 @@ export class MaintenancesRepository extends BaseRepository {
     timestamp: number,
     tags?: string[],
   ): Promise<MaintenanceEventsMonitorList[]> {
-    const query = this.knex("maintenances_events")
+    const query = this.table("maintenances_events")
       .select(
         "maintenances_events.id",
         "maintenances.title",
@@ -580,7 +580,7 @@ export class MaintenancesRepository extends BaseRepository {
     daysInPast: number,
   ): Promise<MaintenanceEventsMonitorList[]> {
     const pastTimestamp = timestamp - daysInPast * 24 * 60 * 60;
-    const rows = await this.knex("maintenances_events")
+    const rows = await this.table("maintenances_events")
       .select(
         "maintenances_events.id",
         "maintenances.title",
@@ -622,7 +622,7 @@ export class MaintenancesRepository extends BaseRepository {
     daysInFuture: number,
   ): Promise<MaintenanceEventsMonitorList[]> {
     const futureTimestamp = timestamp + daysInFuture * 24 * 60 * 60;
-    const rows = await this.knex("maintenances_events")
+    const rows = await this.table("maintenances_events")
       .select(
         "maintenances_events.id",
         "maintenances.title",
@@ -665,7 +665,7 @@ export class MaintenancesRepository extends BaseRepository {
     endTs: number,
     monitorTags?: string[],
   ): Promise<MaintenanceEventsMonitorList[]> {
-    const query = this.knex("maintenances_events")
+    const query = this.table("maintenances_events")
       .select(
         "maintenances_events.id",
         "maintenances.title",
@@ -704,7 +704,7 @@ export class MaintenancesRepository extends BaseRepository {
     endTs: number,
     monitorTag: string,
   ): Promise<MaintenanceEventsMonitorList[]> {
-    const rows = await this.knex("maintenances_events")
+    const rows = await this.table("maintenances_events")
       .select(
         "maintenances_events.id",
         "maintenances.title",
@@ -786,7 +786,7 @@ export class MaintenancesRepository extends BaseRepository {
     const { startFromTimestamp, page, limit, monitorTags, eventStatus, maintenanceId } = options;
 
     // Build base query
-    let query = this.knex("maintenances_events")
+    let query = this.table("maintenances_events")
       .join("maintenances", "maintenances_events.maintenance_id", "maintenances.id")
       .select(
         "maintenances_events.id as event_id",
@@ -820,7 +820,7 @@ export class MaintenancesRepository extends BaseRepository {
     }
 
     // Get total count
-    const countQuery = this.knex("maintenances_events")
+    const countQuery = this.table("maintenances_events")
       .join("maintenances", "maintenances_events.maintenance_id", "maintenances.id")
       .where("maintenances_events.start_date_time", ">=", startFromTimestamp);
 

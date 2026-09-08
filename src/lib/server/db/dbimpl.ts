@@ -25,6 +25,7 @@ import { SessionsRepository } from "./repositories/sessions.js";
 import { MfaRepository } from "./repositories/mfa.js";
 import { SubscriptionSystemRepository } from "./repositories/subscriptionSystem.js";
 import { EmailTemplateConfigRepository } from "./repositories/emailTemplateConfig.js";
+import { OrgsRepository } from "./repositories/orgs.js";
 
 // Re-export types from base
 export type { MonitorFilter, TriggerFilter, IncidentFilter, CountResult } from "./repositories/base.js";
@@ -58,6 +59,7 @@ class DbImpl {
   private audit!: AuditRepository;
   private events!: EventsRepository;
   private webhooks!: WebhooksRepository;
+  private orgs!: OrgsRepository;
   private sessions!: SessionsRepository;
   private mfa!: MfaRepository;
   private subscriptionSystem!: SubscriptionSystemRepository;
@@ -394,6 +396,16 @@ class DbImpl {
   updateWebhookEndpoint!: WebhooksRepository["updateEndpoint"];
   deleteWebhookEndpoint!: WebhooksRepository["deleteEndpoint"];
   getWebhookEndpointById!: WebhooksRepository["getEndpointById"];
+  // Organisations (P4). Unscoped by design; see repositories/orgs.ts.
+  getOrgById!: OrgsRepository["getOrgById"];
+  getOrgBySlug!: OrgsRepository["getOrgBySlug"];
+  getAllOrgs!: OrgsRepository["getAllOrgs"];
+  getActiveOrgIds!: OrgsRepository["getActiveOrgIds"];
+  getActiveOrgDomains!: OrgsRepository["getActiveOrgDomains"];
+  getOrgsForUser!: OrgsRepository["getOrgsForUser"];
+  getOrgMembership!: OrgsRepository["getOrgMembership"];
+  isOrgMember!: OrgsRepository["isOrgMember"];
+
   getWebhookEndpoints!: WebhooksRepository["getEndpoints"];
   getWebhookEndpointsCount!: WebhooksRepository["getEndpointsCount"];
   setWebhookEndpointEvents!: WebhooksRepository["setEndpointEvents"];
@@ -504,6 +516,7 @@ class DbImpl {
     this.audit = new AuditRepository(this.knex);
     this.events = new EventsRepository(this.knex);
     this.webhooks = new WebhooksRepository(this.knex);
+    this.orgs = new OrgsRepository(this.knex);
     this.sessions = new SessionsRepository(this.knex);
     this.mfa = new MfaRepository(this.knex);
     this.subscriptionSystem = new SubscriptionSystemRepository(this.knex);
@@ -1126,6 +1139,14 @@ class DbImpl {
     this.updateWebhookEndpoint = this.webhooks.updateEndpoint.bind(this.webhooks);
     this.deleteWebhookEndpoint = this.webhooks.deleteEndpoint.bind(this.webhooks);
     this.getWebhookEndpointById = this.webhooks.getEndpointById.bind(this.webhooks);
+    this.getOrgById = this.orgs.getOrgById.bind(this.orgs);
+    this.getOrgBySlug = this.orgs.getOrgBySlug.bind(this.orgs);
+    this.getAllOrgs = this.orgs.getAllOrgs.bind(this.orgs);
+    this.getActiveOrgIds = this.orgs.getActiveOrgIds.bind(this.orgs);
+    this.getActiveOrgDomains = this.orgs.getActiveOrgDomains.bind(this.orgs);
+    this.getOrgsForUser = this.orgs.getOrgsForUser.bind(this.orgs);
+    this.getOrgMembership = this.orgs.getOrgMembership.bind(this.orgs);
+    this.isOrgMember = this.orgs.isOrgMember.bind(this.orgs);
     this.getWebhookEndpoints = this.webhooks.getEndpoints.bind(this.webhooks);
     this.getWebhookEndpointsCount = this.webhooks.getEndpointsCount.bind(this.webhooks);
     this.setWebhookEndpointEvents = this.webhooks.setEndpointEvents.bind(this.webhooks);

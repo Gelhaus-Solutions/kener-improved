@@ -7,7 +7,9 @@ import {
   CreateFirstUser,
 } from "$lib/server/controllers/userController";
 import { VerifyPassword } from "$lib/server/controllers/commonController";
-import { CreateSession } from "$lib/server/controllers/sessionController";
+import { CreateSession, DefaultOrgForUser } from "$lib/server/controllers/sessionController";
+import { runWithOrg } from "$lib/server/db/orgContext";
+import db from "$lib/server/db/db";
 import { RequiresMfa } from "$lib/server/controllers/mfaController";
 import { IssueMfaChallenge } from "$lib/server/controllers/mfaChallenge";
 import { GetOidcSettings } from "$lib/server/controllers/oidcController";
@@ -135,7 +137,19 @@ export const actions: Actions = {
       );
     }
 
-    if (!userDB.role_ids || userDB.role_ids.length === 0) {
+    // I3d: roles are per-org, so this has to ask the question in the org the
+    // session is about to land in.
+    //
+    // `userDB.role_ids` was resolved while the request was still in the
+    // *host-derived* org - the default one, for every install with no custom
+    // domain - and a user who belongs only to a second org has no roles there.
+    // Checking that value would have locked every such user out of their own
+    // tenant with "no active roles assigned", which is both wrong and impossible
+    // to diagnose from the message.
+    const signInOrgId = await DefaultOrgForUser(userDB.id);
+    const roleIds = await runWithOrg(signInOrgId, () => db.getUserRoleIds(userDB.id));
+
+    if (roleIds.length === 0) {
       return deny(
         403,
         "Your account has no active roles assigned. Please contact an administrator.",
@@ -166,6 +180,8 @@ export const actions: Actions = {
     // A revocable session row, not a year-long self-certifying copy of the user
     // record. See sessionController.ts.
     const { token, cookieConfig } = await CreateSession({
+      // No explicit org: the user was just created in the current context, and
+      // `CreateSession` resolves their only membership.
       userId: userDB.id,
       ip: safeClientAddress(event),
       userAgent: request.headers.get("user-agent"),
@@ -214,6 +230,8 @@ export const actions: Actions = {
     // Same capture as the login path: the first session on a new instance is
     // still a session somebody may later need to recognise on their device list.
     const { token, cookieConfig } = await CreateSession({
+      // No explicit org: the user was just created in the current context, and
+      // `CreateSession` resolves their only membership.
       userId: userDB.id,
       ip: safeClientAddress(event),
       userAgent: request.headers.get("user-agent"),
