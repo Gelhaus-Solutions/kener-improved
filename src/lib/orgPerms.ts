@@ -47,6 +47,19 @@ export const orgPermissions: Array<{ id: string; permission_name: string }> = [
  */
 export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   getAuditLog: "audit.read",
+
+  // Outbound webhooks (E10). The delivery log is a read; everything that can
+  // change where events are sent, or cause a send, is a write.
+  getWebhookEndpoints: "webhooks.read",
+  getWebhookDeliveries: "webhooks.read",
+  createWebhookEndpoint: "webhooks.write",
+  updateWebhookEndpoint: "webhooks.write",
+  deleteWebhookEndpoint: "webhooks.write",
+  rotateWebhookEndpointSecret: "webhooks.write",
+  // A test causes an outbound request to a URL the caller chose, so it is a
+  // write even though it changes nothing in the database.
+  testWebhookEndpoint: "webhooks.write",
+  retryWebhookDelivery: "webhooks.write",
 };
 
 /**

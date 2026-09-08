@@ -16,3 +16,4 @@ export { PagesRepository } from "./pages.js";
 export { MaintenancesRepository } from "./maintenances.js";
 export { EmailTemplateConfigRepository } from "./emailTemplateConfig.js";
 export { EventsRepository } from "./events.js";
+export { WebhooksRepository } from "./webhooks.js";

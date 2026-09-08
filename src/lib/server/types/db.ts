@@ -1065,3 +1065,46 @@ export interface AuditLogFilter {
   start?: number;
   end?: number;
 }
+
+// ---------------------------------------------------------------- webhooks
+
+export type WebhookEndpointStatus = "ACTIVE" | "DISABLED" | "DISABLED_AUTO";
+
+export interface WebhookEndpointRecord {
+  id: number;
+  org_id: number;
+  name: string;
+  url: string;
+  secret_encrypted: string;
+  secret_hint: string | null;
+  previous_secret_encrypted: string | null;
+  previous_secret_expires_at: number | null;
+  status: WebhookEndpointStatus;
+  api_version: string;
+  custom_headers: string | null;
+  timeout_ms: number;
+  consecutive_failures: number;
+  last_success_at: number | null;
+  last_failure_at: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+/** An endpoint plus the event types it subscribes to. */
+export interface WebhookEndpointWithEvents extends WebhookEndpointRecord {
+  event_types: string[];
+}
+
+export interface WebhookEndpointInsert {
+  org_id: number;
+  name: string;
+  url: string;
+  secret_encrypted: string;
+  secret_hint: string | null;
+  status: WebhookEndpointStatus;
+  api_version: string;
+  custom_headers: string | null;
+  timeout_ms: number;
+  created_at: number;
+  updated_at: number;
+}

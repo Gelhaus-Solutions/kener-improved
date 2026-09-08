@@ -20,6 +20,7 @@ import { MaintenancesRepository } from "./repositories/maintenances.js";
 import { MonitorAlertConfigRepository } from "./repositories/monitorAlertConfig.js";
 import { AuditRepository } from "./repositories/audit.js";
 import { EventsRepository } from "./repositories/events.js";
+import { WebhooksRepository } from "./repositories/webhooks.js";
 import { SubscriptionSystemRepository } from "./repositories/subscriptionSystem.js";
 import { EmailTemplateConfigRepository } from "./repositories/emailTemplateConfig.js";
 
@@ -54,6 +55,7 @@ class DbImpl {
   private monitorAlertConfig!: MonitorAlertConfigRepository;
   private audit!: AuditRepository;
   private events!: EventsRepository;
+  private webhooks!: WebhooksRepository;
   private subscriptionSystem!: SubscriptionSystemRepository;
   private emailTemplateConfig!: EmailTemplateConfigRepository;
 
@@ -347,6 +349,19 @@ class DbImpl {
   getEventDeliveriesCount!: EventsRepository["getDeliveriesCount"];
   resetEventDeliveryForRetry!: EventsRepository["resetDeliveryForRetry"];
   pruneEventDeliveries!: EventsRepository["pruneDeliveries"];
+
+  // Outbound webhook endpoints (E10). Attempts live in event_deliveries.
+  createWebhookEndpoint!: WebhooksRepository["createEndpoint"];
+  updateWebhookEndpoint!: WebhooksRepository["updateEndpoint"];
+  deleteWebhookEndpoint!: WebhooksRepository["deleteEndpoint"];
+  getWebhookEndpointById!: WebhooksRepository["getEndpointById"];
+  getWebhookEndpoints!: WebhooksRepository["getEndpoints"];
+  getWebhookEndpointsCount!: WebhooksRepository["getEndpointsCount"];
+  setWebhookEndpointEvents!: WebhooksRepository["setEndpointEvents"];
+  getWebhookEndpointEvents!: WebhooksRepository["getEndpointEvents"];
+  getActiveWebhookEndpointsForEvent!: WebhooksRepository["getActiveEndpointsForEvent"];
+  recordWebhookEndpointOutcome!: WebhooksRepository["recordEndpointOutcome"];
+  autoDisableWebhookEndpoint!: WebhooksRepository["autoDisableEndpoint"];
   getActiveMonitorAlertConfigs!: MonitorAlertConfigRepository["getActiveMonitorAlertConfigs"];
   getMonitorTagsWithActiveAlertConfigs!: MonitorAlertConfigRepository["getMonitorTagsWithActiveAlertConfigs"];
   getActiveMonitorAlertConfigsByMonitorTag!: MonitorAlertConfigRepository["getActiveMonitorAlertConfigsByMonitorTag"];
@@ -449,6 +464,7 @@ class DbImpl {
     this.monitorAlertConfig = new MonitorAlertConfigRepository(this.knex);
     this.audit = new AuditRepository(this.knex);
     this.events = new EventsRepository(this.knex);
+    this.webhooks = new WebhooksRepository(this.knex);
     this.subscriptionSystem = new SubscriptionSystemRepository(this.knex);
     this.emailTemplateConfig = new EmailTemplateConfigRepository(this.knex);
 
@@ -466,6 +482,7 @@ class DbImpl {
     this.bindSubscriptionSystemMethods();
     this.bindEmailTemplateConfigMethods();
     this.bindEventsMethods();
+    this.bindWebhooksMethods();
 
     this.init();
   }
@@ -1022,6 +1039,20 @@ class DbImpl {
     this.getEventDeliveriesCount = this.events.getDeliveriesCount.bind(this.events);
     this.resetEventDeliveryForRetry = this.events.resetDeliveryForRetry.bind(this.events);
     this.pruneEventDeliveries = this.events.pruneDeliveries.bind(this.events);
+  }
+
+  private bindWebhooksMethods(): void {
+    this.createWebhookEndpoint = this.webhooks.createEndpoint.bind(this.webhooks);
+    this.updateWebhookEndpoint = this.webhooks.updateEndpoint.bind(this.webhooks);
+    this.deleteWebhookEndpoint = this.webhooks.deleteEndpoint.bind(this.webhooks);
+    this.getWebhookEndpointById = this.webhooks.getEndpointById.bind(this.webhooks);
+    this.getWebhookEndpoints = this.webhooks.getEndpoints.bind(this.webhooks);
+    this.getWebhookEndpointsCount = this.webhooks.getEndpointsCount.bind(this.webhooks);
+    this.setWebhookEndpointEvents = this.webhooks.setEndpointEvents.bind(this.webhooks);
+    this.getWebhookEndpointEvents = this.webhooks.getEndpointEvents.bind(this.webhooks);
+    this.getActiveWebhookEndpointsForEvent = this.webhooks.getActiveEndpointsForEvent.bind(this.webhooks);
+    this.recordWebhookEndpointOutcome = this.webhooks.recordEndpointOutcome.bind(this.webhooks);
+    this.autoDisableWebhookEndpoint = this.webhooks.autoDisableEndpoint.bind(this.webhooks);
   }
 
   /** Probes database connectivity with a trivial query. Never throws. */

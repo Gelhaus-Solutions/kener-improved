@@ -12,6 +12,7 @@ import { GenerateToken, CookieConfig } from "./commonController.js";
 import type { OidcSettings } from "$lib/types/site.js";
 import type { UserRecordPublic } from "../types/db.js";
 import { GetSiteDataByKey } from "./siteDataController.js";
+import { openOrPlain } from "../crypto/secretBox.js";
 import GC from "../../global-constants.js";
 
 /**
@@ -37,6 +38,24 @@ let cachedCacheKey: string | null = null;
  * Read the current OIDC settings from the database.
  * Returns null if OIDC is not configured or not enabled.
  */
+/**
+ * The `secretBox` purpose the OIDC client secret is encrypted under.
+ *
+ * Distinct from the webhook purpose, so a ciphertext moved between the two
+ * columns decrypts under neither.
+ */
+export const OIDC_SECRET_PURPOSE = "oidc-client-secret";
+
+/**
+ * The OIDC settings, with the client secret decrypted.
+ *
+ * The secret used to be stored in `site_data` as plaintext and merely masked on
+ * read, which meant anyone who could see the database - a backup, a read
+ * replica, a support dump - had the credential. It is encrypted at rest now.
+ * `openOrPlain` returns a value written before that change unchanged, so an
+ * instance keeps working between deploying this and the migration rewriting the
+ * row.
+ */
 export async function GetOidcSettings(): Promise<OidcSettings | null> {
   const raw = await GetSiteDataByKey("oidcSettings");
   if (!raw) return null;
@@ -44,6 +63,9 @@ export async function GetOidcSettings(): Promise<OidcSettings | null> {
   try {
     const settings: OidcSettings = typeof raw === "string" ? JSON.parse(raw) : raw;
     if (!settings.enabled) return null;
+    if (settings.client_secret) {
+      settings.client_secret = openOrPlain(settings.client_secret, OIDC_SECRET_PURPOSE);
+    }
     return settings;
   } catch {
     return null;

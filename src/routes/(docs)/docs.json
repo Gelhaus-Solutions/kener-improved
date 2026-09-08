@@ -222,6 +222,10 @@
                       "content": "v4/subscriptions"
                     },
                     {
+                      "title": "Event Webhooks",
+                      "content": "v4/event-webhooks"
+                    },
+                    {
                       "title": "RSS Feed",
                       "content": "v4/rss-feed"
                     },

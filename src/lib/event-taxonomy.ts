@@ -95,6 +95,10 @@ export const ADMIN_EVENTS = [
   "webhook_endpoint.created",
   "webhook_endpoint.updated",
   "webhook_endpoint.deleted",
+  // Kener stopped sending, rather than a human doing it. Emitted by the
+  // delivery consumer itself, which is why it is in the administrative group
+  // even though nothing in the admin pipeline produces it.
+  "webhook_endpoint.disabled",
   "subscriber.created",
   "subscriber.updated",
   "subscriber.deleted",
@@ -174,6 +178,7 @@ export const EVENT_AGGREGATE_TYPE: Record<EventType, string> = {
   "webhook_endpoint.created": "webhook_endpoint",
   "webhook_endpoint.updated": "webhook_endpoint",
   "webhook_endpoint.deleted": "webhook_endpoint",
+  "webhook_endpoint.disabled": "webhook_endpoint",
   "subscriber.created": "subscriber",
   "subscriber.updated": "subscriber",
   "subscriber.deleted": "subscriber",

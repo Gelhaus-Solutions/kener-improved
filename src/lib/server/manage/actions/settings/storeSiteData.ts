@@ -1,5 +1,6 @@
 import { GetSiteDataByKey, InsertKeyValue } from "$lib/server/controllers/controller.js";
-import { ClearOidcConfigCache } from "$lib/server/controllers/oidcController.js";
+import { ClearOidcConfigCache, OIDC_SECRET_PURPOSE } from "$lib/server/controllers/oidcController.js";
+import { sealIfPlain } from "$lib/server/crypto/secretBox.js";
 import type { ActionDefinition, LegacyPayload } from "../../types.js";
 
 async function storeSiteData(data: { [x: string]: any }) {
@@ -17,10 +18,18 @@ async function storeSiteData(data: { [x: string]: any }) {
           if (newSettings.client_secret === undefined) {
             const existing = await GetSiteDataByKey("oidcSettings");
             if (existing && typeof existing === "object") {
+              // Already encrypted on the way in, so carrying it forward keeps it
+              // encrypted; sealIfPlain below is a no-op for it.
               newSettings.client_secret = (existing as Record<string, unknown>).client_secret;
-              element = JSON.stringify(newSettings);
             }
           }
+          // Encrypted before it reaches the database. This is the only write
+          // path for the key, so sealing here is what makes "no plaintext
+          // client secret in site_data" true rather than aspirational.
+          if (typeof newSettings.client_secret === "string" && newSettings.client_secret.length > 0) {
+            newSettings.client_secret = sealIfPlain(newSettings.client_secret, OIDC_SECRET_PURPOSE);
+          }
+          element = JSON.stringify(newSettings);
         } catch {
           // If parsing fails, proceed with the original value
         }
