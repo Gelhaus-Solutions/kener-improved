@@ -164,6 +164,12 @@ COPY --chown=node:node --from=builder /app/src/lib/server/db/seedSiteData.ts    
 COPY --chown=node:node --from=builder /app/src/lib/server/db/seedMonitorData.ts   ./src/lib/server/db/seedMonitorData.ts
 COPY --chown=node:node --from=builder /app/src/lib/server/db/seedPagesData.ts     ./src/lib/server/db/seedPagesData.ts
 COPY --chown=node:node --from=builder /app/src/lib/allPerms.ts                   ./src/lib/allPerms.ts
+# Fork-only, and imported by seeds/permissions.ts and seeds/roles.ts. Missing it
+# makes `knex seed:run` fail at boot with "Cannot find module orgPerms.ts", which
+# leaves a fresh deployment with no permissions and no roles. The list above is
+# an allowlist, so a new fork file imported by a seed has to be added here too;
+# `dockerfile-seed-imports.test.ts` fails the build when one is not.
+COPY --chown=node:node --from=builder /app/src/lib/orgPerms.ts                   ./src/lib/orgPerms.ts
 COPY --chown=node:node --from=builder /app/src/lib/server/templates/general       ./src/lib/server/templates/general
 
 # Locale JSON files (read at runtime by server-side i18n)
