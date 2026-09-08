@@ -42,6 +42,7 @@ finish() {
 	emit "auto_resolved" "$(printf '%s\n' "${AUTO_RESOLVED[@]+"${AUTO_RESOLVED[@]}"}")"
 	emit "conflicts" "${REMAINING:-}"
 	emit "warnings" "$(printf '%s\n' "${WARNINGS[@]+"${WARNINGS[@]}"}")"
+	emit "action_diff" "${ACTION_DIFF:-}"
 	emit "branch" "${SYNC_BRANCH:-}"
 }
 
@@ -150,6 +151,27 @@ if [ "$LOCKFILE_CONFLICTED" -eq 1 ]; then
 		git add package-lock.json
 	fi
 fi
+
+# --- Admin action diff ------------------------------------------------------
+# manage/api/+server.ts is merge=ours, so upstream's edits to it are dropped
+# rather than merged. That is the right trade (our version is 7 lines to their
+# ~930) but it means an action upstream ADDS would otherwise arrive as silence.
+# Compare their version against our registry and put the difference in the PR
+# body, then refresh the snapshot so the next sync starts from here.
+MANAGE_API="src/routes/(manage)/manage/api/+server.ts"
+UPSTREAM_MANAGE_API="$(mktemp)"
+ACTION_DIFF=""
+if git show "$UPSTREAM_SHA:$MANAGE_API" >"$UPSTREAM_MANAGE_API" 2>/dev/null; then
+	if ACTION_DIFF="$(node scripts/diff-upstream-actions.mjs "$UPSTREAM_MANAGE_API" --update-snapshot 2>&1)"; then
+		log "$ACTION_DIFF"
+		git add docs/agents/upstream-manage-api.snapshot.ts 2>/dev/null || true
+	else
+		# Never fail a sync over a reporting step.
+		WARNINGS+=("admin action diff could not be computed; check manage/api actions by hand")
+		ACTION_DIFF=""
+	fi
+fi
+rm -f "$UPSTREAM_MANAGE_API"
 
 # --- Commit ----------------------------------------------------------------
 

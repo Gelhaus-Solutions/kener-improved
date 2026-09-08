@@ -18,5 +18,12 @@
 /docs/agents/issue-tracker.md           merge=ours
 /docs/agents/triage-labels.md           merge=ours
 /docs/adr/**                            merge=ours
+/docs/agents/upstream-manage-api.snapshot.ts merge=ours
+/scripts/diff-upstream-actions.mjs      merge=ours
 /scripts/sync-upstream.sh               merge=ours
 /scripts/merge-package-json.mjs         merge=ours
+
+# The admin API entry point is 7 lines here against upstream's ~930, so a
+# merge is never meaningful. Upstream's edits to it are instead reported by
+# scripts/diff-upstream-actions.mjs into the sync PR body; see FORK.md.
+/src/routes/(manage)/manage/api/+server.ts merge=ours

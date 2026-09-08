@@ -104,6 +104,26 @@ an upstream diff has nothing useful to contribute.
 > `git merge upstream/main` will not honour it** - always sync through the
 > script or the workflow.
 
+### The admin API: reported, not merged
+
+`src/routes/(manage)/manage/api/+server.ts` is upstream's whole admin write
+surface, a single ~930-line if/else over about a hundred action strings. The fork
+replaced it with a handler registry, so its version of that file is seven lines.
+No merge between those two is ever meaningful, and it is `merge=ours`.
+
+That would normally mean silently dropping every upstream change to the admin
+API, including new actions. So the sync converts the merge it cannot do into a
+to-do list it can: it extracts the action strings from upstream's version,
+compares them against the registry, and writes the difference into the PR body
+under *Admin actions to reconcile*, naming the file to create for each one. It
+then refreshes `docs/agents/upstream-manage-api.snapshot.ts`, which exists only
+so the next sync can tell "upstream just added this" from "we never had this".
+
+The other half of that trade is that `src/lib/allPerms.ts` is kept
+**byte-identical to upstream**, so a new upstream action arrives with its
+permission mapping already correct and the report above is the only manual step.
+Fork permissions live in `src/lib/orgPerms.ts` and are merged at the consumers.
+
 ### Files the fork deleted
 
 If upstream edits a file this fork removed on purpose, git raises a
@@ -141,6 +161,8 @@ git push
 | `docs/agents/triage-labels.md` | States that triage labels are unused                               |
 | `CLAUDE.md`, `AGENTS.md`   | Fork-specific agent instructions; no upstream counterpart              |
 | `docs/adr/`                | ADRs reconstructed by the fork, numbered from 0100                     |
+| `src/routes/(manage)/manage/api/+server.ts` | 7 lines here vs upstream's ~930; upstream's actions are reported, not merged |
+| `scripts/diff-upstream-actions.mjs`, `docs/agents/upstream-manage-api.snapshot.ts` | The machinery that reports them |
 | `src/**`, `migrations/**`  | Diverge by design; conflicts are resolved by hand on each sync         |
 | `LICENSE`, product name, UI strings, docs content | **Unchanged** - the fork does not rebrand       |
 

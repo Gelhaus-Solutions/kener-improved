@@ -96,6 +96,7 @@ jobs:
           AUTO_RESOLVED: ${{ steps.sync.outputs.auto_resolved }}
           CONFLICTS: ${{ steps.sync.outputs.conflicts }}
           WARNINGS: ${{ steps.sync.outputs.warnings }}
+          ACTION_DIFF: ${{ steps.sync.outputs.action_diff }}
         run: |
           set -euo pipefail
 
@@ -132,6 +133,16 @@ jobs:
               echo "### ⚠️ Warnings"
               echo
               echo "$WARNINGS" | sed '/^$/d; s/^/- /'
+              echo
+            fi
+
+            # manage/api/+server.ts is merge=ours, so upstream's changes to the
+            # admin API never appear in the diff of this PR. This is the only
+            # place they surface.
+            if [ -n "$ACTION_DIFF" ] && [ "$ACTION_DIFF" != "admin actions are in sync with upstream" ]; then
+              echo "### 🔀 Admin actions to reconcile"
+              echo
+              echo "$ACTION_DIFF"
               echo
             fi
 
