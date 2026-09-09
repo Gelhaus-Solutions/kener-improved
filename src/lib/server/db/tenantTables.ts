@@ -51,6 +51,8 @@ export const TENANT_TABLES: ReadonlySet<string> = new Set([
 
   // Fork-added, org-aware from the day they were built
   "subscriber_subscriptions",
+  "component_dependencies",
+  "monitor_rollup_settings",
   "audit_log",
   "event_outbox",
   "event_deliveries",

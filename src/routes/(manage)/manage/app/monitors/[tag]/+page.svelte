@@ -25,6 +25,7 @@
   import MonitorTypeCard from "./components/MonitorTypeCard.svelte";
   import UptimeSettingsCard from "./components/UptimeSettingsCard.svelte";
   import PageVisibilityCard from "./components/PageVisibilityCard.svelte";
+  import MonitorDependenciesCard from "$lib/components/MonitorDependenciesCard.svelte";
   import ModifyDataCard from "./components/ModifyDataCard.svelte";
   import DangerZoneCard from "./components/DangerZoneCard.svelte";
   import MonitorRecentLogs from "./components/MonitorRecentLogs.svelte";
@@ -412,6 +413,14 @@
             <!-- Modify Data Card -->
 
             <ModifyDataCard monitorTag={monitor.tag} />
+          </Accordion.Content>
+        </Accordion.Item>
+      {/if}
+      {#if !isNew}
+        <Accordion.Item value="dependencies">
+          <Accordion.Trigger>Dependencies</Accordion.Trigger>
+          <Accordion.Content class="flex flex-col gap-4 text-balance">
+            <MonitorDependenciesCard monitorTag={monitor.tag} isGroup={monitor.monitor_type === "GROUP"} />
           </Accordion.Content>
         </Accordion.Item>
       {/if}

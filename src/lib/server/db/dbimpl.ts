@@ -14,6 +14,7 @@ import { AlertsRepository } from "./repositories/alerts.js";
 import { UsersRepository } from "./repositories/users.js";
 import { SiteDataRepository } from "./repositories/site-data.js";
 import { IncidentsRepository } from "./repositories/incidents.js";
+import { DependenciesRepository } from "./repositories/dependencies.js";
 import { ImagesRepository } from "./repositories/images.js";
 import { PagesRepository } from "./repositories/pages.js";
 import { MaintenancesRepository } from "./repositories/maintenances.js";
@@ -52,6 +53,17 @@ class DbImpl {
   private users!: UsersRepository;
   private siteData!: SiteDataRepository;
   private incidents!: IncidentsRepository;
+  private dependencies!: DependenciesRepository;
+
+  // ============ Component dependencies and rollup (C3) ============
+  getAllDependencies!: DependenciesRepository["getAllDependencies"];
+  getAllRollupSettings!: DependenciesRepository["getAllRollupSettings"];
+  getMonitorsByType!: DependenciesRepository["getMonitorsByType"];
+  getDependenciesForMonitor!: DependenciesRepository["getDependenciesForMonitor"];
+  insertDependency!: DependenciesRepository["insertDependency"];
+  deleteDependency!: DependenciesRepository["deleteDependency"];
+  getRollupSetting!: DependenciesRepository["getRollupSetting"];
+  upsertRollupSetting!: DependenciesRepository["upsertRollupSetting"];
   private images!: ImagesRepository;
   private pages!: PagesRepository;
   private maintenances!: MaintenancesRepository;
@@ -529,6 +541,15 @@ class DbImpl {
     this.users = new UsersRepository(this.knex);
     this.siteData = new SiteDataRepository(this.knex);
     this.incidents = new IncidentsRepository(this.knex);
+    this.dependencies = new DependenciesRepository(this.knex);
+    this.getAllDependencies = this.dependencies.getAllDependencies.bind(this.dependencies);
+    this.getAllRollupSettings = this.dependencies.getAllRollupSettings.bind(this.dependencies);
+    this.getMonitorsByType = this.dependencies.getMonitorsByType.bind(this.dependencies);
+    this.getDependenciesForMonitor = this.dependencies.getDependenciesForMonitor.bind(this.dependencies);
+    this.insertDependency = this.dependencies.insertDependency.bind(this.dependencies);
+    this.deleteDependency = this.dependencies.deleteDependency.bind(this.dependencies);
+    this.getRollupSetting = this.dependencies.getRollupSetting.bind(this.dependencies);
+    this.upsertRollupSetting = this.dependencies.upsertRollupSetting.bind(this.dependencies);
     this.images = new ImagesRepository(this.knex);
     this.pages = new PagesRepository(this.knex);
     this.maintenances = new MaintenancesRepository(this.knex);

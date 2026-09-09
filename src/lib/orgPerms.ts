@@ -57,6 +57,12 @@ export const orgPermissions: Array<{ id: string; permission_name: string }> = [
 export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   getAuditLog: "audit.read",
 
+  // Component dependencies (C3). Reading the graph is part of reading monitors;
+  // editing it is monitor configuration, so both reuse the upstream monitor
+  // permissions rather than inventing a pair nobody would think to grant.
+  getMonitorDependencies: "monitors.read",
+  getDependencyGraph: "monitors.read",
+
   // Outbound webhooks (E10). The delivery log is a read; everything that can
   // change where events are sent, or cause a send, is a write.
   getWebhookEndpoints: "webhooks.read",
@@ -157,6 +163,12 @@ export const ORG_ROUTE_PERMISSION_MAP: Record<string, string | null> = {
   // Organisations (I3f). `orgs.read` opens the screen; the member list and every
   // button on it are separately gated by their own actions.
   "/(manage)/manage/app/organisations": "orgs.read",
+
+  // The dependency graph view (C3). Read-only; every edit happens on the
+  // monitor's own page and is gated by its action. Deliberately NOT under
+  // `/monitors/`, where a static segment would shadow a monitor whose tag
+  // happened to be "dependencies".
+  "/(manage)/manage/app/dependencies": "monitors.read",
 };
 
 /** Permission ids the fork owns. Used by the seeds to tell them from upstream's. */

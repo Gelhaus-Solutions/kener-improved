@@ -1,6 +1,7 @@
 import db from "../db/db.js";
 import GC from "../../global-constants.js";
 import { PAGE_STATUS_MESSAGES } from "../../global-constants.js";
+import { applyRollup, type DependencyEdge, type RollupSetting } from "./rollup.js";
 import {
   componentImpactFromMonitorImpact,
   isComponentImpact,
@@ -44,7 +45,7 @@ export interface ComponentStatus {
   monitor_tag: string;
   component_impact: ComponentImpact;
   /** Which rule won. Present so the admin and the API can explain a value. */
-  source: "override" | "incident" | "maintenance" | "monitoring";
+  source: "override" | "incident" | "maintenance" | "rollup" | "monitoring" | "silent";
   /** The mechanical projection, or null when the component is operational. */
   monitor_impact: string | null;
 }
@@ -147,6 +148,14 @@ export function derivePageStatus(args: {
     impact_override: string | null;
   }>;
   maintenanceImpacts: Array<{ monitor_tag: string; monitor_impact: string | null; component_impact: string | null }>;
+  /** The dependency graph (C3). Absent means no rollup, as before. */
+  rollup?: {
+    edges: DependencyEdge[];
+    settings: RollupSetting[];
+    /** Tags whose own status already is a rollup - GROUP monitors. */
+    selfRollingTags?: Set<string>;
+    nowSeconds: number;
+  };
 }): PageStatus {
   const latestByTag = new Map(args.latest.map((l) => [l.monitor_tag, l.status ?? null]));
 
@@ -200,10 +209,14 @@ export function derivePageStatus(args: {
       // it to OPERATIONAL here would report a monitor that stopped reporting as
       // healthy - the exact failure ADR 0007 says a status page must not have.
       if (status === undefined || status === null) {
+        // Counted by nobody: a monitor that has never reported contributes to no
+        // bucket, which is what keeps NO_DATA reachable. Marked `silent` so the
+        // recount after a rollup can tell it apart from a genuinely operational
+        // component and keep leaving it out.
         components.push({
           monitor_tag: tag,
           component_impact: "OPERATIONAL",
-          source: "monitoring",
+          source: "silent",
           monitor_impact: null,
         });
         continue;
@@ -231,6 +244,58 @@ export function derivePageStatus(args: {
         break;
       default:
         counts.up++;
+    }
+  }
+
+  // C3's slot, and the reason it sits *after* the per-component pass rather than
+  // inside it: a rollup needs every child already resolved, and the loop above
+  // resolves components in page order, which is not dependency order. Applying
+  // the graph afterwards over the finished map is what lets a child that appears
+  // later on the page still reach its parent.
+  //
+  // A component that is not on this page has no entry in the map and resolves to
+  // OPERATIONAL inside the walk. That is a real limitation and it is the honest
+  // one: this function is given a page, and a page cannot roll up a component it
+  // does not contain without silently reporting on something it does not show.
+  if (args.rollup) {
+    const own = new Map(components.map((c) => [c.monitor_tag, c.component_impact]));
+    const rolled = applyRollup({
+      edges: args.rollup.edges,
+      settings: args.rollup.settings,
+      own,
+      selfRollingTags: args.rollup.selfRollingTags,
+      nowSeconds: args.rollup.nowSeconds,
+    });
+
+    // Recounted from scratch, because a rollup can move a component in either
+    // direction and the counts drive the page headline.
+    counts.up = 0;
+    counts.down = 0;
+    counts.degraded = 0;
+    counts.maintenance = 0;
+    for (const component of components) {
+      const after = rolled.get(component.monitor_tag) ?? component.component_impact;
+      // A silent component that the graph did not move stays out of the counts,
+      // exactly as it was before the rollup ran.
+      if (component.source === "silent" && after === component.component_impact) continue;
+      if (after !== component.component_impact) {
+        component.component_impact = after;
+        component.monitor_impact = monitorImpactFor(after);
+        component.source = "rollup";
+      }
+      switch (monitorImpactFor(component.component_impact)) {
+        case GC.DOWN:
+          counts.down++;
+          break;
+        case GC.DEGRADED:
+          counts.degraded++;
+          break;
+        case GC.MAINTENANCE:
+          counts.maintenance++;
+          break;
+        default:
+          counts.up++;
+      }
     }
   }
 
@@ -267,15 +332,28 @@ export async function getPageStatus(
   if (monitorTags.length === 0) {
     return derivePageStatus({ monitorTags: [], latest: [], incidentImpacts: [], maintenanceImpacts: [] });
   }
-  const [resolvedLatest, incidentImpacts, maintenanceImpacts] = await Promise.all([
+  const [resolvedLatest, incidentImpacts, maintenanceImpacts, edges, settings, groupMonitors] = await Promise.all([
     latest ? Promise.resolve(latest) : (db.getLatestMonitoringDataAllActive(monitorTags) as Promise<LatestStatus[]>),
     db.getDeclaredIncidentImpacts(timestamp, monitorTags),
     db.getDeclaredMaintenanceImpacts(timestamp, monitorTags),
+    db.getAllDependencies(),
+    db.getAllRollupSettings(),
+    // GROUP monitors already produce their status from their members at check
+    // time, so the rollup must skip them or it would apply a second, different
+    // rule to the same members. See incidents/rollup.ts.
+    db.getMonitorsByType("GROUP"),
   ]);
+
   return derivePageStatus({
     monitorTags,
     latest: resolvedLatest,
     incidentImpacts,
     maintenanceImpacts,
+    rollup: {
+      edges,
+      settings,
+      selfRollingTags: new Set(groupMonitors.map((m: { tag: string }) => m.tag)),
+      nowSeconds: timestamp,
+    },
   });
 }
