@@ -4,6 +4,7 @@ import { GetAllSiteData } from "../../controllers/siteDataController.js";
 import { GetGeneralEmailTemplateById } from "../../controllers/generalTemplateController.js";
 import { GetActiveEmailMethodsForEventType } from "../../controllers/userSubscriptionsController.js";
 import { maintenanceToVariables, siteDataToVariables } from "../../notification/notification_utils.js";
+import emailQueue from "../../queues/emailQueue.js";
 import mdToHTML from "../../../marked.js";
 import { formatDistanceStrict } from "date-fns";
 import type { SubscriptionVariableMap } from "../../notification/types.js";
@@ -11,22 +12,46 @@ import type { MaintenanceEventRecordDetailed } from "../../types/db.js";
 import type { EventType } from "$lib/event-taxonomy.js";
 import type { EventConsumer, OutboxEvent, DeliveryTarget, DeliveryResult, DeliveryOptions } from "../types.js";
 
-// Subscriber email as a consumer of the bus, running in shadow.
+// Subscriber email as a consumer of the bus.
 //
-// This consumer does not send anything and is not meant to. `subscriberQueue`
-// still owns every subscriber notification the product actually delivers; what
-// this does is work out, from the event alone, who *would* have been mailed and
-// what they *would* have received, and record that beside the real send so the
-// two can be compared.
+// As of the P6 cutover this consumer can send for real. Which of the two paths
+// actually sends is not decided here: it is decided by this consumer's mode in
+// `site_data.eventBusConsumers`, and `subscriberQueue.push` refuses to do
+// anything once that mode is `live`. Exactly one path sends at any moment, and
+// which one is a row an operator can rewrite in seconds.
 //
-// The reason for the ceremony is that this is the change most able to fail
+// The reason for that ceremony is that this is the change most able to fail
 // invisibly. A webhook that stops arriving produces a complaint from an engineer
 // watching a queue. A subscriber notification that stops arriving produces
 // nothing at all until a customer mentions, weeks later, that they did not hear
 // about an outage. There is no error, no failed job and no alarm - the absence
 // is the whole symptom. So the flip is not made on the strength of a code
-// review; it is made once the shadow rows and the real deliveries have agreed
-// for long enough, and the P6 item is what makes that call.
+// review; it is made from the delivery log, by comparing the SHADOW rows this
+// consumer wrote against the `email` rows the old path wrote, and it is
+// performed by an operator on the event consumers screen rather than by a
+// deploy.
+//
+// **Three behaviour changes come with going live.** All three are improvements,
+// and all three are things somebody will notice:
+//
+//   1. Maintenance notifications start actually deduping. The old path built a
+//      stable `update_id` and then `subscriberQueue.push` appended `Date.now()`
+//      to the dedup key, so nothing ever deduped. The event's
+//      `idempotency_key` is a UNIQUE column keyed on
+//      `<type>:<event id>:<transition_seq>`, which dedupes for real while still
+//      letting a genuine re-entry into a status notify again.
+//
+//   2. The maintenance gate stops erasing history. Turning off a maintenance
+//      email used to suppress the whole operation; now the event is always
+//      recorded and only the mail is gated, so audit and webhooks still see it.
+//
+//   3. Comments on MAINTENANCE-type incidents now notify. The old path only
+//      called `notifySubscribersOfComment` when `incident_type === "INCIDENT"`,
+//      so a comment posted on a maintenance-type incident reached nobody. That
+//      was not a decision anybody made; a comment on the public timeline is
+//      public communication whatever the incident is typed as. Accepted
+//      knowingly in P6, and it means slightly more mail than before rather than
+//      less.
 //
 // The one subscription rule worth stating out loud, because getting it wrong
 // doubles every automatic notification:
@@ -176,10 +201,24 @@ async function renderMaintenance(event: OutboxEvent): Promise<SubscriptionVariab
   const monitorNames = monitors.map((m) => `${m.monitor_name}(${m.monitor_impact})`).join(", ");
   const siteUrl = siteDataToVariables(await GetAllSiteData()).site_url;
 
+  // The payload wins where it has an opinion. `maintenance.scheduled` is
+  // rendered by the controller from the arguments it was handed, not from the
+  // maintenance row, so it carries the two fields that can differ; every other
+  // transition reads the row and leaves these unset, which falls through to the
+  // row and matches. Reading the row unconditionally is what made the shadow
+  // diff report BODY_DIFFERS on `update_text` for a created event whose parent
+  // description had been passed as something else.
+  //
+  // Tested by presence rather than with `??`, and that distinction is the whole
+  // point: `description` is legitimately `null` for a maintenance created
+  // without one, and `null ?? row.description` quietly falls back to the row -
+  // which is precisely the fallback being overridden. `in` separates "the
+  // controller said nothing" from "the controller said nothing was there".
   const detailed: MaintenanceEventRecordDetailed = {
     ...maintenanceEvent,
-    title: maintenance?.title ?? "",
-    description: maintenance?.description ?? null,
+    title: "title" in payload ? String(payload.title ?? "") : (maintenance?.title ?? ""),
+    description:
+      "description" in payload ? ((payload.description as string | null) ?? null) : (maintenance?.description ?? null),
   } as MaintenanceEventRecordDetailed;
 
   let statusMessage = notification.statusMessage;
@@ -209,10 +248,40 @@ async function renderVariables(event: OutboxEvent): Promise<SubscriptionVariable
   return await renderMaintenance(event);
 }
 
+/**
+ * This delivery's row id, so the email worker can write its outcome onto it.
+ *
+ * `deliver()` receives the event and the target but not the row, and the row is
+ * what the send outcome has to land on. The triple below is the delivery UNIQUE
+ * minus the event, so it identifies exactly one row.
+ *
+ * Undefined when the lookup fails, and deliberately not an error: an email that
+ * sends but cannot be traced back to its row is a worse outcome than a row that
+ * stays DELIVERED because nothing corrected it. Losing the audit trail beats
+ * losing the notification.
+ */
+async function findDeliveryId(eventId: string, target: DeliveryTarget): Promise<number | undefined> {
+  try {
+    const rows = await db.getEventDeliveriesByEventId(eventId);
+    return rows.find(
+      (r) => r.consumer === CONSUMER_NAME && r.target_type === target.target_type && r.target_id === target.target_id,
+    )?.id;
+  } catch (error) {
+    console.error("subscribers consumer: could not resolve the delivery row id:", error);
+    return undefined;
+  }
+}
+
 export const subscribersConsumer: EventConsumer = {
   name: CONSUMER_NAME,
-  // Shadow, and it stays shadow through P3 and P4. The flip is P6's decision and
-  // it is made on evidence from the delivery log, not on this default.
+  // Still `shadow` as the declared default, and that is not an oversight.
+  //
+  // This value is only the fallback for an install whose `site_data` says
+  // nothing about this consumer, and the seed migration writes a value on every
+  // install, so in practice it is read almost never. When it *is* read, it is
+  // being read because something is missing - and the safe answer to a missing
+  // setting is the path that was already sending, not the new one. Shadow means
+  // `subscriberQueue` keeps its job.
   mode: "shadow",
   // Fan-out to independent recipients: one slow or broken address must never
   // hold up anyone else's mail.
@@ -239,24 +308,12 @@ export const subscribersConsumer: EventConsumer = {
   },
 
   async deliver(event: OutboxEvent, target: DeliveryTarget, options?: DeliveryOptions): Promise<DeliveryResult> {
-    if (!options?.dryRun) {
-      // Reachable only if somebody flips this consumer to `live` before the P6
-      // work that makes live safe. Refusing is the right answer: going live also
-      // requires `subscriberQueue` to stop sending, and without that every
-      // subscriber gets each notification twice.
-      return {
-        ok: false,
-        error:
-          "The subscribers consumer is shadow-only until the P6 cutover. Going live also requires subscriberQueue to stop sending, or every notification doubles.",
-        permanent: true,
-      };
-    }
-
     const variables = await renderVariables(event);
     if (!variables) {
       // A finding, not a failure to swallow: the consumer resolved a recipient
       // and then could not build the message. Recorded on the row so the diff
-      // shows it.
+      // shows it, and permanent because a message that cannot be rebuilt now
+      // will not rebuild in six hours either.
       return { ok: false, error: `Could not rebuild the notification for ${event.type}`, permanent: true };
     }
 
@@ -270,8 +327,12 @@ export const subscribersConsumer: EventConsumer = {
       return { ok: false, error: `Subscriber method ${target.target_id} no longer exists`, permanent: true };
     }
 
-    // Shaped exactly like the object `subscriberQueue` hands to `emailQueue`, so
-    // the two are comparable field by field rather than approximately.
+    // Shaped exactly like the object `subscriberQueue` handed to `emailQueue`,
+    // which is what made the shadow diff a field-by-field comparison rather than
+    // an approximate one. Keeping the shape now that this path owns the send
+    // means a delivery row written before the cutover and one written after are
+    // still the same kind of thing, so the retry in `email.ts` and the retry
+    // here replay identically.
     const emailJob = {
       toEmails: [method.method_value],
       templateHtmlBody: template.template_html_body || "",
@@ -280,12 +341,31 @@ export const subscribersConsumer: EventConsumer = {
       variables: { ...siteDataToVariables(await GetAllSiteData()), ...variables },
     };
 
-    return {
-      ok: true,
+    const request = {
       request_headers: { to: method.method_value },
       request_body: JSON.stringify(emailJob),
-      response_body: "Shadow: resolved and rendered, not sent",
     };
+
+    if (options?.dryRun) {
+      return { ok: true, ...request, response_body: "Shadow: resolved and rendered, not sent" };
+    }
+
+    // Live. The send itself still belongs to `emailQueue` - it owns SMTP, its
+    // own retry and the rate limiting - so this hands off rather than sending
+    // inline, exactly as `subscriberQueue` did.
+    //
+    // The delivery id goes with it so the email worker writes the real outcome
+    // onto *this* row. Looked up rather than passed in because `deliver()` is
+    // handed a target, not a row; `email.ts` resolves it the same way.
+    const deliveryId = await findDeliveryId(event.event_id, target);
+    await emailQueue.push({ ...emailJob, delivery_id: deliveryId });
+
+    // Queued, not sent, and the response body says so. Returning ok here marks
+    // the row DELIVERED and the email worker overwrites that with the real
+    // verdict a moment later. That ordering is the same one `email.ts` has had
+    // since H8c: claiming a send outcome the sender has not reached yet would be
+    // worse than briefly claiming a queue outcome that is true.
+    return { ok: true, ...request, response_body: "Queued for sending" };
   },
 };
 

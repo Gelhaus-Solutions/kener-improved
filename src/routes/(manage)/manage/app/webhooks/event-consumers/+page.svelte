@@ -20,6 +20,8 @@
     supports_dry_run: boolean;
     ordered: boolean;
     legacy_consumer: string | null;
+    /** False while an older path is still sending what this consumer rehearses. */
+    can_go_live: boolean;
     counts: Record<string, number>;
   }
 
@@ -255,7 +257,7 @@
                     <option value={mode}>{mode}</option>
                   {/each}
                 </select>
-                {#if consumer.declared_mode === "shadow"}
+                {#if consumer.can_go_live === false}
                   <p class="text-muted-foreground text-xs">
                     Cannot be set live here: the existing send path is still running, so every message would go twice.
                   </p>

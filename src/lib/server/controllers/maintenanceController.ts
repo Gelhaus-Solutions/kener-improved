@@ -199,7 +199,15 @@ export const CreateMaintenanceEventWithNotification = async (
       status: determineEventStatus(start_date_time, end_date_time, reminderBufferSeconds),
     });
     // transition_seq 0: the row was born at this status and has not transitioned.
-    const id = await emitMaintenanceTransition("maintenance.scheduled", created, 0, { title });
+    //
+    // `title` and `description` go on the payload because this is the one
+    // transition whose notification is rendered from arguments rather than from
+    // the maintenance row. Every other site reads `getMaintenanceById`, so a
+    // consumer rebuilding the message from the database matches it exactly; this
+    // one would match only as long as every caller happened to pass the parent's
+    // values. Putting them on the event makes the rehearsal reproduce what was
+    // actually rendered instead of what usually equals it.
+    const id = await emitMaintenanceTransition("maintenance.scheduled", created, 0, { title, description });
     return { event: created, eventId: id };
   });
 

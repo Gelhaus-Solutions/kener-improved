@@ -1,6 +1,6 @@
 import { InsertKeyValue } from "$lib/server/controllers/controller.js";
 import { GetSiteDataByKey } from "$lib/server/controllers/siteDataController.js";
-import { registerAllConsumers, ALL_CONSUMERS } from "$lib/server/events/consumers/index.js";
+import { registerAllConsumers, UNCUT_CONSUMERS } from "$lib/server/events/consumers/index.js";
 import { CONSUMER_MODES_KEY, invalidateConsumerModes } from "$lib/server/events/consumerModes.js";
 import { getConsumer } from "$lib/server/events/consumers.js";
 import { ActionError } from "../../types.js";
@@ -22,11 +22,14 @@ const MODES: ConsumerMode[] = ["off", "legacy", "shadow", "live"];
  * *undone*, which is why the write is a single key and why nothing here is
  * cached for longer than the ten seconds `consumerModes.ts` documents.
  *
- * The guard below is not a formality. `subscribers` and `triggers` still have
- * live counterparts sending every notification they rehearse, so setting either
- * to `live` from this screen would double every subscriber email and every alert
- * notification the instance sends. Turning them live is a code change in P6 that
- * silences the old call site in the same commit, not a click.
+ * The guard below is not a formality. A consumer in `UNCUT_CONSUMERS` still has
+ * a live counterpart sending every notification it rehearses, so setting it to
+ * `live` from this screen would double every one of them.
+ *
+ * `subscribers` is no longer in that set: E-cut1 taught `subscriberQueue.push`
+ * to stand down once the consumer is live, so the flip is now genuinely an
+ * operator's decision to make from this screen, taken with the shadow diff in
+ * front of them, and undone the same way.
  */
 export default {
   action: "setEventConsumerMode",
@@ -44,8 +47,7 @@ export default {
       throw new ActionError(400, `Mode must be one of: ${MODES.join(", ")}`);
     }
 
-    const consumer = ALL_CONSUMERS.find((c) => c.name === name);
-    if (mode === "live" && consumer?.mode === "shadow") {
+    if (mode === "live" && UNCUT_CONSUMERS.has(name)) {
       throw new ActionError(
         400,
         `"${name}" cannot be set live from here. Its existing send path is still running, so going live would send every notification twice. The cutover silences that path in the same change.`,

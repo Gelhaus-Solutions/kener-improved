@@ -33,6 +33,29 @@ export const ALL_CONSUMERS: readonly EventConsumer[] = [
 ];
 
 /**
+ * Consumers whose old send path is still running, so `live` would double-send.
+ *
+ * The event consumers screen refuses to set one of these live, and that refusal
+ * is the only thing standing between a click and every customer receiving two of
+ * every notification. Membership here is not a property of the consumer, it is a
+ * property of the *other* code: a consumer leaves this set in the same commit
+ * that teaches its legacy caller to stand down.
+ *
+ * `subscribers` left in E-cut1, when `subscriberQueue.push` learned to return
+ * without doing anything once the consumer is live. `triggers` is still here
+ * because `alertingQueue` still fires triggers inline; E-cut2 is what empties
+ * this set.
+ *
+ * Deliberately a named set rather than the old test, which was
+ * `declared mode === "shadow"`. That test conflated two unrelated things: what
+ * the code ships as a safe default, and whether a second sender exists. They
+ * were the same answer until the cutover and they are not the same question, so
+ * once one consumer was cut over the old test would have gone on refusing a flip
+ * that is now perfectly safe.
+ */
+export const UNCUT_CONSUMERS: ReadonlySet<string> = new Set(["triggers"]);
+
+/**
  * What each consumer is for, in an operator's words.
  *
  * Here rather than on the consumer objects because it is interface copy, and
@@ -43,9 +66,9 @@ export const CONSUMER_DESCRIPTIONS: Record<string, string> = {
   audit: "Writes an audit log entry for every change that reaches the bus, including API and scheduler changes.",
   webhook: "Delivers signed webhooks to your configured endpoints.",
   subscribers:
-    "Rehearses the incident and maintenance emails sent to status page subscribers. The existing path still sends them.",
+    "Sends the incident and maintenance emails your status page subscribers receive. In shadow it only rehearses them and the older path keeps sending.",
   triggers: "Rehearses the alert notifications sent to your triggers. The existing path still sends them.",
-  email: "Records subscriber emails on the delivery log and makes a failed one retryable.",
+  email: "Retries subscriber emails sent before the notification cutover.",
   alert_trigger: "Records alert trigger sends on the delivery log so a failed one is visible.",
 };
 

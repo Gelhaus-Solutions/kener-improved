@@ -1,6 +1,11 @@
 import db from "$lib/server/db/db.js";
 import { currentOrgId } from "$lib/server/events/eventContext.js";
-import { registerAllConsumers, ALL_CONSUMERS, CONSUMER_DESCRIPTIONS } from "$lib/server/events/consumers/index.js";
+import {
+  registerAllConsumers,
+  ALL_CONSUMERS,
+  CONSUMER_DESCRIPTIONS,
+  UNCUT_CONSUMERS,
+} from "$lib/server/events/consumers/index.js";
 import { configuredModes } from "$lib/server/events/consumerModes.js";
 import { SHADOW_PAIRS } from "$lib/server/events/shadowDiff.js";
 import type { ActionDefinition } from "../../types.js";
@@ -40,6 +45,12 @@ export default {
         ordered: c.ordered === true,
         /** The legacy consumer this one is rehearsing against, when it is a shadow pair. */
         legacy_consumer: SHADOW_PAIRS[c.name] ?? null,
+        /**
+         * False while an older path is still sending what this consumer
+         * rehearses, so the screen can explain a disabled flip rather than
+         * letting an operator discover it as a rejected click.
+         */
+        can_go_live: !UNCUT_CONSUMERS.has(c.name),
         counts: counts[c.name] ?? {},
       })),
     };

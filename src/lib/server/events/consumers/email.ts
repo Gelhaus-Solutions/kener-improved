@@ -13,12 +13,16 @@ import type { EventConsumer, OutboxEvent, DeliveryTarget, DeliveryResult } from 
 // What this consumer exists for is the other half of that screen: the retry
 // button. A dispatch goes through the consumer registry, so a delivery whose
 // consumer is not registered goes DEAD with "no consumer registered as email".
-// Registering this makes an emailed delivery retryable without moving the
-// primary send path onto the bus, which is H8c's job and comes with a shadow
-// period this item does not want to pull forward.
+// Registering this makes an emailed delivery retryable without the consumer
+// itself owning the primary send path.
 //
-// When H8c lands, `targets()` starts returning recipients and `subscriberQueue`
-// stops writing rows. Nothing else here changes.
+// **After the P6 cutover this consumer serves history, and it has to stay
+// registered for exactly that reason.** Once `subscribers` is live,
+// `subscriberQueue.push` returns without doing anything, so no new rows are
+// written under this name - but every row written before the flip is still on
+// the delivery log with `email` in its consumer column, and deregistering this
+// would turn each one's retry button into "no consumer registered as email".
+// The rows are the reason, not the code path.
 
 export const EMAIL_CONSUMER = "email";
 

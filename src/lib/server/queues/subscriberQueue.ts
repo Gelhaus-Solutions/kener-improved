@@ -12,6 +12,8 @@ import { GetGeneralEmailTemplateById } from "../controllers/generalTemplateContr
 import { GetActiveEmailMethodsForEventType } from "../controllers/userSubscriptionsController.js";
 import db from "../db/db.js";
 import { EMAIL_CONSUMER } from "../events/consumers/email.js";
+import { effectiveMode } from "../events/consumers.js";
+import subscribersConsumer from "../events/consumers/subscribers.js";
 import emailQueue from "./emailQueue.js";
 let subscriberQueue: Queue | null = null;
 let worker: Worker | null = null;
@@ -172,6 +174,26 @@ export const push = async (
    */
   context: { event_id?: string; org_id?: number } = {},
 ) => {
+  // The cutover switch, and the only one there is.
+  //
+  // Once the `subscribers` consumer is live it resolves the same recipients from
+  // the same event and hands them to the same `emailQueue`. If this kept pushing
+  // as well, every subscriber would get every notification twice - which is the
+  // failure mode a cutover is most likely to produce and the one customers
+  // notice fastest.
+  //
+  // The check lives here rather than at the seven call sites deliberately. All
+  // seven already funnel through this function, so there is exactly one thing to
+  // get right, and an eighth call site added later inherits the gate instead of
+  // quietly bypassing it.
+  //
+  // Returning also suppresses the legacy `email` delivery rows this path writes,
+  // which is correct: those rows exist to be the live half of the shadow diff,
+  // and once the bus owns the send there is no other half to compare against.
+  if ((await effectiveMode(subscribersConsumer)) === "live") {
+    return;
+  }
+
   if (!options) {
     options = {};
   }
