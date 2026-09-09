@@ -8,6 +8,7 @@ import type { MonitoringData } from "../types/db.js";
 import db from "../db/db.js";
 import { emit } from "../events/emit.js";
 import { currentOrgId } from "../events/eventContext.js";
+import { MERGED_REGION_ID } from "../db/regions.js";
 let monitorResponseQueue: Queue | null = null;
 let worker: Worker | null = null;
 const queueName = "monitorResponseQueue";
@@ -68,8 +69,8 @@ const addWorker = () => {
           type: "monitor.status_changed",
           aggregate_id: monitorTag,
           // One transition per monitor per sample timestamp. This queue already
-          // deduplicates on `${tag}-${ts}`, and a redelivered job must not
-          // report the same flip twice.
+          // deduplicates on `${tag}-${region}-${ts}`, and a redelivered job must
+          // not report the same flip twice.
           idempotency_key: `monitor.status_changed:${monitorTag}:${ts}`,
           occurred_at: ts,
           payload: {
@@ -95,6 +96,7 @@ const addWorker = () => {
     await SetLastMonitoringValue(monitorTag, {
       monitor_tag: monitorTag,
       timestamp: ts,
+      region_id: MERGED_REGION_ID,
       status: status,
       latency: latency,
       type: type,
@@ -113,7 +115,13 @@ const addWorker = () => {
 };
 
 export const push = async (monitorTag: string, ts: number, result: MonitoringResult, options?: JobsOptions) => {
-  const deDupId = `${monitorTag}-${ts}`;
+  // The region belongs in the deduplication id for the same reason it belongs in
+  // the primary key: two regions reporting one monitor's minute are two distinct
+  // samples. Keyed on `${tag}-${ts}` alone, BullMQ would drop the second as a
+  // duplicate of the first and the row would never be written at all — a quieter
+  // failure than the key collision, because nothing would even reach the
+  // database to be overwritten.
+  const deDupId = `${monitorTag}-${MERGED_REGION_ID}-${ts}`;
   if (!options) {
     options = {};
   }

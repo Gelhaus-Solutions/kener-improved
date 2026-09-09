@@ -48,6 +48,7 @@
     "predev": "npm run seed",
     "prepare": "svelte-kit sync || echo ''",
     "preseed": "vite-node scripts/fix-migration-ext.ts && npx knex migrate:latest",
+    "pg:partition-monitoring-data": "vite-node scripts/pg-partition-monitoring-data.ts",
     "prettify": "prettier --write .",
     "preview": "vite preview",
     "schedule": "vite-node src/lib/server/startup.ts",

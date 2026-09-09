@@ -1267,6 +1267,23 @@ class DbImpl {
     this.autoDisableWebhookEndpoint = this.webhooks.autoDisableEndpoint.bind(this.webhooks);
   }
 
+  /**
+   * The raw connection, for DDL that no repository can express (B1a).
+   *
+   * The only caller is `monitoring_data` partition maintenance, which issues
+   * `CREATE TABLE ... PARTITION OF` against the catalogue. That is not a tenant
+   * query and has no `org_id` to carry, so it neither wants nor could use
+   * `BaseRepository.table()`; and it is not something to reach for otherwise,
+   * which is why the name says what it is for rather than being a plain getter.
+   *
+   * Deliberately the worker pool: it runs from the daily scheduler, and one more
+   * connection held during a `CREATE TABLE` should not come out of the budget
+   * serving page loads.
+   */
+  knexForPartitionMaintenance(): KnexType {
+    return this.workerKnex;
+  }
+
   /** Probes database connectivity with a trivial query. Never throws. */
   async ping(): Promise<boolean> {
     try {

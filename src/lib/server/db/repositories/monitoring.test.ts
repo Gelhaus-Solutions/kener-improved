@@ -25,17 +25,24 @@ describe("MonitoringRepository.getLatestMonitoringDataAllActive", () => {
     await db.schema.createTable("monitoring_data", (table) => {
       table.string("monitor_tag").notNullable();
       table.integer("timestamp").notNullable();
+      table.integer("region_id").notNullable().defaultTo(0);
       table.string("status");
       table.float("latency");
       table.string("type");
-      table.primary(["monitor_tag", "timestamp"]);
+      table.primary(["monitor_tag", "region_id", "timestamp"]);
     });
     await db("monitoring_data").insert([
-      { monitor_tag: "alpha", timestamp: 300, status: "UP", latency: 12, type: "REALTIME" },
-      { monitor_tag: "alpha", timestamp: 100, status: "DOWN", latency: 40, type: "REALTIME" },
-      { monitor_tag: "alpha", timestamp: 200, status: "DEGRADED", latency: 25, type: "REALTIME" },
-      { monitor_tag: "beta", timestamp: 150, status: "UP", latency: 8, type: "REALTIME" },
-      { monitor_tag: "ignored", timestamp: 999, status: "UP", latency: 1, type: "REALTIME" },
+      { monitor_tag: "alpha", timestamp: 300, region_id: 0, status: "UP", latency: 12, type: "REALTIME" },
+      { monitor_tag: "alpha", timestamp: 100, region_id: 0, status: "DOWN", latency: 40, type: "REALTIME" },
+      { monitor_tag: "alpha", timestamp: 200, region_id: 0, status: "DEGRADED", latency: 25, type: "REALTIME" },
+      { monitor_tag: "beta", timestamp: 150, region_id: 0, status: "UP", latency: 8, type: "REALTIME" },
+      { monitor_tag: "ignored", timestamp: 999, region_id: 0, status: "UP", latency: 1, type: "REALTIME" },
+      // A probe's report of a minute region 0 already covers. Every read in the
+      // repository has to look past it; if one stops carrying `region_id = 0`,
+      // this row is what makes the test say so rather than the test still
+      // passing because nothing but region 0 exists.
+      { monitor_tag: "alpha", timestamp: 400, region_id: 7, status: "DOWN", latency: 900, type: "REALTIME" },
+      { monitor_tag: "beta", timestamp: 900, region_id: 7, status: "DOWN", latency: 900, type: "REALTIME" },
     ]);
     repo = unscoped(new MonitoringRepository(db));
   });

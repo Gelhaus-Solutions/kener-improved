@@ -201,7 +201,7 @@ git push
 
 | Area                                                                               | Divergence                                                                   |
 | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `package.json`                                                                     | `repository`, `homepage`, `bugs` point here; `sync:upstream` script          |
+| `package.json`                                                                     | `repository`, `homepage`, `bugs` point here; fork-added `scripts` entries    |
 | `package.json` `version`                                                           | Fork-owned; the fork releases on its own schedule and numbers                |
 | `README.md`                                                                        | Fork notice at the top; upstream content otherwise                           |
 | `.github/FUNDING.yml`                                                              | Emptied - sponsor upstream directly, not this fork                           |
@@ -209,6 +209,7 @@ git push
 | `.github/workflows/create-release.yml`                                             | Uses `GITHUB_TOKEN` instead of upstream's `RELEASE_TOKEN`                    |
 | `CHANGELOG.md`                                                                     | Fork-only; the GitHub release body, recorded on publish                      |
 | `scripts/apply-release.mjs`                                                        | Applies a published release: version bump plus the changelogs                |
+| `scripts/pg-partition-monitoring-data.ts`                                          | Fork-only: converts `monitoring_data` to a partitioned table (B1a)           |
 | `.github/ISSUE_TEMPLATE/`                                                          | No upstream assignee                                                         |
 | `docs/agents/issue-tracker.md`                                                     | Points at the Plane project, not GitHub Issues                               |
 | `docs/agents/triage-labels.md`                                                     | States that triage labels are unused                                         |

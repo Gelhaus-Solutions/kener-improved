@@ -1,6 +1,7 @@
 import type { Knex as KnexType } from "knex";
 import { BaseRepository } from "./base.js";
 import { requireOrgId } from "../orgContext.js";
+import { MERGED_REGION_ID } from "../regions.js";
 import { hasFloorFunction, supportsInsertReturning } from "../capabilities.js";
 import GC from "../../../global-constants.js";
 import type { MonitoringStatus } from "../../../types/status.js";
@@ -43,10 +44,18 @@ const OVERLAY_TYPES = [GC.INCIDENT, GC.MAINTENANCE];
 export class MonitoringRepository extends BaseRepository {
   async insertMonitoringData(data: MonitoringDataInsert): Promise<MonitoringData | null> {
     const { monitor_tag, timestamp, status, latency, type, error_message, raw_status } = data;
+    // Defaulted rather than required, because every caller today is the local
+    // scheduler writing the merged verdict. A probe reporting for itself passes
+    // its own region and lands beside region 0 instead of over it.
+    const region_id = data.region_id ?? MERGED_REGION_ID;
 
     const upsert = this.table("monitoring_data")
-      .insert({ monitor_tag, timestamp, status, latency, type, error_message, raw_status })
-      .onConflict(["monitor_tag", "timestamp"])
+      .insert({ monitor_tag, timestamp, region_id, status, latency, type, error_message, raw_status })
+      // The conflict target has to be the whole key. Naming only
+      // (monitor_tag, timestamp) is what let two regions' samples for one minute
+      // merge into a single row, and it failed silently: the merge succeeded,
+      // and whichever sample arrived second was simply the one that survived.
+      .onConflict(["monitor_tag", "region_id", "timestamp"])
       .merge({ status, latency, type, error_message, raw_status });
 
     // This runs once per monitor per minute on the worker pool, so the second
@@ -61,6 +70,7 @@ export class MonitoringRepository extends BaseRepository {
 
     const record = await this.table("monitoring_data")
       .where("monitor_tag", monitor_tag)
+      .where("region_id", region_id)
       .where("timestamp", timestamp)
       .first();
 
@@ -70,6 +80,7 @@ export class MonitoringRepository extends BaseRepository {
   async getMonitoringData(monitor_tag: string, start: number, end: number): Promise<MonitoringData[]> {
     return await this.table("monitoring_data")
       .where("monitor_tag", monitor_tag)
+      .where("region_id", MERGED_REGION_ID)
       .where("timestamp", ">=", start)
       .where("timestamp", "<", end)
       .orderBy("timestamp", "asc");
@@ -78,6 +89,7 @@ export class MonitoringRepository extends BaseRepository {
   async getLatestMonitoringData(monitor_tag: string): Promise<MonitoringData | undefined> {
     return await this.table("monitoring_data")
       .where("monitor_tag", monitor_tag)
+      .where("region_id", MERGED_REGION_ID)
       .orderBy("timestamp", "desc")
       .limit(1)
       .first();
@@ -86,6 +98,7 @@ export class MonitoringRepository extends BaseRepository {
   async getLatestMonitoringDataN(monitor_tag: string, limit: number): Promise<MonitoringData[]> {
     return await this.table("monitoring_data")
       .where("monitor_tag", monitor_tag)
+      .where("region_id", MERGED_REGION_ID)
       .orderBy("timestamp", "desc")
       .limit(limit);
   }
@@ -95,7 +108,7 @@ export class MonitoringRepository extends BaseRepository {
     limit: number,
     filter?: { monitor_tag?: string; status?: MonitoringStatus; start_time?: number; end_time?: number },
   ): Promise<MonitoringData[]> {
-    let query = this.table("monitoring_data").select("*");
+    let query = this.table("monitoring_data").select("*").where("region_id", MERGED_REGION_ID);
 
     if (filter?.monitor_tag) {
       query = query.where("monitor_tag", filter.monitor_tag);
@@ -125,7 +138,7 @@ export class MonitoringRepository extends BaseRepository {
     start_time?: number;
     end_time?: number;
   }): Promise<{ count: number }> {
-    let query = this.table("monitoring_data").count("* as count");
+    let query = this.table("monitoring_data").count("* as count").where("region_id", MERGED_REGION_ID);
 
     if (filter?.monitor_tag) {
       query = query.where("monitor_tag", filter.monitor_tag);
@@ -150,6 +163,7 @@ export class MonitoringRepository extends BaseRepository {
   async getMonitoringDataAt(monitor_tag: string, timestamp: number): Promise<MonitoringData | undefined> {
     return await this.table("monitoring_data")
       .where("monitor_tag", monitor_tag)
+      .where("region_id", MERGED_REGION_ID)
       .where("timestamp", timestamp)
       .orderBy("timestamp", "desc")
       .limit(1)
@@ -162,7 +176,7 @@ export class MonitoringRepository extends BaseRepository {
     }
 
     // One newest-row lookup per unique tag — each a single descent of the
-    // (monitor_tag, timestamp) primary key. The previous MAX(timestamp)
+    // (monitor_tag, region_id, timestamp) primary key. The previous MAX(timestamp)
     // GROUP BY self-join planned as a full-table scan on large
     // monitoring_data tables (Postgres), holding a pool connection for
     // hundreds of ms per page load and exhausting the web pool under load.
@@ -181,6 +195,7 @@ export class MonitoringRepository extends BaseRepository {
   async getLastHeartbeat(monitor_tag: string): Promise<MonitoringData | undefined> {
     return await this.table("monitoring_data")
       .where("monitor_tag", monitor_tag)
+      .where("region_id", MERGED_REGION_ID)
       .where("type", GC.SIGNAL)
       .orderBy("timestamp", "desc")
       .limit(1)
@@ -202,6 +217,7 @@ export class MonitoringRepository extends BaseRepository {
         this.knexUnscoped.raw("MIN(latency) as min_latency"),
       )
       .where("monitor_tag", monitor_tag)
+      .where("region_id", MERGED_REGION_ID)
       .where("timestamp", ">=", start)
       .where("timestamp", "<=", end)
       .first();
@@ -210,6 +226,7 @@ export class MonitoringRepository extends BaseRepository {
   async getLastStatusBefore(monitor_tag: string, timestamp: number): Promise<MonitoringData | undefined> {
     return await this.table("monitoring_data")
       .where("monitor_tag", monitor_tag)
+      .where("region_id", MERGED_REGION_ID)
       .where("timestamp", "<", timestamp)
       .orderBy("timestamp", "desc")
       .limit(1)
@@ -219,6 +236,7 @@ export class MonitoringRepository extends BaseRepository {
   async getLastStatusBeforeAll(monitor_tags: string[], timestamp: number): Promise<MonitoringData | undefined> {
     return await this.table("monitoring_data")
       .whereIn("monitor_tag", monitor_tags)
+      .where("region_id", MERGED_REGION_ID)
       .where("timestamp", "<", timestamp)
       .orderBy("timestamp", "desc")
       .limit(1)
@@ -233,6 +251,7 @@ export class MonitoringRepository extends BaseRepository {
     return await this.table("monitoring_data")
       .select("timestamp", "status", "latency")
       .where("monitor_tag", monitor_tag)
+      .where("region_id", MERGED_REGION_ID)
       .andWhere("timestamp", ">=", start)
       .andWhere("timestamp", "<=", end)
       .orderBy("timestamp", "asc");
@@ -256,7 +275,8 @@ export class MonitoringRepository extends BaseRepository {
           END as status
         `),
       )
-      .whereIn("monitor_tag", monitor_tags_arr);
+      .whereIn("monitor_tag", monitor_tags_arr)
+      .where("region_id", MERGED_REGION_ID);
 
     if (!!minTimestamp) {
       query = query.whereBetween("timestamp", [minTimestamp, timestamp]);
@@ -272,6 +292,16 @@ export class MonitoringRepository extends BaseRepository {
       .first();
   }
 
+  /**
+   * Nightly retention.
+   *
+   * **No `region_id` predicate, and that is the point.** Every read in this file
+   * carries `region_id = 0`, so it would be easy to add one here by symmetry and
+   * wrong to: retention prunes history, and a probe's samples are history. Keep
+   * them past the cutoff and they become rows nothing renders, nothing merges
+   * and nothing ever prunes again - the table would grow without bound in the
+   * one dimension no query looks at.
+   */
   async background(retentionDays: number = 100): Promise<number> {
     const safeRetentionDays = Math.max(1, Math.floor(retentionDays || 100));
     const cutoffTimestamp = GetMinuteStartNowTimestampUTC() - 86400 * safeRetentionDays;
@@ -284,6 +314,7 @@ export class MonitoringRepository extends BaseRepository {
         qb.select("*")
           .from("monitoring_data")
           .where("monitor_tag", monitor_tag)
+          .where("region_id", MERGED_REGION_ID)
           .whereIn("type", ALERT_VISIBLE_TYPES)
           .orderBy("timestamp", "desc")
           .limit(lastX);
@@ -310,6 +341,7 @@ export class MonitoringRepository extends BaseRepository {
         qb.select("*")
           .from("monitoring_data")
           .where("monitor_tag", monitor_tag)
+          .where("region_id", MERGED_REGION_ID)
           .whereIn("type", ALERT_VISIBLE_TYPES)
           .orderBy("timestamp", "desc")
           .limit(lastX);
@@ -332,6 +364,7 @@ export class MonitoringRepository extends BaseRepository {
         qb.select("*")
           .from("monitoring_data")
           .where("monitor_tag", monitor_tag)
+          .where("region_id", MERGED_REGION_ID)
           .whereIn("type", ALERT_VISIBLE_TYPES)
           .orderBy("timestamp", "desc")
           .limit(lastX);
@@ -363,6 +396,7 @@ export class MonitoringRepository extends BaseRepository {
     return await this.table("monitoring_data")
       .select("timestamp", "status", "raw_status", "type")
       .where("monitor_tag", monitor_tag)
+      .where("region_id", MERGED_REGION_ID)
       .where("timestamp", "<", beforeTs)
       .whereIn("type", [...OBSERVED_CHECK_TYPES, ...OVERLAY_TYPES])
       .whereNot("status", GC.NO_DATA)
@@ -396,6 +430,7 @@ export class MonitoringRepository extends BaseRepository {
     return await this.table("monitoring_data")
       .select("monitor_tag", "timestamp", "status")
       .whereIn("monitor_tag", monitor_tags)
+      .where("region_id", MERGED_REGION_ID)
       .where("timestamp", ">=", floor)
       .where("timestamp", "<=", ceiling)
       .whereIn("type", OBSERVED_CHECK_TYPES)
@@ -413,6 +448,7 @@ export class MonitoringRepository extends BaseRepository {
     const row = await this.table("monitoring_data")
       .select("status")
       .where("monitor_tag", monitor_tag)
+      .where("region_id", MERGED_REGION_ID)
       .where("timestamp", "<", beforeTs)
       .whereIn("type", OBSERVED_CHECK_TYPES)
       .whereNot("status", GC.NO_DATA)
@@ -440,6 +476,7 @@ export class MonitoringRepository extends BaseRepository {
     if (confirmThreshold === null) {
       return await this.table("monitoring_data")
         .where("monitor_tag", monitor_tag)
+        .where("region_id", MERGED_REGION_ID)
         .whereIn("timestamp", timestamps)
         .whereNotNull("raw_status")
         .update({
@@ -458,6 +495,7 @@ export class MonitoringRepository extends BaseRepository {
       const rows = await trx("monitoring_data")
         .select("timestamp", "error_message", "raw_status")
         .where("monitor_tag", monitor_tag)
+        .where("region_id", MERGED_REGION_ID)
         .whereIn("timestamp", timestamps)
         .whereNotNull("raw_status");
 
@@ -475,7 +513,7 @@ export class MonitoringRepository extends BaseRepository {
           nextMessage = `${existing} | ${note}`;
         }
         updated += await trx("monitoring_data")
-          .where({ monitor_tag, timestamp: row.timestamp })
+          .where({ monitor_tag, region_id: MERGED_REGION_ID, timestamp: row.timestamp })
           .update({ status: row.raw_status, error_message: nextMessage });
       }
       return updated;
@@ -527,6 +565,9 @@ export class MonitoringRepository extends BaseRepository {
     const records = timestamps.map((ts) => ({
       monitor_tag,
       timestamp: ts,
+      // The overlay rewrites the verdict, never a probe's own report of what it
+      // saw. A probe's samples are evidence; this is the operator's account.
+      region_id: MERGED_REGION_ID,
       status: newStatus,
       type,
       latency: generateLatency(),
@@ -546,7 +587,7 @@ export class MonitoringRepository extends BaseRepository {
         // rewritten rather than reassigned.
         const result = await trx("monitoring_data")
           .insert(batch)
-          .onConflict(["monitor_tag", "timestamp"])
+          .onConflict(["monitor_tag", "region_id", "timestamp"])
           .merge(["status", "type", "latency"]);
         results.push(result);
       }
@@ -555,6 +596,14 @@ export class MonitoringRepository extends BaseRepository {
     });
   }
 
+  /**
+   * Deletes a window of a monitor's samples.
+   *
+   * **Every region, like `background` and for the same reason.** This is the
+   * only path that removes a monitor's history on purpose, so leaving a probe's
+   * rows behind would leave orphans that no read returns and no later delete
+   * finds.
+   */
   async deleteMonitorDataByTag(tag?: string, start?: number, end?: number, status?: MonitoringStatus): Promise<number> {
     const query = this.table("monitoring_data");
     if (tag) {
@@ -609,7 +658,7 @@ export class MonitoringRepository extends BaseRepository {
 				MAX(latency) AS max_latency,
 				MIN(latency) AS min_latency
       FROM monitoring_data
-      WHERE ${tagClause} AND timestamp >= ? AND timestamp < ?
+      WHERE ${tagClause} AND region_id = ? AND timestamp >= ? AND timestamp < ?
       GROUP BY ts
       ORDER BY ts ASC
     `;
@@ -623,6 +672,7 @@ export class MonitoringRepository extends BaseRepository {
       intervalInSeconds,
       startTimestamp,
       ...(isArray ? monitorTag : [monitorTag]),
+      MERGED_REGION_ID,
       startTimestamp,
       endTimestamp,
     ];
@@ -690,7 +740,7 @@ export class MonitoringRepository extends BaseRepository {
         MAX(latency) AS max_latency,
         MIN(latency) AS min_latency
       FROM monitoring_data
-      WHERE monitor_tag IN (${monitorTags.map(() => "?").join(", ")}) AND timestamp >= ? AND timestamp < ?
+      WHERE monitor_tag IN (${monitorTags.map(() => "?").join(", ")}) AND region_id = ? AND timestamp >= ? AND timestamp < ?
       GROUP BY monitor_tag, ts
       ORDER BY monitor_tag ASC, ts ASC
     `;
@@ -701,6 +751,7 @@ export class MonitoringRepository extends BaseRepository {
       intervalInSeconds,
       startTimestamp,
       ...monitorTags,
+      MERGED_REGION_ID,
       startTimestamp,
       endTimestamp,
     ];
@@ -741,6 +792,7 @@ export class MonitoringRepository extends BaseRepository {
         qb.select("status", "latency")
           .from("monitoring_data")
           .whereIn("monitor_tag", tags)
+          .where("region_id", MERGED_REGION_ID)
           .orderBy("timestamp", "desc")
           .limit(lastX);
       })
@@ -770,6 +822,10 @@ export class MonitoringRepository extends BaseRepository {
 
   //get the last known status for a monitor
   async getLastKnownStatus(monitor_tag: string): Promise<MonitoringData | undefined> {
-    return await this.table("monitoring_data").where("monitor_tag", monitor_tag).orderBy("timestamp", "desc").first();
+    return await this.table("monitoring_data")
+      .where("monitor_tag", monitor_tag)
+      .where("region_id", MERGED_REGION_ID)
+      .orderBy("timestamp", "desc")
+      .first();
   }
 }

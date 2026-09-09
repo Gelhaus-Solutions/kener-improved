@@ -9,6 +9,8 @@ export type DbTimestamp = Date | string;
 export interface MonitoringData {
   monitor_tag: string;
   timestamp: number;
+  /** Part of the primary key. 0 is the merged verdict; see `db/regions.ts`. */
+  region_id: number;
   status: string | null;
   latency: number | null;
   type: string | null;
@@ -19,6 +21,14 @@ export interface MonitoringData {
 export interface MonitoringDataInsert {
   monitor_tag: string;
   timestamp: number;
+  /**
+   * Optional, defaulting to the merged verdict (0).
+   *
+   * Optional rather than required on purpose: every caller today is the local
+   * scheduler, whose sample *is* the verdict, and making them all pass a
+   * constant would be noise. A probe reporting for itself passes its own id.
+   */
+  region_id?: number;
   status: string;
   latency: number;
   type: string;

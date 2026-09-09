@@ -50,6 +50,12 @@ export const TENANT_TABLES: ReadonlySet<string> = new Set([
   "roles_permissions",
 
   // Fork-added, org-aware from the day they were built
+  //
+  // `regions` is the one row-level exception in this whole set: id 0, the merged
+  // verdict, carries a null `org_id` because it belongs to the instance rather
+  // than to a tenant. A scoped read therefore never returns it, which is
+  // correct - region 0 is a constant (`db/regions.ts`), not something to look up.
+  "regions",
   "subscriber_subscriptions",
   "component_dependencies",
   "monitor_rollup_settings",
