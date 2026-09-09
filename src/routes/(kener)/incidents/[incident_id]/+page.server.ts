@@ -5,6 +5,7 @@ import {
   GetIncidentCommentsByIncidentId,
   GetAffectedMonitorsByIncidentId,
 } from "$lib/server/controllers/dashboardController.js";
+import { GetPublishedPostmortem } from "$lib/server/incidents/postmortem.js";
 
 export const load: PageServerLoad = async ({ params }) => {
   const { incident_id } = params;
@@ -24,7 +25,12 @@ export const load: PageServerLoad = async ({ params }) => {
   // Fetch affected monitors
   const affectedMonitors = await GetAffectedMonitorsByIncidentId(incidentIdNum);
 
+  // C1. `GetPublishedPostmortem` rather than the draft-inclusive reader, and the
+  // two are separate functions rather than one with a flag precisely so that this
+  // line cannot accidentally publish a draft somebody is still writing.
+  const postmortem = await GetPublishedPostmortem(incidentIdNum);
+
   return {
-    ...{ incident, comments, affectedMonitors },
+    ...{ incident, comments, affectedMonitors, postmortem },
   };
 };

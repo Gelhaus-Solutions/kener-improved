@@ -63,6 +63,21 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   acknowledgeIncident: "incidents.write",
   getIncidentMetrics: "incidents.read",
 
+  // Postmortems (C1). Deliberately mapped onto the *incident* permissions rather
+  // than a new pair. A postmortem is the incident's published account of itself,
+  // and inventing `postmortems.write` would mean every existing role that can
+  // communicate about incidents silently could not write the postmortem - a
+  // permission nobody had been told to grant, discovered during an outage.
+  //
+  // Publishing is arguably the stronger act and could carry its own grant. It
+  // does not, for now, because splitting it would need somebody to decide who
+  // holds it, and a split nobody configures is a split that only ever denies.
+  getPostmortem: "incidents.read",
+  savePostmortem: "incidents.write",
+  publishPostmortem: "incidents.write",
+  unpublishPostmortem: "incidents.write",
+  deletePostmortem: "incidents.write",
+
   // Component dependencies (C3). Reading the graph is part of reading monitors;
   // editing it is monitor configuration, so both reuse the upstream monitor
   // permissions rather than inventing a pair nobody would think to grant.
@@ -175,6 +190,13 @@ export const ORG_ROUTE_PERMISSION_MAP: Record<string, string | null> = {
   // `/monitors/`, where a static segment would shadow a monitor whose tag
   // happened to be "dependencies".
   "/(manage)/manage/app/dependencies": "monitors.read",
+
+  // The postmortem editor (C1). Nested under the incident it belongs to, which
+  // is safe here in a way it would not be under `/monitors/`: the segment before
+  // it is `[incident_id]`, a numeric id, so a static `postmortem` sibling cannot
+  // shadow anything. Opening it needs only `incidents.read`; every button on it
+  // is gated on `incidents.write` by its own action.
+  "/(manage)/manage/app/incidents/[incident_id]/postmortem": "incidents.read",
 };
 
 /** Permission ids the fork owns. Used by the seeds to tell them from upstream's. */

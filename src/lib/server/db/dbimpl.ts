@@ -15,6 +15,7 @@ import { UsersRepository } from "./repositories/users.js";
 import { SiteDataRepository } from "./repositories/site-data.js";
 import { IncidentsRepository } from "./repositories/incidents.js";
 import { DependenciesRepository } from "./repositories/dependencies.js";
+import { PostmortemsRepository } from "./repositories/postmortems.js";
 import { ImagesRepository } from "./repositories/images.js";
 import { PagesRepository } from "./repositories/pages.js";
 import { MaintenancesRepository } from "./repositories/maintenances.js";
@@ -54,6 +55,16 @@ class DbImpl {
   private siteData!: SiteDataRepository;
   private incidents!: IncidentsRepository;
   private dependencies!: DependenciesRepository;
+  private postmortems!: PostmortemsRepository;
+
+  // ============ Postmortems (C1) ============
+  getPostmortemByIncidentId!: PostmortemsRepository["getPostmortemByIncidentId"];
+  getPostmortemById!: PostmortemsRepository["getPostmortemById"];
+  getPublishedPostmortems!: PostmortemsRepository["getPublishedPostmortems"];
+  getPublishedPostmortemsForIncidents!: PostmortemsRepository["getPublishedPostmortemsForIncidents"];
+  insertPostmortem!: PostmortemsRepository["insertPostmortem"];
+  updatePostmortem!: PostmortemsRepository["updatePostmortem"];
+  deletePostmortem!: PostmortemsRepository["deletePostmortem"];
 
   // ============ Component dependencies and rollup (C3) ============
   getAllDependencies!: DependenciesRepository["getAllDependencies"];
@@ -542,6 +553,17 @@ class DbImpl {
     this.users = new UsersRepository(this.knex);
     this.siteData = new SiteDataRepository(this.knex);
     this.incidents = new IncidentsRepository(this.knex);
+    this.postmortems = new PostmortemsRepository(this.knex);
+    this.getPostmortemByIncidentId = this.postmortems.getPostmortemByIncidentId.bind(this.postmortems);
+    this.getPostmortemById = this.postmortems.getPostmortemById.bind(this.postmortems);
+    this.getPublishedPostmortems = this.postmortems.getPublishedPostmortems.bind(this.postmortems);
+    this.getPublishedPostmortemsForIncidents = this.postmortems.getPublishedPostmortemsForIncidents.bind(
+      this.postmortems,
+    );
+    this.insertPostmortem = this.postmortems.insertPostmortem.bind(this.postmortems);
+    this.updatePostmortem = this.postmortems.updatePostmortem.bind(this.postmortems);
+    this.deletePostmortem = this.postmortems.deletePostmortem.bind(this.postmortems);
+
     this.dependencies = new DependenciesRepository(this.knex);
     this.getAllDependencies = this.dependencies.getAllDependencies.bind(this.dependencies);
     this.getAllRollupSettings = this.dependencies.getAllRollupSettings.bind(this.dependencies);

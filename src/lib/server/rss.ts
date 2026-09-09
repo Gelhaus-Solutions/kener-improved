@@ -12,8 +12,10 @@ import { ResolvePublicMonitor } from "./controllers/publicMonitorResolver.js";
 import db from "$lib/server/db/db.js";
 import { GetAllSiteData } from "$lib/server/controllers/siteDataController.js";
 import type { IncidentForMonitorListWithComments, MaintenanceEventsMonitorList } from "$lib/server/types/db.js";
+import { GetPublishedPostmortemsFor } from "./incidents/postmortem.js";
+import type { Postmortem } from "./types/postmortem.js";
 
-export type RssFeedItemType = "incident" | "maintenance";
+export type RssFeedItemType = "incident" | "maintenance" | "postmortem";
 
 export interface RssFeedItem {
   type: RssFeedItemType;
@@ -35,6 +37,7 @@ export interface BuildRssFeedArgs {
 const TYPE_TITLE_PREFIX: Record<RssFeedItemType, string> = {
   incident: "[Incident]",
   maintenance: "[Maintenance]",
+  postmortem: "[Postmortem]",
 };
 
 export function buildRssFeed(args: BuildRssFeedArgs): string {
@@ -184,6 +187,33 @@ export async function renderRssFeedResponse(args: RenderRssFeedArgs): Promise<Re
       description: buildIncidentDescription(incident),
     });
   }
+  // C1: published postmortems for the incidents already in this window.
+  //
+  // Scoped by the incidents rather than fetched independently, which gets the
+  // monitor filtering for free: if an incident is not in this feed because none
+  // of its components are on this page, its postmortem must not be either.
+  //
+  // **Its own item rather than an update to the incident's**, because a reader's
+  // aggregator has already shown them the incident and will not show it again -
+  // a `guid` it has seen is a `guid` it skips. The write-up published a week
+  // later is new, and the only way to say so is to publish it as new.
+  const postmortems = await GetPublishedPostmortemsFor(incidents.map((i) => i.id));
+  for (const incident of incidents) {
+    const postmortem = postmortems.get(incident.id);
+    if (!postmortem || postmortem.published_at === null) continue;
+    items.push({
+      type: "postmortem",
+      id: postmortem.id,
+      title: postmortem.title,
+      // The incident page, because that is where a published postmortem renders.
+      // The fragment takes a reader who clicks from their aggregator straight to
+      // the document rather than to the top of an incident they have read.
+      link: joinUrl(siteURL, basePath, `/incidents/${incident.id}`) + "#postmortem",
+      pubDate: postmortem.published_at,
+      description: buildPostmortemDescription(postmortem),
+    });
+  }
+
   for (const maintenance of maintenances) {
     // Drop events whose affected monitors were all hidden: the DB layer strips
     // hidden monitors from the row; a now-empty monitors[] means the public
@@ -225,6 +255,23 @@ function buildIncidentDescription(incident: IncidentForMonitorListWithComments):
     lines.push("");
     lines.push(latest.comment);
   }
+  return lines.join("\n");
+}
+
+function buildPostmortemDescription(postmortem: Postmortem): string {
+  const lines: string[] = [];
+  if (postmortem.summary) lines.push(postmortem.summary);
+  if (postmortem.root_cause) {
+    lines.push("");
+    lines.push(`Root cause: ${postmortem.root_cause}`);
+  }
+  if (postmortem.action_items.length > 0) {
+    lines.push("");
+    lines.push(`Follow-up actions: ${postmortem.action_items.length}`);
+  }
+  // Deliberately not the whole body. A postmortem runs to several screens of
+  // markdown, and an aggregator that renders all of it inline buries every other
+  // item in the feed.
   return lines.join("\n");
 }
 

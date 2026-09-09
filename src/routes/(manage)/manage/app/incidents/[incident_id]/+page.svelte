@@ -20,6 +20,7 @@
   import MoreVerticalIcon from "@lucide/svelte/icons/more-vertical";
   import CheckIcon from "@lucide/svelte/icons/check";
   import AlertTriangleIcon from "@lucide/svelte/icons/alert-triangle";
+  import FileTextIcon from "@lucide/svelte/icons/file-text";
   import type { PageProps } from "./$types";
   import type { MonitorRecord, IncidentRecord, IncidentCommentRecord } from "$lib/server/types/db.js";
   import { goto } from "$app/navigation";
@@ -816,6 +817,14 @@
     </Breadcrumb.Root>
     <div class="flex gap-2">
       {#if !isNew}
+        <Button
+          variant="outline"
+          size="sm"
+          href={clientResolver(resolve, `/manage/app/incidents/${params.incident_id}/postmortem`)}
+        >
+          <FileTextIcon class="size-4" />
+          Postmortem
+        </Button>
         <Button
           variant="outline"
           target="_blank"

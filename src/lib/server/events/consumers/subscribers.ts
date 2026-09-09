@@ -153,6 +153,19 @@ async function maintenanceGates(): Promise<Record<string, boolean>> {
 async function isNotifiable(event: OutboxEvent): Promise<boolean> {
   if (event.type === "incident.comment_added") return true;
 
+  // C1. The second incident-family event this consumer listens to, and the only
+  // one gated on the row rather than on a site setting: a postmortem says for
+  // itself whether publishing it should mail anybody, because the answer differs
+  // per document. A routine write-up of a ten-minute blip is not worth a mail;
+  // the account of the outage that took a customer down for a day is.
+  //
+  // Read from the payload rather than from the row, so a later edit to
+  // `notify_subscribers` cannot retroactively change what an already-emitted
+  // event meant.
+  if (event.type === "postmortem.published") {
+    return String(payloadOf(event).notify_subscribers ?? "NO") === "YES";
+  }
+
   const notification = MAINTENANCE_NOTIFICATIONS[event.type as EventType];
   if (!notification) return false;
   return (await maintenanceGates())[notification.gate] === true;
@@ -243,8 +256,48 @@ async function renderMaintenance(event: OutboxEvent): Promise<SubscriptionVariab
   );
 }
 
+/**
+ * Rebuilds the postmortem notification from the event (C1).
+ *
+ * The mail is a short pointer rather than the whole document: a postmortem is
+ * long-form, often several screens of markdown, and the thing a subscriber wants
+ * in their inbox is "the write-up is out, here it is". The link goes to the
+ * incident, because that is where a published postmortem is rendered.
+ */
+async function renderPostmortem(event: OutboxEvent): Promise<SubscriptionVariableMap | null> {
+  const payload = payloadOf(event);
+  const postmortemId = Number(payload.postmortem_id ?? event.aggregate_id);
+  const incidentId = Number(payload.incident_id);
+  if (!Number.isFinite(incidentId) || !Number.isFinite(postmortemId)) return null;
+
+  const incident = await db.getIncidentById(incidentId);
+  if (!incident) return null;
+
+  const row = await db.getPostmortemById(postmortemId);
+  if (!row) return null;
+
+  const siteUrl = siteDataToVariables(await GetAllSiteData()).site_url;
+  // The summary where there is one, the opening of the body otherwise. Rendered
+  // through the same markdown pipeline as a comment, so the same sanitisation
+  // applies and no second answer exists about what HTML may reach a mailbox.
+  const blurb = row.summary?.trim() || (row.body_md ?? "").trim();
+
+  return {
+    title: row.title,
+    cta_url: `${siteUrl}incidents/${incidentId}`,
+    cta_text: "Read the postmortem",
+    update_text: mdToHTML(blurb),
+    update_subject: `[Postmortem] ${row.title}`,
+    // Keyed on the postmortem rather than the incident, so a postmortem and a
+    // comment on the same incident are never collapsed into one notification.
+    update_id: `postmortem-${postmortemId}`,
+    event_type: "incidents",
+  };
+}
+
 async function renderVariables(event: OutboxEvent): Promise<SubscriptionVariableMap | null> {
   if (event.type === "incident.comment_added") return await renderIncidentComment(event);
+  if (event.type === "postmortem.published") return await renderPostmortem(event);
   return await renderMaintenance(event);
 }
 
@@ -289,7 +342,11 @@ async function findDeliveryId(eventId: string, target: DeliveryTarget): Promise<
 async function recipientQueryFor(event: OutboxEvent): Promise<RecipientQuery> {
   const payload = payloadOf(event);
 
-  if (event.type === "incident.comment_added") {
+  // Both incident-family events resolve recipients the same way, because a
+  // postmortem inherits its incident's scope entirely: the components it is
+  // about, the severity it carries and whether it was global are all facts about
+  // the incident, not about the document.
+  if (event.type === "incident.comment_added" || event.type === "postmortem.published") {
     const incidentId = Number(payload.incident_id ?? event.aggregate_id);
     const incident = Number.isFinite(incidentId) ? await db.getIncidentById(incidentId) : undefined;
     const monitors = Number.isFinite(incidentId) ? await db.getIncidentMonitorsByIncidentID(incidentId) : [];

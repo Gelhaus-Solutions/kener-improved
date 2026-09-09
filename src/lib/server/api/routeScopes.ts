@@ -50,6 +50,38 @@ export const ROUTE_SCOPE_MAP: Record<string, MethodScopes> = {
     DELETE: "incidents.write",
   },
 
+  // v5 incidents (C1, C7).
+  //
+  // A separate version rather than more verbs on v4, because v4's write paths go
+  // straight to the repository and therefore emit no events and stamp no
+  // lifecycle timestamps. v5 goes through the controller; fixing v4 in place
+  // would have changed what every existing caller observes.
+  //
+  // **A route missing from this map is a 403**, so every v5 route added later
+  // needs an entry here or it is unreachable by any scoped key. That is the
+  // fail-closed behaviour, and it is worth stating because the symptom - a
+  // working route that only ever returns "not permitted to use this endpoint" -
+  // looks like a permissions problem rather than a missing line.
+  "/(api)/api/v5/incidents": { GET: "incidents.read", POST: "incidents.write" },
+  "/(api)/api/v5/incidents/[incident_id]": {
+    GET: "incidents.read",
+    PATCH: "incidents.write",
+    DELETE: "incidents.write",
+  },
+  "/(api)/api/v5/incidents/[incident_id]/comments": { GET: "incidents.read", POST: "incidents.write" },
+  // Postmortems map onto the incident permissions rather than a new pair, the
+  // same call `orgPerms.ts` makes for the admin actions: a postmortem is the
+  // incident's published account of itself.
+  "/(api)/api/v5/incidents/[incident_id]/postmortem": {
+    GET: "incidents.read",
+    PUT: "incidents.write",
+    DELETE: "incidents.write",
+  },
+  "/(api)/api/v5/incidents/[incident_id]/postmortem/publish": {
+    POST: "incidents.write",
+    DELETE: "incidents.write",
+  },
+
   // Maintenances
   "/(api)/api/v4/maintenances": { GET: "maintenances.read", POST: "maintenances.write" },
   "/(api)/api/v4/maintenances/[maintenance_id]": {
