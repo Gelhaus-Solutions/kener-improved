@@ -8,6 +8,8 @@ import {
   VerifySubscriberOTP,
   VerifySubscriberToken,
   UpdateSubscriberPreferences,
+  UpdateSubscriberScope,
+  GetScopedSubscriptions,
 } from "$lib/server/controllers/userSubscriptionsController";
 
 interface LoginRequest {
@@ -34,7 +36,29 @@ interface UpdatePreferencesRequest {
   maintenances?: boolean;
 }
 
-type PostRequestBody = LoginRequest | VerifyRequest | GetPreferencesRequest | UpdatePreferencesRequest;
+/**
+ * Narrows an existing subscription (E1).
+ *
+ * Separate from `updatePreferences`, which owns the all-or-nothing pair, because
+ * these are different questions: one is "do you want incident mail at all", the
+ * other is "which of it". A bare subscribe still means everything.
+ */
+interface UpdateScopeRequest {
+  action: "updateScope";
+  token: string;
+  event_class: "incidents" | "maintenances";
+  scope_type?: "ALL" | "PAGE" | "COMPONENT" | "GROUP";
+  scope_id?: string;
+  min_severity?: string;
+  enabled?: boolean;
+}
+
+type PostRequestBody =
+  | LoginRequest
+  | VerifyRequest
+  | GetPreferencesRequest
+  | UpdatePreferencesRequest
+  | UpdateScopeRequest;
 
 export default async function post(req: APIServerRequest): Promise<Response> {
   const body = req.body as PostRequestBody;
@@ -65,6 +89,18 @@ export default async function post(req: APIServerRequest): Promise<Response> {
         (body as UpdatePreferencesRequest).maintenances,
         config,
       );
+    case "updateScope": {
+      const scopeBody = body as UpdateScopeRequest;
+      const result = await UpdateSubscriberScope(scopeBody.token, {
+        event_class: scopeBody.event_class,
+        scope_type: scopeBody.scope_type,
+        scope_id: scopeBody.scope_id,
+        min_severity: scopeBody.min_severity,
+        enabled: scopeBody.enabled,
+      });
+      if (!result.success) return error(400, { message: result.error ?? "Could not update the subscription" });
+      return json({ success: true });
+    }
     default:
       return error(400, { message: "Invalid action" });
   }
@@ -111,10 +147,22 @@ async function handleGetPreferences(token: string, config: SubscriptionsConfig):
     return error(401, { message: result.error || "Invalid token" });
   }
 
+  // The severity floor on the all-scope incidents subscription, which is the one
+  // the preferences screen can show without knowing anything about pages or
+  // components. A subscriber with no scoped row yet has no floor: ANY.
+  let minSeverity = "ANY";
+  if (result.method) {
+    const scoped = await GetScopedSubscriptions(result.method.id);
+    minSeverity =
+      scoped.find((r) => r.event_class === "incidents" && r.scope_type === "ALL" && r.status === "ACTIVE")
+        ?.min_severity ?? "ANY";
+  }
+
   return json({
     success: true,
     email: result.user?.email,
     subscriptions: result.subscriptions,
+    minSeverity,
     availableSubscriptions: {
       incidents: config.methods?.emails?.incidents === true,
       maintenances: config.methods?.emails?.maintenances === true,

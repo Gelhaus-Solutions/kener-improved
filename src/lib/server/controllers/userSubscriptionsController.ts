@@ -1,4 +1,5 @@
 import db from "$lib/server/db/db.js";
+import { INCIDENT_SEVERITIES, isIncidentSeverity } from "$lib/server/incidents/impact.js";
 import type {
   UserSubscriptionRecord,
   UserSubscriptionRecordInsert,
@@ -401,6 +402,62 @@ export async function GetActiveEmailMethodsForEventType(
   return methods;
 }
 
+/**
+ * Severity values a subscription floor of `min` will admit.
+ *
+ * Expressed as "which floors accept this event" rather than "which events clear
+ * this floor" because that is the direction the query needs: the event's
+ * severity is known and the floors are rows.
+ */
+function acceptableFloorsFor(severity: string | null | undefined): string[] {
+  const rank = INCIDENT_SEVERITIES.indexOf((severity ?? "NONE") as (typeof INCIDENT_SEVERITIES)[number]);
+  const eventRank = rank === -1 ? 0 : rank;
+  // ANY always accepts. Every floor at or below the event's severity accepts.
+  return ["ANY", ...INCIDENT_SEVERITIES.filter((_value: string, i: number) => i <= eventRank)];
+}
+
+/** What one notification needs to know to find its recipients. */
+export interface RecipientQuery {
+  /** `incidents` or `maintenances`. */
+  event_class: SubscriptionEventType;
+  /** The monitor tags this event touches. */
+  component_tags?: string[];
+  /** The incident's severity. Ignored for maintenances. */
+  severity?: string | null;
+  /** True for an incident marked global. */
+  is_global?: boolean;
+}
+
+/**
+ * The recipients of one event, honouring scope, severity and channel (E1).
+ *
+ * Replaces `GetActiveEmailsForEventType` as the delivery path's entry point.
+ * Returns method records rather than addresses, which is what makes a
+ * per-recipient delivery row and a per-recipient unsubscribe token possible at
+ * all - two subscribers can share an address, and a bare `string[]` cannot tell
+ * them apart.
+ *
+ * **Maintenances skip the severity filter entirely.** They have no severity, and
+ * `MAINTENANCE` ranks below `MINOR` in the incident vocabulary, so ranking them
+ * together would mean a customer who set a floor of MINOR silently stopped
+ * hearing about scheduled work. A severity floor is not a maintenance opt-out.
+ */
+export async function ResolveRecipients(query: RecipientQuery): Promise<ActiveEmailMethod[]> {
+  const componentTags = query.component_tags ?? [];
+  const isGlobal = query.is_global === true;
+
+  // Only needed for PAGE-scoped matching, and only when scope matters at all.
+  const pageIds = isGlobal || componentTags.length === 0 ? [] : await db.getPageIdsForMonitorTags(componentTags);
+
+  return await db.getRecipientsForScopedEvent({
+    event_class: query.event_class,
+    component_tags: componentTags,
+    page_ids: pageIds,
+    acceptable_min_severities: query.event_class === "incidents" ? acceptableFloorsFor(query.severity) : null,
+    is_global: isGlobal,
+  });
+}
+
 // ============ Public Subscription Functions ============
 
 import { GenerateTokenWithExpiry, VerifyToken } from "./commonController.js";
@@ -582,6 +639,64 @@ export async function VerifySubscriberOTP(
 /**
  * Update subscription preferences
  */
+/**
+ * Sets one scoped subscription for the holder of a subscriber token (E1).
+ *
+ * Separate from `UpdateSubscriberPreferences`, which owns the inherited
+ * all-or-nothing pair and dual-writes both tables. This one writes only the
+ * scoped table, because a scoped subscription has no equivalent in the old
+ * schema - there is nothing to mirror it onto, and inventing an ALL-scoped row
+ * for it would subscribe the customer to everything, which is the opposite of
+ * what they asked for.
+ */
+/** One method's scoped subscriptions, for the preferences screen. */
+export async function GetScopedSubscriptions(
+  methodId: number,
+): Promise<Array<{ scope_type: string; scope_id: string; event_class: string; min_severity: string; status: string }>> {
+  return await db.getScopedSubscriptionsForMethod(methodId);
+}
+
+export async function UpdateSubscriberScope(
+  token: string,
+  scope: {
+    event_class: SubscriptionEventType;
+    scope_type?: "ALL" | "PAGE" | "COMPONENT" | "GROUP";
+    scope_id?: string;
+    min_severity?: string;
+    enabled?: boolean;
+  },
+): Promise<{ success: boolean; error?: string }> {
+  const verifyResult = await VerifySubscriberToken(token);
+  if (!verifyResult.success || !verifyResult.user || !verifyResult.method) {
+    return { success: false, error: verifyResult.error || "Invalid token" };
+  }
+
+  const scopeType = scope.scope_type ?? "ALL";
+  // Empty string rather than null for ALL: it is part of the UNIQUE, and a NULL
+  // in a unique index deduplicates on neither dialect.
+  const scopeId = scopeType === "ALL" ? "" : (scope.scope_id ?? "");
+  if (scopeType !== "ALL" && scopeId === "") {
+    return { success: false, error: "A page or component scope needs an id" };
+  }
+
+  const minSeverity = scope.min_severity ?? "ANY";
+  if (minSeverity !== "ANY" && !isIncidentSeverity(minSeverity)) {
+    return { success: false, error: `min_severity must be ANY or one of ${INCIDENT_SEVERITIES.join(", ")}` };
+  }
+
+  await db.upsertScopedSubscription({
+    subscriber_user_id: verifyResult.user.id,
+    subscriber_method_id: verifyResult.method.id,
+    scope_type: scopeType,
+    scope_id: scopeId,
+    event_class: scope.event_class,
+    min_severity: minSeverity,
+    status: scope.enabled === false ? "INACTIVE" : "ACTIVE",
+  });
+
+  return { success: true };
+}
+
 export async function UpdateSubscriberPreferences(
   token: string,
   preferences: { incidents?: boolean; maintenances?: boolean },

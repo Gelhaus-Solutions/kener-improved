@@ -2,7 +2,7 @@ import db from "../../db/db.js";
 import seedSiteData from "../../db/seedSiteData.js";
 import { GetAllSiteData } from "../../controllers/siteDataController.js";
 import { GetGeneralEmailTemplateById } from "../../controllers/generalTemplateController.js";
-import { GetActiveEmailMethodsForEventType } from "../../controllers/userSubscriptionsController.js";
+import { ResolveRecipients, type RecipientQuery } from "../../controllers/userSubscriptionsController.js";
 import { maintenanceToVariables, siteDataToVariables } from "../../notification/notification_utils.js";
 import emailQueue from "../../queues/emailQueue.js";
 import mdToHTML from "../../../marked.js";
@@ -272,6 +272,49 @@ async function findDeliveryId(eventId: string, target: DeliveryTarget): Promise<
   }
 }
 
+/**
+ * What this event is, in the terms `ResolveRecipients` needs (E1).
+ *
+ * The components an event touches, its severity and whether it is global are all
+ * on rows rather than on the event, so this reads them. Worth the two queries:
+ * without them every subscription is effectively ALL-scoped, which is the
+ * behaviour E1 exists to replace.
+ *
+ * **Existing subscribers are unaffected**, which is what keeps the shadow diff
+ * meaningful for an instance still running this consumer in `shadow`. The
+ * migration backfills every inherited subscription as ALL scope with no severity
+ * floor, so the scoped query resolves exactly the set the unscoped one did until
+ * somebody creates a scoped subscription on purpose.
+ */
+async function recipientQueryFor(event: OutboxEvent): Promise<RecipientQuery> {
+  const payload = payloadOf(event);
+
+  if (event.type === "incident.comment_added") {
+    const incidentId = Number(payload.incident_id ?? event.aggregate_id);
+    const incident = Number.isFinite(incidentId) ? await db.getIncidentById(incidentId) : undefined;
+    const monitors = Number.isFinite(incidentId) ? await db.getIncidentMonitorsByIncidentID(incidentId) : [];
+    return {
+      event_class: "incidents",
+      component_tags: monitors.map((m) => m.monitor_tag),
+      severity: incident?.severity ?? "NONE",
+      is_global: incident?.is_global === "YES",
+    };
+  }
+
+  const maintenanceEventId = Number(payload.maintenance_event_id ?? event.aggregate_id);
+  const maintenanceEvent = Number.isFinite(maintenanceEventId)
+    ? await db.getMaintenanceEventById(maintenanceEventId)
+    : null;
+  const monitors = maintenanceEvent ? await db.getMonitorsByMaintenanceId(maintenanceEvent.maintenance_id) : [];
+  const maintenance = maintenanceEvent ? await db.getMaintenanceById(maintenanceEvent.maintenance_id) : undefined;
+  return {
+    event_class: "maintenances",
+    component_tags: monitors.map((m) => m.monitor_tag),
+    // Deliberately absent: maintenances are not severity-filtered.
+    is_global: maintenance?.is_global === "YES",
+  };
+}
+
 export const subscribersConsumer: EventConsumer = {
   name: CONSUMER_NAME,
   // Still `shadow` as the declared default, and that is not an oversight.
@@ -302,8 +345,7 @@ export const subscribersConsumer: EventConsumer = {
   async targets(event: OutboxEvent): Promise<DeliveryTarget[]> {
     if (!(await isNotifiable(event))) return [];
 
-    const eventType = event.type === "incident.comment_added" ? "incidents" : "maintenances";
-    const recipients = await GetActiveEmailMethodsForEventType(eventType);
+    const recipients = await ResolveRecipients(await recipientQueryFor(event));
     return recipients.map((r) => ({ target_type: "subscriber_method", target_id: String(r.subscriber_method_id) }));
   },
 

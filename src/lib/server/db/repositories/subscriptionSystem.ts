@@ -173,14 +173,52 @@ export class SubscriptionSystemRepository extends BaseRepository {
       updated_at: this.knexUnscoped.fn.now(),
     };
 
+    let created: UserSubscriptionV2Record;
     if (dbType === "postgresql") {
       const [sub] = await this.table("user_subscriptions_v2").insert(insertData).returning("*");
-      return sub;
+      created = sub;
     } else {
       const result = await this.table("user_subscriptions_v2").insert(insertData);
-      const id = result[0];
-      return (await this.getUserSubscriptionV2ById(id))!;
+      created = (await this.getUserSubscriptionV2ById(result[0]))!;
     }
+
+    await this.mirrorToScopedSubscription(created);
+    return created;
+  }
+
+  /**
+   * Writes the equivalent scoped row for an inherited subscription (E1).
+   *
+   * The dual write lives here rather than at each caller for the same reason the
+   * subscriber cutover gate does: every path that creates a subscription already
+   * funnels through this method, so there is exactly one thing to get right and a
+   * caller added later inherits it. `AdminAddSubscriber`, the public subscribe
+   * endpoint and the preferences screen all arrive here.
+   *
+   * ALL scope with no severity floor, which is precisely what the old row means.
+   * A subscription created through the *scoped* UI is written directly and does
+   * not come through here.
+   */
+  private async mirrorToScopedSubscription(sub: UserSubscriptionV2Record): Promise<void> {
+    await this.table("subscriber_subscriptions")
+      .insert({
+        subscriber_user_id: sub.subscriber_user_id,
+        subscriber_method_id: sub.subscriber_method_id,
+        scope_type: "ALL",
+        scope_id: "",
+        event_class: sub.event_type,
+        min_severity: "ANY",
+        notify_on: null,
+        status: sub.status ?? "ACTIVE",
+        created_at: this.knexUnscoped.fn.now(),
+        updated_at: this.knexUnscoped.fn.now(),
+      })
+      // Re-subscribing to something already held must revive it rather than
+      // fail: the old table's UNIQUE is on (user, method, event) and this one's
+      // is on (method, scope, scope_id, class), so the same second subscribe
+      // reaches a conflict on both and both have to mean the same thing.
+      .onConflict(["subscriber_method_id", "scope_type", "scope_id", "event_class"])
+      .merge({ status: sub.status ?? "ACTIVE", updated_at: this.knexUnscoped.fn.now() });
   }
 
   async getUserSubscriptionV2ById(id: number): Promise<UserSubscriptionV2Record | undefined> {
@@ -213,10 +251,39 @@ export class SubscriptionSystemRepository extends BaseRepository {
     };
     if (data.status !== undefined) updateData.status = data.status;
 
-    return await this.table("user_subscriptions_v2").where("id", id).update(updateData);
+    // Read before the write, because after it the row no longer says which
+    // scoped row to mirror onto.
+    const existing = await this.getUserSubscriptionV2ById(id);
+    const rows = await this.table("user_subscriptions_v2").where("id", id).update(updateData);
+
+    if (existing && data.status !== undefined) {
+      await this.table("subscriber_subscriptions")
+        .where({
+          subscriber_method_id: existing.subscriber_method_id,
+          scope_type: "ALL",
+          scope_id: "",
+          event_class: existing.event_type,
+        })
+        .update({ status: data.status, updated_at: this.knexUnscoped.fn.now() });
+    }
+    return rows;
   }
 
   async deleteUserSubscriptionV2(id: number): Promise<number> {
+    // Only the ALL-scoped mirror goes. A scoped subscription the subscriber
+    // created deliberately is not a shadow of this row and must survive the
+    // inherited one being removed.
+    const existing = await this.getUserSubscriptionV2ById(id);
+    if (existing) {
+      await this.table("subscriber_subscriptions")
+        .where({
+          subscriber_method_id: existing.subscriber_method_id,
+          scope_type: "ALL",
+          scope_id: "",
+          event_class: existing.event_type,
+        })
+        .del();
+    }
     return await this.table("user_subscriptions_v2").where("id", id).del();
   }
 
@@ -274,6 +341,136 @@ export class SubscriptionSystemRepository extends BaseRepository {
         updated_at: row.updated_at,
       },
     }));
+  }
+
+  /**
+   * Who should receive one event, from the scoped subscription table (E1).
+   *
+   * One query rather than a fan of them, and `distinct` on the method rather
+   * than on the address, because both of those are correctness rather than
+   * performance. A subscriber who signed up for a page *and* for one of the
+   * components on it matches two rows and must receive one email; the old path
+   * deduplicated by putting addresses in a `Set`, which also silently collapsed
+   * two different people who happen to share an address.
+   *
+   * The severity floor is passed in as the set of values that admit this event
+   * rather than compared in SQL. Ranking a vocabulary in a query means a CASE
+   * expression that reads differently on each dialect and has to be kept in step
+   * with the enum by hand; a set membership test does not.
+   */
+  async getRecipientsForScopedEvent(args: {
+    event_class: string;
+    /** Monitor tags the event touches. Empty for an event that names none. */
+    component_tags: string[];
+    /** Ids of the pages those components appear on. */
+    page_ids: number[];
+    /**
+     * `min_severity` values that admit this event, or null to skip the filter
+     * entirely - which is what a maintenance does, because a severity floor must
+     * not become a maintenance opt-out.
+     */
+    acceptable_min_severities: string[] | null;
+    /**
+     * True for an incident marked global.
+     *
+     * A global incident is the operator saying this affects everything, and such
+     * an incident frequently names no components at all - so scope matching is
+     * skipped rather than applied, or the biggest outages would reach only the
+     * subscribers who asked for everything.
+     */
+    is_global: boolean;
+  }): Promise<Array<{ subscriber_user_id: number; subscriber_method_id: number; email: string }>> {
+    const query = this.table("subscriber_subscriptions as ss")
+      .join("subscriber_users as su", "ss.subscriber_user_id", "su.id")
+      .join("subscriber_methods as sm", "ss.subscriber_method_id", "sm.id")
+      .where("ss.event_class", args.event_class)
+      .andWhere("ss.status", "ACTIVE")
+      .andWhere("su.status", "ACTIVE")
+      .andWhere("sm.status", "ACTIVE")
+      .andWhere("sm.method_type", "email");
+
+    if (!args.is_global) {
+      query.andWhere(function () {
+        this.where("ss.scope_type", "ALL");
+        if (args.component_tags.length > 0) {
+          this.orWhere(function () {
+            this.where("ss.scope_type", "COMPONENT").whereIn("ss.scope_id", args.component_tags);
+          });
+        }
+        if (args.page_ids.length > 0) {
+          this.orWhere(function () {
+            this.where("ss.scope_type", "PAGE").whereIn(
+              "ss.scope_id",
+              args.page_ids.map((id) => String(id)),
+            );
+          });
+        }
+      });
+    }
+
+    if (args.acceptable_min_severities !== null) {
+      query.whereIn("ss.min_severity", args.acceptable_min_severities);
+    }
+
+    const rows = await query
+      .distinct("sm.id as subscriber_method_id", "sm.subscriber_user_id", "sm.method_value as email")
+      .orderBy("sm.id", "asc");
+
+    return rows as Array<{ subscriber_user_id: number; subscriber_method_id: number; email: string }>;
+  }
+
+  /**
+   * Creates, revives or retires one scoped subscription (E1).
+   *
+   * An upsert rather than an insert because "subscribe to this again" and
+   * "change my severity floor" are the same gesture from a subscriber's point of
+   * view, and both collide with the UNIQUE. Retiring sets INACTIVE rather than
+   * deleting, so a subscriber who turns something off and back on does not lose
+   * the settings that came with it.
+   */
+  async upsertScopedSubscription(data: {
+    subscriber_user_id: number;
+    subscriber_method_id: number;
+    scope_type: string;
+    scope_id: string;
+    event_class: string;
+    min_severity: string;
+    status: string;
+  }): Promise<void> {
+    await this.table("subscriber_subscriptions")
+      .insert({
+        subscriber_user_id: data.subscriber_user_id,
+        subscriber_method_id: data.subscriber_method_id,
+        scope_type: data.scope_type,
+        scope_id: data.scope_id,
+        event_class: data.event_class,
+        min_severity: data.min_severity,
+        status: data.status,
+        created_at: this.knexUnscoped.fn.now(),
+        updated_at: this.knexUnscoped.fn.now(),
+      })
+      .onConflict(["subscriber_method_id", "scope_type", "scope_id", "event_class"])
+      .merge({
+        min_severity: data.min_severity,
+        status: data.status,
+        updated_at: this.knexUnscoped.fn.now(),
+      });
+  }
+
+  /** One method's scoped subscriptions, for the preferences screen. */
+  async getScopedSubscriptionsForMethod(
+    methodId: number,
+  ): Promise<
+    Array<{ scope_type: string; scope_id: string; event_class: string; min_severity: string; status: string }>
+  > {
+    return await this.table("subscriber_subscriptions").where("subscriber_method_id", methodId).select("*");
+  }
+
+  /** Every page a set of monitors appears on, for PAGE-scoped matching. */
+  async getPageIdsForMonitorTags(monitorTags: string[]): Promise<number[]> {
+    if (monitorTags.length === 0) return [];
+    const rows = await this.table("pages_monitors").whereIn("monitor_tag", monitorTags).distinct("page_id");
+    return rows.map((r: { page_id: number }) => r.page_id);
   }
 
   /**
@@ -367,7 +564,7 @@ export class SubscriptionSystemRepository extends BaseRepository {
     const result = [];
     for (const user of users) {
       const methods = await this.getSubscriberMethodsByUserId(user.id);
-      const subCount = await this.table("user_subscriptions_v2")
+      const subCount = await this.table("subscriber_subscriptions")
         .where("subscriber_user_id", user.id)
         .andWhere("status", "ACTIVE")
         .count("id as count")
@@ -430,17 +627,22 @@ export class SubscriptionSystemRepository extends BaseRepository {
     // Get subscription counts and event types for each method
     const result = [];
     for (const method of methods) {
-      const subCount = await this.table("user_subscriptions_v2")
+      // Read from the scoped table (E1). The two agree for every inherited
+      // subscription, because the migration backfilled them and every writer
+      // mirrors - but a *scoped* subscription exists only here, and an admin
+      // screen that could not see one would be showing subscriptions that no
+      // longer decide who is emailed.
+      const subCount = await this.table("subscriber_subscriptions")
         .where("subscriber_method_id", method.method_id)
         .andWhere("status", "ACTIVE")
         .count("id as count")
         .first();
 
-      const eventTypes = await this.table("user_subscriptions_v2")
+      const eventTypes = await this.table("subscriber_subscriptions")
         .where("subscriber_method_id", method.method_id)
         .andWhere("status", "ACTIVE")
-        .distinct("event_type")
-        .pluck("event_type");
+        .distinct("event_class")
+        .pluck("event_class");
 
       result.push({
         id: method.user_id,
@@ -471,10 +673,19 @@ export class SubscriptionSystemRepository extends BaseRepository {
     const user = await this.table("subscriber_users").where("id", method.subscriber_user_id).first();
     if (!user) return null;
 
-    const subscriptions = await this.table("user_subscriptions_v2")
+    // The scoped rows, shaped like the inherited ones the admin screen expects.
+    // `scope_type`, `scope_id` and `min_severity` ride along so a screen that
+    // wants to show "incidents on api, major and above" can, without a second
+    // query and without this method having two shapes.
+    const rows = await this.table("subscriber_subscriptions")
       .where("subscriber_method_id", methodId)
       .andWhere("status", "ACTIVE")
       .orderBy("created_at", "desc");
+
+    const subscriptions = rows.map((row: Record<string, unknown>) => ({
+      ...row,
+      event_type: row.event_class,
+    })) as unknown as UserSubscriptionV2Record[];
 
     return { user, method, subscriptions };
   }

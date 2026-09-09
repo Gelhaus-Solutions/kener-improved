@@ -47,6 +47,16 @@
   let subscriberEmail = $state("");
   let incidentsEnabled = $state(false);
   let maintenancesEnabled = $state(false);
+  // The severity floor on incident mail (E1). ANY is what every inherited
+  // subscription means, so a subscriber who never touches this keeps receiving
+  // exactly what they did before.
+  let minSeverity = $state("ANY");
+  const SEVERITY_FLOORS: Array<{ value: string; label: string }> = [
+    { value: "ANY", label: "Everything" },
+    { value: "MINOR", label: "Minor and above" },
+    { value: "MAJOR", label: "Major and above" },
+    { value: "CRITICAL", label: "Critical only" }
+  ];
   let availableSubscriptions = $state<{ incidents: boolean; maintenances: boolean }>({
     incidents: false,
     maintenances: false
@@ -89,6 +99,7 @@
       const data = await response.json();
       subscriberEmail = data.email || "";
       incidentsEnabled = data.subscriptions?.incidents || false;
+      minSeverity = data.minSeverity || "ANY";
       maintenancesEnabled = data.subscriptions?.maintenances || false;
       availableSubscriptions = data.availableSubscriptions || { incidents: false, maintenances: false };
       currentView = "preferences";
@@ -231,6 +242,39 @@
     }
   }
 
+  /** Narrows incident mail to a severity floor. */
+  async function handleSeverityChange(value: string) {
+    const token = localStorage.getItem(STORAGE_KEY);
+    if (!token) {
+      currentView = "login";
+      return;
+    }
+    const previous = minSeverity;
+    minSeverity = value;
+    try {
+      const response = await fetch(clientResolver(resolve, "/dashboard-apis/subscription"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "updateScope",
+          token,
+          event_class: "incidents",
+          scope_type: "ALL",
+          min_severity: value
+        })
+      });
+      if (!response.ok) {
+        minSeverity = previous;
+        errorMessage = $t("Failed to update preference");
+        return;
+      }
+      trackEvent("subscribe_severity_set", { source: "subscribe_menu", value });
+    } catch (err) {
+      minSeverity = previous;
+      errorMessage = $t("Network error. Please try again.");
+    }
+  }
+
   function handleLogout() {
     localStorage.removeItem(STORAGE_KEY);
     email = "";
@@ -238,6 +282,7 @@
     subscriberEmail = "";
     incidentsEnabled = false;
     maintenancesEnabled = false;
+    minSeverity = "ANY";
     errorMessage = "";
     currentView = "login";
     trackEvent("subscribe_logout", { source: "subscribe_menu" });
@@ -437,6 +482,24 @@
                   onCheckedChange={(value) => handlePreferenceChange("incidents", value)}
                 />
               </div>
+
+              {#if incidentsEnabled}
+                <div class="flex flex-col gap-2 pl-8">
+                  <Label class="text-xs font-medium">{$t("How much to send")}</Label>
+                  <select
+                    class="border-input bg-background h-9 rounded-md border px-2 text-sm"
+                    value={minSeverity}
+                    onchange={(e) => handleSeverityChange(e.currentTarget.value)}
+                  >
+                    {#each SEVERITY_FLOORS as floor (floor.value)}
+                      <option value={floor.value}>{$t(floor.label)}</option>
+                    {/each}
+                  </select>
+                  <p class="text-muted-foreground text-xs">
+                    {$t("Scheduled maintenance is not affected by this setting.")}
+                  </p>
+                </div>
+              {/if}
             {/if}
 
             {#if availableSubscriptions.maintenances}

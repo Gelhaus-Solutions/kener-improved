@@ -499,6 +499,10 @@ class DbImpl {
   subscriptionV2Exists!: SubscriptionSystemRepository["subscriptionV2Exists"];
   getSubscriptionsWithMethodsForUser!: SubscriptionSystemRepository["getSubscriptionsWithMethodsForUser"];
   getSubscribersForEvent!: SubscriptionSystemRepository["getSubscribersForEvent"];
+  getRecipientsForScopedEvent!: SubscriptionSystemRepository["getRecipientsForScopedEvent"];
+  getPageIdsForMonitorTags!: SubscriptionSystemRepository["getPageIdsForMonitorTags"];
+  upsertScopedSubscription!: SubscriptionSystemRepository["upsertScopedSubscription"];
+  getScopedSubscriptionsForMethod!: SubscriptionSystemRepository["getScopedSubscriptionsForMethod"];
   getSubscribersSummary!: SubscriptionSystemRepository["getSubscribersSummary"];
   getMethodsCountByType!: SubscriptionSystemRepository["getMethodsCountByType"];
   getSubscribersByMethodTypeV2!: SubscriptionSystemRepository["getSubscribersByMethodTypeV2"];
@@ -995,6 +999,14 @@ class DbImpl {
       this.subscriptionSystem,
     );
     this.getSubscribersForEvent = this.subscriptionSystem.getSubscribersForEvent.bind(this.subscriptionSystem);
+    this.getRecipientsForScopedEvent = this.subscriptionSystem.getRecipientsForScopedEvent.bind(
+      this.subscriptionSystem,
+    );
+    this.getPageIdsForMonitorTags = this.subscriptionSystem.getPageIdsForMonitorTags.bind(this.subscriptionSystem);
+    this.upsertScopedSubscription = this.subscriptionSystem.upsertScopedSubscription.bind(this.subscriptionSystem);
+    this.getScopedSubscriptionsForMethod = this.subscriptionSystem.getScopedSubscriptionsForMethod.bind(
+      this.subscriptionSystem,
+    );
     this.getSubscribersSummary = this.subscriptionSystem.getSubscribersSummary.bind(this.subscriptionSystem);
 
     // Admin methods for listing by method type

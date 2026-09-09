@@ -50,6 +50,7 @@ export const TENANT_TABLES: ReadonlySet<string> = new Set([
   "roles_permissions",
 
   // Fork-added, org-aware from the day they were built
+  "subscriber_subscriptions",
   "audit_log",
   "event_outbox",
   "event_deliveries",
