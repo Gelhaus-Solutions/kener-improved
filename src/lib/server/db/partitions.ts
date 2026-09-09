@@ -2,83 +2,122 @@ import type { Knex } from "knex";
 import { dialectOf } from "./capabilities.js";
 
 /**
- * Declarative partitioning for `monitoring_data` (B1a).
+ * Declarative partitioning, for `monitoring_data` and the rollup grains.
  *
- * **Postgres only, and opt-in.** A fresh install has an ordinary table and works
- * exactly as before; an operator converts it by running
- * `npm run pg:partition-monitoring-data`, once, deliberately. Nothing here
- * converts anything - this module only knows how to *name* partitions, ask
- * whether the table is partitioned, and create the months that do not exist yet.
+ * **Postgres only.** SQLite and MySQL get plain tables and range-delete
+ * retention: correct, slower to prune, and per the tiered database rule.
  *
- * **Why the conversion is not a migration.** knex runs a migration inside one
- * transaction, and copying a multi-GB table takes long enough that the container
- * healthcheck kills the process mid-copy. The next boot would then start the
- * whole copy again, forever. The script is resumable and runs when an operator
- * is watching; a migration is neither.
+ * Two different histories meet here, and the difference matters when reading
+ * this file:
  *
- * **The payoff is retention.** `MonitoringRepository.background` deletes roughly
- * a day of rows every night, which is what
- * `20260831120000_monitoring_data_autovacuum.ts` exists to survive: the deletes
- * leave dead tuples that autovacuum only gets to days later, and reads slow down
- * in the meantime. Against a partitioned table, dropping a month is a catalogue
- * update that reclaims the space instantly and leaves nothing to vacuum.
+ *   - `monitoring_data` (B1a) is **converted**, by an operator, once, with
+ *     `npm run pg:partition-monitoring-data`. It cannot be a migration: knex
+ *     wraps a migration in one transaction, and copying a multi-GB table takes
+ *     long enough that the container healthcheck kills the process mid-copy,
+ *     after which every boot restarts the copy forever.
+ *   - The rollup tables (F6a) are **born partitioned** by their migration, which
+ *     is free because they are empty at that moment.
+ *
+ * Either way this module only knows how to name periods, ask whether a table is
+ * partitioned, and create the ones that do not exist yet. It converts nothing.
+ *
+ * **The payoff is retention.** Deleting a day of samples from an ordinary table
+ * leaves dead tuples that autovacuum reaches days later - the reason
+ * `20260831120000_monitoring_data_autovacuum.ts` exists at all. Dropping a
+ * partition is a catalogue update: instant, and it leaves nothing to vacuum.
  */
 
-const TABLE = "monitoring_data";
-
-/** The safety net. Never dropped, and it should always be empty. */
-export const DEFAULT_PARTITION = `${TABLE}_default`;
+export type PartitionGrain = "month" | "year";
 
 /**
- * How far ahead partitions are created.
+ * Every table that may be partitioned, and at what grain.
  *
- * Three months rather than one, because the cost of an extra empty partition is
- * a catalogue row and the cost of running out is worse than it looks: rows for
- * an uncovered month land in the DEFAULT partition, and Postgres then refuses to
+ * `monitor_rollup_1d` is deliberately absent: a decade of daily rollups for a
+ * thousand monitors is a few million rows, which needs no partitioning to stay
+ * fast, and an unpartitioned table is one fewer thing to keep supplied.
+ */
+export const PARTITIONED_TABLES: ReadonlyArray<{ table: string; grain: PartitionGrain }> = [
+  { table: "monitoring_data", grain: "month" },
+  { table: "monitor_rollup_5m", grain: "month" },
+  { table: "monitor_rollup_1h", grain: "year" },
+];
+
+/**
+ * How far each table is pre-created in each direction.
+ *
+ * Backwards as well as forwards, because a backfilled incident overlay and a
+ * rollup recompute both write into the past.
+ *
+ * Three rather than one, because the cost of a spare empty partition is a
+ * catalogue row and the cost of running out is worse than it looks: rows for an
+ * uncovered period land in the DEFAULT partition, and Postgres then refuses to
  * attach a real partition for that range until the default is scanned and found
  * clear of them. Running out is recoverable, but only by moving rows.
  */
-export const MONTHS_AHEAD = 3;
+export const PERIODS_AROUND = 3;
 
-/** `monitoring_data_y2026m09`, from a UTC month. */
-export function partitionName(year: number, month1: number): string {
-  return `${TABLE}_y${year}m${String(month1).padStart(2, "0")}`;
-}
+export const defaultPartitionName = (table: string) => `${table}_default`;
 
 /**
- * The UTC-second bounds of the month containing `ts`, and the month after it.
+ * The UTC bounds of the period containing `ts`, and its name suffix.
  *
  * `Date.UTC` rather than the `new Date(y, m, d, ...)` component constructor.
- * That constructor reads the *local* zone, and the scheduler process only gets
- * away with using it because `startup.ts` forces `TZ=UTC` before anything else
- * loads - which the `vite dev` web process never does. Month boundaries are the
- * one place in the data layer where plain integer arithmetic will not do, since
- * months are not a fixed number of seconds, so the constructor has to be the
+ * That constructor reads the *local* zone and is only correct in the scheduler
+ * process because `startup.ts` forces `TZ=UTC` before anything else loads -
+ * which the `vite dev` web process never does. Calendar boundaries are the one
+ * place in the data layer where integer arithmetic will not do, since months and
+ * years are not a fixed number of seconds, so the constructor has to be the
  * explicitly-UTC one.
  */
-export function monthBounds(ts: number): { start: number; end: number; year: number; month1: number } {
+export function periodBounds(ts: number, grain: PartitionGrain): { start: number; end: number; suffix: string } {
   const d = new Date(ts * 1000);
   const year = d.getUTCFullYear();
+  if (grain === "year") {
+    return {
+      start: Math.floor(Date.UTC(year, 0, 1) / 1000),
+      end: Math.floor(Date.UTC(year + 1, 0, 1) / 1000),
+      suffix: `y${year}`,
+    };
+  }
   const month0 = d.getUTCMonth();
   return {
-    start: Math.floor(Date.UTC(year, month0, 1, 0, 0, 0, 0) / 1000),
-    end: Math.floor(Date.UTC(year, month0 + 1, 1, 0, 0, 0, 0) / 1000),
-    year,
-    month1: month0 + 1,
+    start: Math.floor(Date.UTC(year, month0, 1) / 1000),
+    end: Math.floor(Date.UTC(year, month0 + 1, 1) / 1000),
+    suffix: `y${year}m${String(month0 + 1).padStart(2, "0")}`,
   };
 }
 
-/** Every UTC month touching `[from, to]`, oldest first. */
-export function monthsBetween(from: number, to: number): Array<{ start: number; end: number }> {
-  const months: Array<{ start: number; end: number }> = [];
-  let cursor = monthBounds(from);
-  // `<=`: a `to` landing exactly on a month start belongs to the month that
-  // begins there, so that month is the last one the loop adds.
+/** Every period touching `[from, to]`, oldest first. */
+export function periodsBetween(from: number, to: number, grain: PartitionGrain): Array<{ start: number; end: number }> {
+  const periods: Array<{ start: number; end: number }> = [];
+  let cursor = periodBounds(from, grain);
+  // `<=`: a `to` landing exactly on a period start belongs to the period that
+  // begins there, so that period is the last one the loop adds.
   while (cursor.start <= to) {
-    months.push({ start: cursor.start, end: cursor.end });
-    cursor = monthBounds(cursor.end);
+    periods.push({ start: cursor.start, end: cursor.end });
+    cursor = periodBounds(cursor.end, grain);
   }
-  return months;
+  return periods;
+}
+
+/** The `PERIODS_AROUND` periods either side of `nowTs`, plus its own, oldest first. */
+export function partitionsAround(
+  table: string,
+  grain: PartitionGrain,
+  nowTs: number,
+): Array<{ name: string; lo: number; hi: number }> {
+  let cursor = periodBounds(nowTs, grain).start;
+  // Stepping back through period starts rather than subtracting seconds, since
+  // periods differ in length.
+  for (let i = 0; i < PERIODS_AROUND; i++) cursor = periodBounds(cursor - 1, grain).start;
+
+  const out: Array<{ name: string; lo: number; hi: number }> = [];
+  for (let i = 0; i < PERIODS_AROUND * 2 + 1; i++) {
+    const period = periodBounds(cursor, grain);
+    out.push({ name: `${table}_${period.suffix}`, lo: period.start, hi: period.end });
+    cursor = period.end;
+  }
+  return out;
 }
 
 function isPg(knex: Knex): boolean {
@@ -88,9 +127,12 @@ function isPg(knex: Knex): boolean {
 /**
  * A partition bound, as SQL text.
  *
- * DDL takes no bind parameters, so these have to reach Postgres as literals.
- * The check is what makes that safe: everything this module partitions on is a
- * UTC-second integer, and anything else is a bug rather than a value to quote.
+ * DDL takes no bind parameters at all in Postgres - `FOR VALUES FROM (?)` fails
+ * with "there is no parameter $1" rather than doing anything useful - so these
+ * have to reach the server as literals. The check is what makes that safe:
+ * everything partitioned on here is a UTC-second integer, and anything else is a
+ * bug rather than a value to quote. knex's `??` identifier placeholders are
+ * unaffected, because those are substituted into the statement text.
  */
 function boundLiteral(ts: number): string {
   if (!Number.isSafeInteger(ts)) throw new Error(`Refusing to build a partition bound from ${ts}`);
@@ -98,19 +140,19 @@ function boundLiteral(ts: number): string {
 }
 
 /**
- * Whether `monitoring_data` is a partitioned parent.
+ * Whether `table` is a partitioned parent.
  *
- * `relkind = 'p'` is the only honest test. A table that merely *has* partitions
+ * `relkind = 'p'` is the only honest test. A table that merely *has* relations
  * named after it is still an ordinary table, and asking the catalogue about the
  * relation kind is what tells the two apart.
  */
-export async function isMonitoringDataPartitioned(knex: Knex): Promise<boolean> {
+export async function isPartitioned(knex: Knex, table: string): Promise<boolean> {
   if (!isPg(knex)) return false;
   const result = await knex.raw(
     `select relkind from pg_class c
        join pg_namespace n on n.oid = c.relnamespace
       where c.relname = ? and n.nspname = current_schema()`,
-    [TABLE],
+    [table],
   );
   const rows = ((result as { rows?: Array<{ relkind: string }> }).rows ?? []) as Array<{ relkind: string }>;
   return rows[0]?.relkind === "p";
@@ -127,50 +169,41 @@ async function relationExists(knex: Knex, name: string): Promise<boolean> {
 }
 
 /**
- * Creates any missing monthly partition from `MONTHS_AHEAD` months back through
- * `MONTHS_AHEAD` months forward, plus the DEFAULT partition.
+ * Creates every missing partition, for every table that is partitioned.
  *
- * Backwards as well as forwards because a conversion that has just finished, or
- * a backfilled incident overlay, can write into a month that has already passed.
- *
- * A no-op on a table that is not partitioned and on every dialect but Postgres,
- * so the daily scheduler can call it unconditionally. Returns the partitions it
+ * A no-op on an unpartitioned table and on every dialect but Postgres, so the
+ * daily scheduler can call it unconditionally. Returns the partitions it
  * created, which is what makes it worth logging.
+ *
+ * **One table failing does not stop the others.** A stranded row in one table's
+ * DEFAULT partition blocks that table's next period and nothing else; letting it
+ * block the rollup grains as well would turn one recoverable problem into three.
  */
-export async function ensureMonitoringDataPartitions(knex: Knex, nowTs: number): Promise<string[]> {
-  if (!(await isMonitoringDataPartitioned(knex))) return [];
+export async function ensurePartitions(knex: Knex, nowTs: number): Promise<string[]> {
+  if (!isPg(knex)) return [];
 
   const created: string[] = [];
+  for (const { table, grain } of PARTITIONED_TABLES) {
+    try {
+      if (!(await isPartitioned(knex, table))) continue;
 
-  if (!(await relationExists(knex, DEFAULT_PARTITION))) {
-    await knex.raw(`CREATE TABLE ?? PARTITION OF ?? DEFAULT`, [DEFAULT_PARTITION, TABLE]);
-    created.push(DEFAULT_PARTITION);
+      const fallback = defaultPartitionName(table);
+      if (!(await relationExists(knex, fallback))) {
+        await knex.raw(`CREATE TABLE ?? PARTITION OF ?? DEFAULT`, [fallback, table]);
+        created.push(fallback);
+      }
+
+      for (const partition of partitionsAround(table, grain, nowTs)) {
+        if (await relationExists(knex, partition.name)) continue;
+        await knex.raw(
+          `CREATE TABLE ?? PARTITION OF ?? FOR VALUES FROM (${boundLiteral(partition.lo)}) TO (${boundLiteral(partition.hi)})`,
+          [partition.name, table],
+        );
+        created.push(partition.name);
+      }
+    } catch (error) {
+      console.error(`Partition maintenance failed for ${table}:`, error);
+    }
   }
-
-  const from = monthBounds(nowTs);
-  // Walk back MONTHS_AHEAD months by stepping through month starts rather than
-  // subtracting seconds, since months differ in length.
-  let earliest = from.start;
-  for (let i = 0; i < MONTHS_AHEAD; i++) earliest = monthBounds(earliest - 1).start;
-  let latest = from.start;
-  for (let i = 0; i < MONTHS_AHEAD; i++) latest = monthBounds(latest).end;
-
-  for (const month of monthsBetween(earliest, latest)) {
-    const { year, month1 } = monthBounds(month.start);
-    const name = partitionName(year, month1);
-    if (await relationExists(knex, name)) continue;
-    // **The bounds are interpolated, not bound.** Postgres allows no parameters
-    // in DDL at all, so `FOR VALUES FROM (?)` fails with "there is no parameter
-    // $1" rather than doing anything useful. knex substitutes `??` identifiers
-    // into the statement text, which is why those still work here. The two
-    // interpolated values come from `monthBounds`, which returns integers from
-    // `Date.UTC`, and `boundLiteral` refuses anything else.
-    await knex.raw(
-      `CREATE TABLE ?? PARTITION OF ?? FOR VALUES FROM (${boundLiteral(month.start)}) TO (${boundLiteral(month.end)})`,
-      [name, TABLE],
-    );
-    created.push(name);
-  }
-
   return created;
 }

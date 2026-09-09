@@ -36,6 +36,78 @@ export interface MonitoringDataInsert {
   raw_status?: string | null;
 }
 
+// ============ monitor_rollup_5m / _1h / _1d tables ============
+
+/**
+ * One rollup bucket (F6a).
+ *
+ * The same shape at all three grains, so folding twelve five-minute rows into an
+ * hour and twenty-four hourly rows into a day is one function rather than three.
+ *
+ * `latency_p50` and friends are **derived, not authoritative**. They exist so the
+ * common single-bucket read never parses JSON; anything spanning more than one
+ * bucket must merge `latency_histogram` and re-derive, because percentiles do
+ * not average. See `services/latencyHistogram.ts`.
+ */
+export interface MonitorRollup {
+  org_id: number;
+  monitor_tag: string;
+  region_id: number;
+  bucket_start: number;
+
+  count_total: number;
+  count_up: number;
+  count_down: number;
+  count_degraded: number;
+  count_maintenance: number;
+  /** Deliberately separate from a missing row: this is "recorded nothing", not "was not there". */
+  count_no_data: number;
+
+  count_in_maint_window: number;
+  count_total_excl_maint: number;
+  count_up_excl_maint: number;
+  count_down_excl_maint: number;
+  count_degraded_excl_maint: number;
+
+  /** Rows a check produced. */
+  count_observed: number;
+  /** Rows an operator wrote: an incident or maintenance overlay, or a backfill. */
+  count_overlay: number;
+
+  latency_count: number;
+  latency_sum: number;
+  latency_min: number | null;
+  latency_max: number | null;
+  latency_p50: number | null;
+  latency_p90: number | null;
+  latency_p95: number | null;
+  latency_p99: number | null;
+  /** Sparse JSON, bucket index to count. Decode with `decodeHistogram`. */
+  latency_histogram: string | null;
+
+  /** The real extent of the samples inside the bucket, not the bucket's bounds. */
+  first_ts: number | null;
+  last_ts: number | null;
+  computed_at: number;
+  rollup_version: number;
+}
+
+/** The three grains, and the table each lives in. */
+export const ROLLUP_TABLES = {
+  "5m": "monitor_rollup_5m",
+  "1h": "monitor_rollup_1h",
+  "1d": "monitor_rollup_1d",
+} as const;
+
+export type RollupGrain = keyof typeof ROLLUP_TABLES;
+
+/** Bucket width in seconds, per grain. */
+export const ROLLUP_GRAIN_SECONDS: Record<RollupGrain, number> = {
+  "5m": 300,
+  "1h": 3600,
+  "1d": 86400,
+};
+
 export interface AggregatedMonitoringData {
   DEGRADED: number;
   UP: number;

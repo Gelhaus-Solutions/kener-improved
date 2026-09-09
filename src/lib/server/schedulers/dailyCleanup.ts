@@ -5,7 +5,7 @@ import db from "../db/db.js";
 import type { DataRetentionPolicy } from "../../types/site.js";
 import { GetSiteDataByKey } from "../controllers/siteDataController.js";
 import { GetNowTimestampUTC } from "../tool.js";
-import { ensureMonitoringDataPartitions } from "../db/partitions.js";
+import { ensurePartitions } from "../db/partitions.js";
 
 let dailyCleanupQueue: Queue | null = null;
 let worker: Worker | null = null;
@@ -97,28 +97,29 @@ const pruneSessions = async (): Promise<number> => {
 };
 
 /**
- * Creates the `monitoring_data` partitions that do not exist yet (B1a).
+ * Creates the partitions that do not exist yet, for `monitoring_data` (B1a) and
+ * the rollup grains (F6a).
  *
- * A no-op unless an operator has run `npm run pg:partition-monitoring-data`, so
- * it costs one catalogue lookup on every other install. Kept here rather than in
- * a scheduler of its own because it is daily housekeeping on the same table this
- * job already prunes, and one more queue to start, watch and shut down is not
- * worth a `CREATE TABLE` that runs three times a year.
+ * A no-op on an unpartitioned table and on every dialect but Postgres, so it
+ * costs a couple of catalogue lookups on installs that have none. Kept here
+ * rather than in a scheduler of its own because it is daily housekeeping on the
+ * same tables this job already prunes, and one more queue to start, watch and
+ * shut down is not worth a `CREATE TABLE` that runs a few times a year.
  *
  * Cross-tenant, like session pruning: partitions are a property of the table,
  * not of an org, so this runs once outside the per-org loop.
  */
-const ensurePartitions = async (): Promise<string[]> => {
+const maintainPartitions = async (): Promise<string[]> => {
   try {
-    const created = await ensureMonitoringDataPartitions(db.knexForPartitionMaintenance(), GetNowTimestampUTC());
-    if (created.length > 0) console.log(`Created monitoring_data partition(s): ${created.join(", ")}`);
+    const created = await ensurePartitions(db.knexForPartitionMaintenance(), GetNowTimestampUTC());
+    if (created.length > 0) console.log(`Created partition(s): ${created.join(", ")}`);
     return created;
   } catch (error) {
     // Same reasoning as the audit and session prunes: housekeeping riding along
     // must never fail the retention delete people actually notice. A missing
     // partition is also not urgent — writes land in the DEFAULT partition until
     // the next pass, which is exactly what it is there for.
-    console.error("monitoring_data partition maintenance failed:", error);
+    console.error("Partition maintenance failed:", error);
     return [];
   }
 };
@@ -191,7 +192,7 @@ const addWorker = () => {
     // After the deletes, not before: a partition created now is for a month
     // nothing has written to yet, and doing it last keeps the retention delete
     // first in line for the table.
-    const createdPartitions = await ensurePartitions();
+    const createdPartitions = await maintainPartitions();
 
     return { skipped, deletedRows, retentionDays, prunedAuditRows, prunedSessions, createdPartitions };
   });

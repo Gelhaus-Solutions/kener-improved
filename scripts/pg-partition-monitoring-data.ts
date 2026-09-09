@@ -43,17 +43,12 @@
 import knexLib from "knex";
 import type { Knex } from "knex";
 import knexOb from "../knexfile.js";
-import {
-  DEFAULT_PARTITION,
-  MONTHS_AHEAD,
-  monthBounds,
-  monthsBetween,
-  partitionName,
-} from "../src/lib/server/db/partitions.js";
+import { PERIODS_AROUND, defaultPartitionName, periodBounds, periodsBetween } from "../src/lib/server/db/partitions.js";
 
 const TABLE = "monitoring_data";
 const STAGING = "monitoring_data_partitioned";
 const RETIRED = "monitoring_data_pre_partition";
+const DEFAULT_PARTITION = defaultPartitionName(TABLE);
 
 /**
  * The indexes the staging table is built with, and the names they take at the
@@ -165,9 +160,9 @@ async function main(): Promise<void> {
     // scheduler's next pass.
     const nowTs = Math.floor(Date.now() / 1000);
     const firstTs = total === 0 ? nowTs : Number(lo);
-    let latest = monthBounds(nowTs).start;
-    for (let i = 0; i < MONTHS_AHEAD; i++) latest = monthBounds(latest).end;
-    const months = monthsBetween(firstTs, latest);
+    let latest = periodBounds(nowTs, "month").start;
+    for (let i = 0; i < PERIODS_AROUND; i++) latest = periodBounds(latest, "month").end;
+    const months = periodsBetween(firstTs, latest, "month");
 
     console.log(
       `Plan: ${months.length} monthly partitions plus ${DEFAULT_PARTITION}, copied in ${chunkDays}-day chunks.`,
@@ -220,8 +215,7 @@ async function main(): Promise<void> {
       await knex.raw(`CREATE TABLE ?? PARTITION OF ?? DEFAULT`, [DEFAULT_PARTITION, STAGING]);
     }
     for (const month of months) {
-      const { year, month1 } = monthBounds(month.start);
-      const name = partitionName(year, month1);
+      const name = `${TABLE}_${periodBounds(month.start, "month").suffix}`;
       if ((await relationKind(knex, name)) !== null) continue;
       await knex.raw(`CREATE TABLE ?? PARTITION OF ?? FOR VALUES FROM (${lit(month.start)}) TO (${lit(month.end)})`, [
         name,
