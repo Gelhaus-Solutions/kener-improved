@@ -24,6 +24,7 @@ function auditRecord(over: Partial<AuditRecord> = {}): AuditRecord {
     action: "createIncident",
     permission: "incidents.write",
     requestId: "req-1",
+    orgId: 1,
     actorId: 9,
     actorLabel: "someone@example.com",
     ip: "10.0.0.1",

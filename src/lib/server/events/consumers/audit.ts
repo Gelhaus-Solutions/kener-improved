@@ -129,9 +129,9 @@ export const auditConsumer: EventConsumer = {
     // not for the middleware: the outbox row is still there, unpublished or
     // undelivered, and the sweeper brings it back.
     record({
-      // Carried from the event rather than left null. The middleware writes null
-      // because the pipeline has no org context to read yet; the bus has always
-      // had one, because `emit()` refuses to run without it.
+      // Carried from the event. The bus has always had an org, because `emit()`
+      // refuses to run without one; I3f gave the middleware's two writers the
+      // same, so all three paths now agree.
       org_id: event.org_id,
       // The event's own timestamp, not now. A delivery retried six hours later
       // must land in the log where the change happened, not where the retry did.

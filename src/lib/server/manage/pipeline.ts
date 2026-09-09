@@ -74,11 +74,15 @@ export async function runAction(event: RequestEvent): Promise<Response> {
       cookies: event.cookies,
       ip: safeClientAddress(event),
       userAgent: event.request.headers.get("user-agent"),
-      // Overwritten by `requireOrg` below, which is what makes it trustworthy.
-      // It is seeded here only because the context has to exist before the check
-      // that establishes the org - the catch at the bottom needs a context to
-      // attribute a failure to, including a failure of that very check.
-      orgId: DEFAULT_ORG_ID,
+      // The org the session *claims*, pending the membership check a few lines
+      // below, which overwrites this with the validated answer. It is seeded
+      // rather than left undefined because the context has to exist before that
+      // check runs: the catch at the bottom attributes failures with it,
+      // including a failure of the check itself, and a refusal belongs in the
+      // org that was asked for rather than in the default one.
+      //
+      // Nothing between here and `requireOrg` may use it to scope a query.
+      orgId: session.active_org_id ?? DEFAULT_ORG_ID,
     };
 
     // Before requireOrg and before authorize: a user who owes the instance a

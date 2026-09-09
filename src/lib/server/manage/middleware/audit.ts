@@ -33,6 +33,14 @@ export interface AuditRecord {
   action: string;
   permission: string | null | undefined;
   requestId: string;
+  /**
+   * The org the action ran in, captured here rather than read at write time.
+   *
+   * `record()` buffers and flushes on a timer, long after the request's org
+   * context is gone, so the answer has to be frozen into the row while the
+   * request still exists.
+   */
+  orgId: number;
   actorId: number;
   actorLabel: string;
   ip: string | null;
@@ -79,6 +87,7 @@ export async function auditBefore(
     action,
     permission,
     requestId: ctx.requestId,
+    orgId: ctx.orgId,
     actorId: ctx.user.id,
     // Denormalised now, while the user still exists.
     actorLabel: ctx.user.email ?? String(ctx.user.id),
@@ -161,8 +170,16 @@ export function auditWrite(
 
   try {
     record({
-      // P4 fills this from the org context established by requireOrg.
-      org_id: null,
+      // The org `requireOrg` established, frozen into `auditRecord` when the
+      // action started.
+      //
+      // **This was `null` until I3f, and null was not merely incomplete.**
+      // `audit_log` is a tenant table, so the Audit Log screen reads it through
+      // `where org_id = ?` - and a null matches no org at all. From I3c onwards
+      // every administrative action wrote a row that nothing could ever display.
+      // Found when I3b's deferred NOT NULL turned the invisible write into a
+      // failing one.
+      org_id: auditRecord.orgId,
       ts: GetNowTimestampUTC(),
       request_id: auditRecord.requestId,
       actor_type: "user",
@@ -229,7 +246,13 @@ export function auditOutcomeOnly(
 
   try {
     record({
-      org_id: null,
+      // Same fix as `auditWrite`, and this one matters most of the three: a
+      // denial is the row an operator goes looking for. It may be recorded
+      // *before* `requireOrg` ran - a caller refused for not belonging to the
+      // org they named never gets that far - so this is the org the session
+      // asked for rather than one that was approved, which is exactly the right
+      // attribution for a refusal.
+      org_id: ctx.orgId,
       ts: GetNowTimestampUTC(),
       request_id: ctx.requestId,
       actor_type: "user",
