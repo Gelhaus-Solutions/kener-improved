@@ -137,6 +137,16 @@ export const POST: RequestHandler = async ({ locals, request }) => {
     impact_override: incident.impact_override,
     suppress_notifications: incident.suppress_notifications,
     template_id: incident.template_id,
+    // C2c, carried for the same reason. This endpoint writes a whole record, so a
+    // column it omits is a column it erases. It also bypasses `AddIncidentComment`,
+    // so a v4 comment stamps no lifecycle timestamp and emits nothing; that is
+    // inherited behaviour, and v5 is where it is fixed.
+    detected_at: incident.detected_at,
+    acknowledged_at: incident.acknowledged_at,
+    acknowledged_by_user_id: incident.acknowledged_by_user_id,
+    identified_at: incident.identified_at,
+    mitigated_at: incident.mitigated_at,
+    resolved_at: incident.resolved_at,
   });
 
   const response: CreateCommentResponse = {

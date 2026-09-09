@@ -59,9 +59,24 @@ export interface IncidentInput {
   impact_override?: string | null;
   /** C7: an imported historical incident must not mail anyone. */
   suppress_notifications?: string;
+  /** C4: the template this incident was opened from. */
+  template_id?: number | null;
+  /** C2c: when Kener first observed the problem. Only the alerting queue knows. */
+  detected_at?: number | null;
 }
 
 interface IncidentUpdateInput {
+  /**
+   * C2c: when the transition this update represents actually happened.
+   *
+   * Separate from `end_date_time` because only one transition sets an end time
+   * and all four need a timestamp. `AddIncidentComment` passes the comment's
+   * `commented_at`, which is the operator's account of when the incident moved -
+   * and for a backfilled timeline that is months ago. Defaulting to now would
+   * stamp every imported transition with the moment of the import, which is
+   * exactly the number C7 exists to avoid recording.
+   */
+  transition_at?: number;
   severity?: string;
   impact_override?: string | null;
   title?: string;
@@ -378,6 +393,8 @@ export const CreateIncident = async (data: IncidentInput): Promise<{ incident_id
         : "NONE",
     impact_override: isComponentImpact(data.impact_override) ? data.impact_override : null,
     suppress_notifications: data.suppress_notifications === "YES" ? "YES" : "NO",
+    template_id: data.template_id ?? null,
+    detected_at: data.detected_at ?? null,
   };
 
   //incident_type == INCIDENT delete endDateTime
@@ -415,6 +432,60 @@ function GetNowSeconds(): number {
   return Math.floor(Date.now() / 1000);
 }
 
+/**
+ * C2c: the lifecycle timestamps, stamped from the state the incident moved into.
+ *
+ * Three rules, and each one is a decision rather than an implementation detail:
+ *
+ * 1. **`identified_at` and `mitigated_at` are set once and never re-set.** They
+ *    answer "when did we work this out", and an incident that slipped from
+ *    IDENTIFIED back to INVESTIGATING did not un-identify itself. Guarding on
+ *    null is what makes them agree with the `MIN(commented_at)` the migration
+ *    used to backfill them.
+ *
+ * 2. **`resolved_at` moves.** An incident resolved, reopened and resolved again
+ *    was over at the second one; keeping the first would report an MTTR that
+ *    ends before the outage did. So a reopen clears it, exactly as it clears
+ *    `end_date_time`, and the next resolve writes the later time.
+ *
+ * 3. **The transition matters, not the destination.** Everything here is guarded
+ *    on the state having actually changed. `UpdateIncident` runs on every
+ *    comment, so without that guard a second comment posted while the incident
+ *    sits in MONITORING would re-stamp `mitigated_at` to now, and a long
+ *    incident's mitigation would keep sliding forward until it resolved.
+ *
+ * The timestamp comes from `transition_at` where the caller gave one - the
+ * comment's `commented_at`, the time the operator said the thing happened -
+ * then `end_date_time`, then now. Using `Date.now()` unconditionally would put
+ * every transition at the moment the row was written rather than the moment it
+ * happened, and those differ by exactly as much as a backfilled timeline.
+ */
+function applyLifecycleTimestamps(
+  before: Pick<IncidentRecord, "state" | "identified_at" | "mitigated_at" | "resolved_at">,
+  updateObject: Partial<IncidentRecord> & { id: number },
+  data: IncidentUpdateInput,
+): void {
+  const nextState = updateObject.state;
+  if (nextState === before.state) return;
+
+  const at = data.transition_at ?? data.end_date_time ?? GetNowSeconds();
+
+  if (nextState === GC.IDENTIFIED && before.identified_at === null) {
+    updateObject.identified_at = at;
+  }
+  if (nextState === GC.MONITORING && before.mitigated_at === null) {
+    updateObject.mitigated_at = at;
+  }
+  if (nextState === GC.RESOLVED) {
+    updateObject.resolved_at = at;
+  } else if (before.state === GC.RESOLVED) {
+    // Reopened. `AddIncidentComment` nulls `end_date_time` on this transition and
+    // `resolved_at` has to follow it, or an open incident keeps reporting a
+    // resolution time and every "resolved this month" count includes it.
+    updateObject.resolved_at = null;
+  }
+}
+
 export const UpdateIncident = async (incident_id: number, data: IncidentUpdateInput): Promise<number> => {
   let incidentExists = await db.getIncidentById(incident_id);
 
@@ -445,6 +516,17 @@ export const UpdateIncident = async (incident_id: number, data: IncidentUpdateIn
         : isComponentImpact(data.impact_override)
           ? data.impact_override
           : null,
+    // C2c. Carried across explicitly rather than left undefined for knex to drop.
+    // Leaving them out would preserve them by accident - knex omits an undefined
+    // column - and `applyLifecycleTimestamps` below writes an explicit `null` to
+    // clear `resolved_at` on a reopen, which only survives if this object is the
+    // whole row rather than a partial one.
+    detected_at: incidentExists.detected_at,
+    acknowledged_at: incidentExists.acknowledged_at,
+    acknowledged_by_user_id: incidentExists.acknowledged_by_user_id,
+    identified_at: incidentExists.identified_at,
+    mitigated_at: incidentExists.mitigated_at,
+    resolved_at: incidentExists.resolved_at,
   };
 
   // Stamped only when the value moves, so it answers "when did this become
@@ -454,6 +536,8 @@ export const UpdateIncident = async (incident_id: number, data: IncidentUpdateIn
   if (updateObject.severity !== incidentExists.severity) {
     updateObject.severity_changed_at = GetNowSeconds();
   }
+
+  applyLifecycleTimestamps(incidentExists, updateObject, data);
 
   return await db.withTransaction(async () => {
     const rows = await db.updateIncident(updateObject as IncidentRecord);
@@ -537,6 +621,65 @@ export const UpdateIncident = async (incident_id: number, data: IncidentUpdateIn
  * inference direction is the lossy one, which is fine here: an alert genuinely
  * has no better information than "this monitor is down".
  */
+/**
+ * C2c: a human takes ownership of an incident.
+ *
+ * **The only incident transition with no state change behind it**, which is why
+ * it is its own controller function and its own event rather than a flag on
+ * `UpdateIncident`. An incident sits in INVESTIGATING both before and after
+ * somebody acknowledges it; what changes is that a person is now on it, and MTTA
+ * is the number that says how long that took.
+ *
+ * Idempotent, and deliberately not re-stampable. A second acknowledgement is a
+ * no-op rather than an overwrite, because MTTA measures the *first* human
+ * response - letting a later acknowledger reset it would let an incident's MTTA
+ * grow every time somebody else looked at it.
+ */
+export const AcknowledgeIncident = async (
+  incident_id: number,
+  user_id: number,
+  acknowledged_at?: number,
+): Promise<{ acknowledged_at: number; acknowledged_by_user_id: number }> => {
+  const incident = await db.getIncidentById(incident_id);
+  if (!incident) {
+    throw new Error(`Incident with id ${incident_id} does not exist`);
+  }
+
+  if (incident.acknowledged_at !== null) {
+    return {
+      acknowledged_at: incident.acknowledged_at,
+      acknowledged_by_user_id: incident.acknowledged_by_user_id ?? user_id,
+    };
+  }
+
+  const at = acknowledged_at ?? GetNowSeconds();
+
+  return await db.withTransaction(async () => {
+    await db.updateIncident({
+      ...incident,
+      // `getIncidentById` omits `incident_source` by design, and `updateIncident`
+      // never writes it, so the cast covers a column neither end touches.
+      incident_source: "",
+      id: incident_id,
+      acknowledged_at: at,
+      acknowledged_by_user_id: user_id,
+    } as IncidentRecord);
+
+    await emit({
+      org_id: currentOrgId(),
+      type: "incident.acknowledged",
+      aggregate_id: incident_id,
+      payload: { incident_id, acknowledged_at: at, acknowledged_by_user_id: user_id },
+      diff: { before: { acknowledged_at: null }, after: { acknowledged_at: at } },
+      // One acknowledgement per incident, ever. Without this a retried request
+      // would emit twice for a transition that happened once.
+      idempotency_key: `incident.acknowledged:${incident_id}`,
+    });
+
+    return { acknowledged_at: at, acknowledged_by_user_id: user_id };
+  });
+};
+
 export const AddIncidentMonitor = async (
   incident_id: number,
   monitor_tag: string,
@@ -639,6 +782,9 @@ export const UpdateCommentByID = async (
 
       let incidentUpdate: IncidentUpdateInput = {
         state: state,
+        // The comment's own timestamp, so the lifecycle stamp records when the
+        // incident moved rather than when the row was written.
+        transition_at: commented_at,
       };
       if (state === GC.RESOLVED) {
         incidentUpdate.end_date_time = commented_at;
@@ -725,6 +871,9 @@ export const AddIncidentComment = async (
     if (c && incidentType === GC.INCIDENT) {
       let incidentUpdate: IncidentUpdateInput = {
         state: state,
+        // The comment's own timestamp, so the lifecycle stamp records when the
+        // incident moved rather than when the row was written.
+        transition_at: commented_at,
       };
       if (state === GC.RESOLVED) {
         incidentUpdate.end_date_time = commented_at;

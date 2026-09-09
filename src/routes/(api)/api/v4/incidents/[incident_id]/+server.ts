@@ -142,6 +142,17 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
     impact_override: existingIncident.impact_override,
     suppress_notifications: existingIncident.suppress_notifications,
     template_id: existingIncident.template_id,
+    // C2c, carried for the same reason: this endpoint writes a whole record, so
+    // a column it omits is a column it erases. Note that it also bypasses
+    // `UpdateIncident`, so a v4 state change stamps no lifecycle timestamp and
+    // emits nothing. That is inherited behaviour and v5 is where it is fixed;
+    // v4 stays byte-compatible with what its callers already get.
+    detected_at: existingIncident.detected_at,
+    acknowledged_at: existingIncident.acknowledged_at,
+    acknowledged_by_user_id: existingIncident.acknowledged_by_user_id,
+    identified_at: existingIncident.identified_at,
+    mitigated_at: existingIncident.mitigated_at,
+    resolved_at: existingIncident.resolved_at,
   };
 
   // Update the incident

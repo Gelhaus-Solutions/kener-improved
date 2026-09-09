@@ -370,6 +370,39 @@ export class MonitoringRepository extends BaseRepository {
   }
 
   /**
+   * Observed samples in a window, oldest last, for C2c's true-outage-start walk.
+   *
+   * **Only OBSERVED_CHECK_TYPES, and that filter is the whole correctness of the
+   * number it feeds.** `monitoring_data` also holds the overlay rows an incident
+   * writes for its own window, so including them would let the incident's
+   * declared start decide when the outage started - the arithmetic would measure
+   * what an operator typed rather than what the monitors saw, and MTTD would be
+   * zero for every incident by construction. MANUAL pushes and DEFAULT_STATUS
+   * fill are out for the same reason: neither is an observation.
+   *
+   * NO_DATA is excluded because a gap in checking is not evidence of anything. A
+   * scheduler that was down for an hour must not read as an hour of outage.
+   *
+   * `floor` bounds the walk. Without it a monitor that has been down since it was
+   * created would scan its whole history on every metrics read.
+   */
+  async getObservedSamplesInWindow(
+    monitor_tags: string[],
+    floor: number,
+    ceiling: number,
+  ): Promise<Array<{ monitor_tag: string; timestamp: number; status: string | null }>> {
+    if (monitor_tags.length === 0) return [];
+    return await this.table("monitoring_data")
+      .select("monitor_tag", "timestamp", "status")
+      .whereIn("monitor_tag", monitor_tags)
+      .where("timestamp", ">=", floor)
+      .where("timestamp", "<=", ceiling)
+      .whereIn("type", OBSERVED_CHECK_TYPES)
+      .whereNot("status", GC.NO_DATA)
+      .orderBy("timestamp", "desc");
+  }
+
+  /**
    * The committed status of the most recent real scheduled-check observation before `beforeTs`
    * — the Confirmation Threshold "anchor" (the side currently shown). Looks past overlays,
    * MANUAL/DEFAULT, and NO_DATA so a long incident/maintenance window can never hide the anchor

@@ -79,6 +79,13 @@ async function createNewIncident(
     // deliberately not unified - see incidents/impact.ts - so this is a
     // translation rather than a copy.
     severity: incidentSeverityFromAlertSeverity(config.severity),
+    // C2c. The alert row's creation time *is* the moment Kener first observed
+    // the problem, so detection is knowable here and nowhere else. It is the
+    // same instant as `start_date_time` today, and they are separate columns
+    // because they answer different questions: an operator may correct the start
+    // to when the outage really began, and doing so must not rewrite when we
+    // found out - that gap is exactly what MTTD measures.
+    detected_at: startDateTime,
   };
 
   // Subscriber notification comes from AddIncidentComment (via

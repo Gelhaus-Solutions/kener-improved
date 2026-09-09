@@ -122,6 +122,23 @@ export class IncidentsRepository extends BaseRepository {
     return await query;
   }
 
+  /**
+   * Inserts an incident.
+   *
+   * **The third member of the whitelist family, and the one that was wrong.**
+   * `updateIncident` and `getIncidentById` document each other as a pair; this
+   * one was never mentioned and never updated, so from C2 until C2c it dropped
+   * `severity`, `impact_override`, `suppress_notifications` and `template_id` on
+   * the way in. Every incident landed with the column defaults - `NONE` and
+   * `NO` - while `CreateIncident` emitted an `incident.created` payload carrying
+   * the severity the operator actually chose. The event said MAJOR and the row
+   * said NONE, and nothing errored, which is the same failure C2's severity had
+   * on update and C7 would have inherited: `suppress_notifications` could never
+   * be `YES`, so a backfill would have mailed everybody.
+   *
+   * Anything added to `IncidentRecordInsert` belongs here, in `updateIncident`
+   * and in `getIncidentById`. All three, every time.
+   */
   async createIncident(data: IncidentRecordInsert): Promise<IncidentRecord> {
     const dbType = GetDbType();
 
@@ -136,6 +153,21 @@ export class IncidentsRepository extends BaseRepository {
       incident_type: data.incident_type,
       incident_source: data.incident_source,
       is_global: data.is_global || "YES",
+      // C2. Undefined is left to the column default rather than written as null:
+      // `severity` and `suppress_notifications` are NOT NULL, so an explicit null
+      // from a caller that did not mention them would fail the insert outright.
+      ...(data.severity !== undefined ? { severity: data.severity } : {}),
+      ...(data.impact_override !== undefined ? { impact_override: data.impact_override } : {}),
+      ...(data.suppress_notifications !== undefined ? { suppress_notifications: data.suppress_notifications } : {}),
+      ...(data.template_id !== undefined ? { template_id: data.template_id } : {}),
+      // C2c. Normally only `detected_at` is set here, by the alerting queue; a
+      // backfill hands over the whole lifecycle at once.
+      ...(data.detected_at !== undefined ? { detected_at: data.detected_at } : {}),
+      ...(data.acknowledged_at !== undefined ? { acknowledged_at: data.acknowledged_at } : {}),
+      ...(data.acknowledged_by_user_id !== undefined ? { acknowledged_by_user_id: data.acknowledged_by_user_id } : {}),
+      ...(data.identified_at !== undefined ? { identified_at: data.identified_at } : {}),
+      ...(data.mitigated_at !== undefined ? { mitigated_at: data.mitigated_at } : {}),
+      ...(data.resolved_at !== undefined ? { resolved_at: data.resolved_at } : {}),
     };
 
     if (dbType === "postgresql") {
@@ -251,6 +283,16 @@ export class IncidentsRepository extends BaseRepository {
       impact_override: data.impact_override,
       suppress_notifications: data.suppress_notifications,
       template_id: data.template_id,
+      // C2c. Editable in the sense that matters here: the controller computes
+      // them from state transitions and writes them back through this method, so
+      // an omission would drop a transition exactly the way it dropped C2's
+      // severity.
+      detected_at: data.detected_at,
+      acknowledged_at: data.acknowledged_at,
+      acknowledged_by_user_id: data.acknowledged_by_user_id,
+      identified_at: data.identified_at,
+      mitigated_at: data.mitigated_at,
+      resolved_at: data.resolved_at,
       updated_at: this.knexUnscoped.fn.now(),
     });
   }
@@ -295,6 +337,12 @@ export class IncidentsRepository extends BaseRepository {
         "impact_override",
         "suppress_notifications",
         "template_id",
+        "detected_at",
+        "acknowledged_at",
+        "acknowledged_by_user_id",
+        "identified_at",
+        "mitigated_at",
+        "resolved_at",
       )
       .where("id", id)
       .first();

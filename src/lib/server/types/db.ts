@@ -387,6 +387,19 @@ export interface IncidentRecord {
   suppress_notifications: string;
   /** C4: the template this incident was opened from, if any. */
   template_id: number | null;
+  /**
+   * C2c lifecycle timestamps, all UTC seconds and all nullable.
+   *
+   * Null means "this never happened", not "unknown": an incident nobody
+   * acknowledged has a null `acknowledged_at` forever, and the metrics say so
+   * rather than substituting a plausible number.
+   */
+  detected_at: number | null;
+  acknowledged_at: number | null;
+  acknowledged_by_user_id: number | null;
+  identified_at: number | null;
+  mitigated_at: number | null;
+  resolved_at: number | null;
 }
 
 export interface IncidentMonitorImpact {
@@ -425,6 +438,14 @@ export interface IncidentRecordInsert {
   impact_override?: string | null;
   suppress_notifications?: string;
   template_id?: number | null;
+  /** C2c. Set at creation by the alerting queue, which knows when it observed. */
+  detected_at?: number | null;
+  /** C7 backfill writes the historical lifecycle straight in. */
+  acknowledged_at?: number | null;
+  acknowledged_by_user_id?: number | null;
+  identified_at?: number | null;
+  mitigated_at?: number | null;
+  resolved_at?: number | null;
 }
 
 // ============ incident_monitors table ============

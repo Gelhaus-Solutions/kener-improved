@@ -118,6 +118,53 @@
 
   const states = [GC.INVESTIGATING, GC.IDENTIFIED, GC.MONITORING, GC.RESOLVED];
 
+  // C2c: the response timeline and the durations derived from it.
+  interface IncidentMetrics {
+    timestamps: {
+      start_date_time: number;
+      end_date_time: number | null;
+      detected_at: number | null;
+      acknowledged_at: number | null;
+      acknowledged_by_user_id: number | null;
+      identified_at: number | null;
+      mitigated_at: number | null;
+      resolved_at: number | null;
+    };
+    durations: {
+      impact_started_at: number | null;
+      mttd: number | null;
+      mtta: number | null;
+      mttr: number | null;
+      time_to_identify: number | null;
+      time_to_mitigate: number | null;
+      basis: "ALERT" | "REPORTED";
+    };
+  }
+
+  let metrics = $state<IncidentMetrics | null>(null);
+  let loadingMetrics = $state(false);
+  let acknowledging = $state(false);
+
+  /**
+   * Seconds as something a human reads at a glance.
+   *
+   * Null renders as an em-free dash placeholder rather than "0s", because the
+   * difference between "nobody acknowledged this" and "somebody acknowledged it
+   * instantly" is the entire value of the number.
+   */
+  function formatDuration(seconds: number | null): string {
+    if (seconds === null || seconds === undefined) return "-";
+    if (seconds < 60) return `${seconds}s`;
+    const m = Math.floor(seconds / 60);
+    if (m < 60) return `${m}m`;
+    const h = Math.floor(m / 60);
+    const rm = m % 60;
+    if (h < 24) return rm === 0 ? `${h}h` : `${h}h ${rm}m`;
+    const d = Math.floor(h / 24);
+    const rh = h % 24;
+    return rh === 0 ? `${d}d` : `${d}d ${rh}h`;
+  }
+
   // Convert timestamp to local datetime string for input (YYYY-MM-DDTHH:MM format)
   function timestampToLocalDatetime(ts: number): string {
     const date = new Date(ts * 1000);
@@ -183,7 +230,7 @@
           severity: result.severity || "NONE"
         };
         // Fetch comments and monitors
-        await Promise.all([fetchComments(), fetchIncidentMonitors()]);
+        await Promise.all([fetchComments(), fetchIncidentMonitors(), fetchMetrics()]);
       } else {
         error = "Incident not found";
       }
@@ -191,6 +238,49 @@
       error = e instanceof Error ? e.message : "Failed to fetch incident";
     } finally {
       loading = false;
+    }
+  }
+
+  // C2c: the lifecycle timestamps and the durations. Its own action because the
+  // true-outage-start walk scans up to a day of samples per attached monitor,
+  // and `getIncident` runs on every repaint of the editor.
+  async function fetchMetrics() {
+    if (isNew) return;
+    loadingMetrics = true;
+    try {
+      const response = await fetch(clientResolver(resolve, "/manage/api"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "getIncidentMetrics", data: { incident_id: parseInt(params.incident_id) } })
+      });
+      const result = await response.json();
+      if (!result.error) metrics = result;
+    } catch {
+      // A missing metrics panel must never break the editor around it.
+    } finally {
+      loadingMetrics = false;
+    }
+  }
+
+  async function acknowledgeIncident() {
+    acknowledging = true;
+    try {
+      const response = await fetch(clientResolver(resolve, "/manage/api"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "acknowledgeIncident", data: { id: parseInt(params.incident_id) } })
+      });
+      const result = await response.json();
+      if (result.error) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Incident acknowledged");
+      await fetchMetrics();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to acknowledge incident");
+    } finally {
+      acknowledging = false;
     }
   }
 
@@ -1021,6 +1111,83 @@
         </Button>
       </Card.Footer>
     </Card.Root>
+
+    <!-- C2c: response timeline and the durations derived from it -->
+    {#if !isNew}
+      <Card.Root>
+        <Card.Header>
+          <div class="flex items-center justify-between">
+            <div>
+              <Card.Title>Response Timeline</Card.Title>
+              <Card.Description>
+                When this incident moved, and how long each step took. Nothing here is stored as a metric: the durations
+                are computed from the timestamps every time this panel is opened.
+              </Card.Description>
+            </div>
+            {#if metrics && metrics.timestamps.acknowledged_at === null}
+              <Button size="sm" variant="outline" onclick={acknowledgeIncident} disabled={acknowledging}>
+                {#if acknowledging}
+                  <Loader class="size-4 animate-spin" />
+                {:else}
+                  <CheckIcon class="size-4" />
+                {/if}
+                Acknowledge
+              </Button>
+            {/if}
+          </div>
+        </Card.Header>
+        <Card.Content>
+          {#if loadingMetrics}
+            <div class="flex justify-center py-6"><Spinner /></div>
+          {:else if !metrics}
+            <p class="text-muted-foreground text-sm">Response timings are unavailable for this incident.</p>
+          {:else}
+            <div class="grid gap-6 md:grid-cols-2">
+              <div class="space-y-2">
+                <h4 class="text-sm font-medium">Timeline</h4>
+                <dl class="divide-border divide-y text-sm">
+                  {#each [{ label: "Impact started", value: metrics.durations.impact_started_at }, { label: "Detected", value: metrics.timestamps.detected_at }, { label: "Acknowledged", value: metrics.timestamps.acknowledged_at }, { label: "Identified", value: metrics.timestamps.identified_at }, { label: "Mitigated", value: metrics.timestamps.mitigated_at }, { label: "Resolved", value: metrics.timestamps.resolved_at }] as row (row.label)}
+                    <div class="flex items-center justify-between py-1.5">
+                      <dt class="text-muted-foreground">{row.label}</dt>
+                      <dd>
+                        {#if row.value === null}
+                          <span class="text-muted-foreground">Not recorded</span>
+                        {:else}
+                          <LocalTime value={row.value} format="MMM d, yyyy HH:mm" />
+                        {/if}
+                      </dd>
+                    </div>
+                  {/each}
+                </dl>
+              </div>
+
+              <div class="space-y-2">
+                <h4 class="text-sm font-medium">Durations</h4>
+                <dl class="divide-border divide-y text-sm">
+                  {#each [{ label: "Time to detect", value: metrics.durations.mttd, hint: "Detection minus the first non-UP minute the monitors saw" }, { label: "Time to acknowledge", value: metrics.durations.mtta, hint: "How long until a person took it" }, { label: "Time to identify", value: metrics.durations.time_to_identify, hint: "Until the incident entered Identified" }, { label: "Time to mitigate", value: metrics.durations.time_to_mitigate, hint: "Until the incident entered Monitoring" }, { label: "Time to resolve", value: metrics.durations.mttr, hint: "From detection to resolution" }] as row (row.label)}
+                    <div class="py-1.5">
+                      <div class="flex items-center justify-between">
+                        <dt class="text-muted-foreground">{row.label}</dt>
+                        <dd class="font-medium">{formatDuration(row.value)}</dd>
+                      </div>
+                      <p class="text-muted-foreground/70 text-xs">{row.hint}</p>
+                    </div>
+                  {/each}
+                </dl>
+                <p class="text-muted-foreground text-xs">
+                  {#if metrics.durations.basis === "ALERT"}
+                    Measured from the moment a monitor observed the problem.
+                  {:else}
+                    Measured from the start time entered on this incident. Nothing detected it automatically, so there
+                    is no detection lag to report.
+                  {/if}
+                </p>
+              </div>
+            </div>
+          {/if}
+        </Card.Content>
+      </Card.Root>
+    {/if}
 
     <!-- Updates/Comments (only for existing incidents) -->
     {#if !isNew}

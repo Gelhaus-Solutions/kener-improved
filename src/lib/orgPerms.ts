@@ -57,6 +57,12 @@ export const orgPermissions: Array<{ id: string; permission_name: string }> = [
 export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   getAuditLog: "audit.read",
 
+  // Incidents (C2c). A fork-invented action on an upstream resource, so it maps
+  // to the upstream permission rather than inventing one: acknowledging is
+  // acting on an incident, and anybody who may comment on one may take it.
+  acknowledgeIncident: "incidents.write",
+  getIncidentMetrics: "incidents.read",
+
   // Component dependencies (C3). Reading the graph is part of reading monitors;
   // editing it is monitor configuration, so both reuse the upstream monitor
   // permissions rather than inventing a pair nobody would think to grant.

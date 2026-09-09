@@ -28,6 +28,11 @@ export const INCIDENT_EVENTS = [
   "incident.state_changed",
   "incident.severity_changed",
   "incident.component_impact_changed",
+  // C2c. Its own type rather than a flavour of `updated` because acknowledgement
+  // is the only incident transition with no state change behind it: a human takes
+  // ownership while the incident stays INVESTIGATING. A consumer wanting "tell me
+  // when nobody has picked this up yet" has nothing else to key on.
+  "incident.acknowledged",
   "incident.comment_added",
   "incident.comment_updated",
   "incident.comment_hidden",
@@ -146,6 +151,7 @@ export const EVENT_AGGREGATE_TYPE: Record<EventType, string> = {
   "incident.state_changed": "incident",
   "incident.severity_changed": "incident",
   "incident.component_impact_changed": "incident",
+  "incident.acknowledged": "incident",
   "incident.comment_added": "incident",
   "incident.comment_updated": "incident",
   "incident.comment_hidden": "incident",
