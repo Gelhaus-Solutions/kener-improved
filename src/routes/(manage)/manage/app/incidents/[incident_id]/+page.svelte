@@ -52,14 +52,42 @@
     status: string;
     state: string;
     is_global: string;
+    severity: string;
   }>({
     id: 0,
     title: "",
     start_date_time: Math.floor(Date.now() / 1000),
     status: "OPEN",
     state: GC.INVESTIGATING,
-    is_global: "YES"
+    is_global: "YES",
+    severity: "NONE"
   });
+
+  // The communication impact vocabulary (C2), worst first so the list reads the
+  // way an operator picks: the common case for a new incident is at the top.
+  // These are what customers read; the mechanical DOWN/DEGRADED/MAINTENANCE that
+  // drives the timeline is derived from them on the server and is never chosen
+  // here.
+  const COMPONENT_IMPACTS: Array<{ value: string; label: string }> = [
+    { value: "MAJOR_OUTAGE", label: "Major Outage" },
+    { value: "PARTIAL_OUTAGE", label: "Partial Outage" },
+    { value: "DEGRADED_PERFORMANCE", label: "Degraded Performance" },
+    { value: "UNDER_MAINTENANCE", label: "Under Maintenance" },
+    { value: "OPERATIONAL", label: "Operational" }
+  ];
+
+  // Customer impact, not the alert rule's severity. An alert-opened incident
+  // arrives with this already mapped from the rule and an operator can correct it.
+  const INCIDENT_SEVERITIES: Array<{ value: string; label: string }> = [
+    { value: "NONE", label: "None" },
+    { value: "MINOR", label: "Minor" },
+    { value: "MAJOR", label: "Major" },
+    { value: "CRITICAL", label: "Critical" },
+    { value: "MAINTENANCE", label: "Maintenance" }
+  ];
+
+  const impactLabel = (value: string | null) => COMPONENT_IMPACTS.find((i) => i.value === value)?.label ?? "Unknown";
+  const severityLabel = (value: string | null) => INCIDENT_SEVERITIES.find((s) => s.value === value)?.label ?? "None";
 
   // For datetime inputs (convert to/from local datetime string)
   let startDateTimeLocal = $state("");
@@ -73,11 +101,11 @@
 
   // Monitors
   let availableMonitors = $state<MonitorRecord[]>([]);
-  let incidentMonitors = $state<Array<{ monitor_tag: string; monitor_impact: string | null }>>([]);
-  let originalMonitors = $state<Array<{ monitor_tag: string; monitor_impact: string | null }>>([]);
+  let incidentMonitors = $state<Array<{ monitor_tag: string; component_impact: string }>>([]);
+  let originalMonitors = $state<Array<{ monitor_tag: string; component_impact: string }>>([]);
   let addMonitorDialogOpen = $state(false);
   let selectedMonitorTag = $state("");
-  let selectedMonitorImpact = $state("DOWN");
+  let selectedMonitorImpact = $state("MAJOR_OUTAGE");
   let addingMonitor = $state(false);
 
   // Comment inline editing/adding
@@ -151,7 +179,8 @@
           start_date_time: result.start_date_time,
           status: result.status,
           state: result.state,
-          is_global: result.is_global || "YES"
+          is_global: result.is_global || "YES",
+          severity: result.severity || "NONE"
         };
         // Fetch comments and monitors
         await Promise.all([fetchComments(), fetchIncidentMonitors()]);
@@ -205,7 +234,7 @@
         if (found && found.monitors) {
           incidentMonitors = found.monitors.map((m: any) => ({
             monitor_tag: m.tag || m.monitor_tag,
-            monitor_impact: m.impact_type || m.monitor_impact
+            component_impact: m.component_impact || "MAJOR_OUTAGE"
           }));
           // Store original monitors to compare on save
           originalMonitors = [...incidentMonitors];
@@ -254,7 +283,8 @@
               status: "OPEN",
               state: GC.INVESTIGATING,
               incident_type: GC.INCIDENT,
-              is_global: incident.is_global
+              is_global: incident.is_global,
+              severity: incident.severity
             }
           })
         });
@@ -274,7 +304,7 @@
                 data: {
                   incident_id: incidentId,
                   monitor_tag: monitor.monitor_tag,
-                  monitor_impact: monitor.monitor_impact
+                  component_impact: monitor.component_impact
                 }
               })
             });
@@ -312,7 +342,8 @@
               start_date_time: incident.start_date_time,
               end_date_time: null,
               status: "OPEN",
-              is_global: incident.is_global
+              is_global: incident.is_global,
+              severity: incident.severity
             }
           })
         });
@@ -331,7 +362,7 @@
           // Monitors with changed impact (in both but impact is different)
           const toUpdate = incidentMonitors.filter((m) => {
             const original = originalMonitors.find((o) => o.monitor_tag === m.monitor_tag);
-            return original && original.monitor_impact !== m.monitor_impact;
+            return original && original.component_impact !== m.component_impact;
           });
 
           // Add new monitors
@@ -344,7 +375,7 @@
                 data: {
                   incident_id: incident.id,
                   monitor_tag: monitor.monitor_tag,
-                  monitor_impact: monitor.monitor_impact
+                  component_impact: monitor.component_impact
                 }
               })
             });
@@ -360,7 +391,7 @@
                 data: {
                   incident_id: incident.id,
                   monitor_tag: monitor.monitor_tag,
-                  monitor_impact: monitor.monitor_impact
+                  component_impact: monitor.component_impact
                 }
               })
             });
@@ -407,7 +438,7 @@
           data: {
             incident_id: incident.id,
             monitor_tag: selectedMonitorTag,
-            monitor_impact: selectedMonitorImpact
+            component_impact: selectedMonitorImpact
           }
         })
       });
@@ -580,11 +611,11 @@
     if (!selectedMonitorTag) return;
     incidentMonitors = [
       ...incidentMonitors,
-      { monitor_tag: selectedMonitorTag, monitor_impact: selectedMonitorImpact }
+      { monitor_tag: selectedMonitorTag, component_impact: selectedMonitorImpact }
     ];
     addMonitorDialogOpen = false;
     selectedMonitorTag = "";
-    selectedMonitorImpact = "DOWN";
+    selectedMonitorImpact = "MAJOR_OUTAGE";
   }
 
   // Remove monitor from list (for new incidents)
@@ -595,7 +626,7 @@
   // Update monitor impact in list
   function updateMonitorImpact(monitorTag: string, newImpact: string) {
     incidentMonitors = incidentMonitors.map((m) =>
-      m.monitor_tag === monitorTag ? { ...m, monitor_impact: newImpact } : m
+      m.monitor_tag === monitorTag ? { ...m, component_impact: newImpact } : m
     );
   }
 
@@ -617,11 +648,12 @@
   // Get impact badge variant
   function getImpactBadgeVariant(impact: string | null): "default" | "secondary" | "destructive" | "outline" {
     switch (impact) {
-      case "DOWN":
+      case "MAJOR_OUTAGE":
         return "destructive";
-      case "DEGRADED":
+      case "PARTIAL_OUTAGE":
+      case "DEGRADED_PERFORMANCE":
         return "secondary";
-      case "MAINTENANCE":
+      case "UNDER_MAINTENANCE":
         return "outline";
       default:
         return "default";
@@ -796,6 +828,29 @@
           <p class="text-muted-foreground text-xs">Enter time in your local timezone. It will be stored as UTC.</p>
         </div>
 
+        <!-- Severity -->
+        <div class="flex flex-col gap-2">
+          <Label>Severity</Label>
+          <Select.Root
+            type="single"
+            value={incident.severity}
+            onValueChange={(v) => {
+              if (v) incident.severity = v;
+            }}
+          >
+            <Select.Trigger class="w-full">{severityLabel(incident.severity)}</Select.Trigger>
+            <Select.Content>
+              {#each INCIDENT_SEVERITIES as severity (severity.value)}
+                <Select.Item value={severity.value}>{severity.label}</Select.Item>
+              {/each}
+            </Select.Content>
+          </Select.Root>
+          <p class="text-muted-foreground text-xs">
+            How badly customers are affected. Separate from an alert rule's severity: an incident opened by an alert
+            starts from the rule and you can change it here.
+          </p>
+        </div>
+
         <!-- Global Visibility -->
         <div class="flex items-center justify-between rounded-md border p-3">
           <div class="flex flex-col gap-1">
@@ -883,11 +938,12 @@
                       }}
                     >
                       <Select.Trigger class="w-full">
-                        {selectedMonitorImpact}
+                        {impactLabel(selectedMonitorImpact)}
                       </Select.Trigger>
                       <Select.Content>
-                        <Select.Item value="DOWN">Down</Select.Item>
-                        <Select.Item value="DEGRADED">Degraded</Select.Item>
+                        {#each COMPONENT_IMPACTS as impact (impact.value)}
+                          <Select.Item value={impact.value}>{impact.label}</Select.Item>
+                        {/each}
                       </Select.Content>
                     </Select.Root>
                   </div>
@@ -907,12 +963,8 @@
                 <div class="flex items-center justify-between rounded-md border p-3">
                   <div class="flex items-center gap-3">
                     <span class="font-medium">{getMonitorName(monitor.monitor_tag)}</span>
-                    <Badge
-                      variant="outline"
-                      class="text-{monitor.monitor_impact?.toLowerCase() ||
-                        'default'} font-semibold border-{monitor.monitor_impact?.toLowerCase() || 'default'}"
-                    >
-                      {monitor.monitor_impact || "Unknown"}
+                    <Badge variant={getImpactBadgeVariant(monitor.component_impact)} class="font-semibold">
+                      {impactLabel(monitor.component_impact)}
                     </Badge>
                   </div>
                   <DropdownMenu.Root>
@@ -926,32 +978,21 @@
                     <DropdownMenu.Content align="end">
                       <DropdownMenu.Label>Update Impact</DropdownMenu.Label>
                       <DropdownMenu.Group>
-                        <DropdownMenu.Item
-                          class="cursor-pointer"
-                          onclick={() => updateMonitorImpact(monitor.monitor_tag, "DOWN")}
-                        >
-                          <span class="flex items-center gap-2">
-                            {#if monitor.monitor_impact === "DOWN"}
-                              <CheckIcon class="size-4" />
-                            {:else}
-                              <span class="size-4"></span>
-                            {/if}
-                            Down
-                          </span>
-                        </DropdownMenu.Item>
-                        <DropdownMenu.Item
-                          class="cursor-pointer"
-                          onclick={() => updateMonitorImpact(monitor.monitor_tag, "DEGRADED")}
-                        >
-                          <span class="flex items-center gap-2">
-                            {#if monitor.monitor_impact === "DEGRADED"}
-                              <CheckIcon class="size-4" />
-                            {:else}
-                              <span class="size-4"></span>
-                            {/if}
-                            Degraded
-                          </span>
-                        </DropdownMenu.Item>
+                        {#each COMPONENT_IMPACTS as impact (impact.value)}
+                          <DropdownMenu.Item
+                            class="cursor-pointer"
+                            onclick={() => updateMonitorImpact(monitor.monitor_tag, impact.value)}
+                          >
+                            <span class="flex items-center gap-2">
+                              {#if monitor.component_impact === impact.value}
+                                <CheckIcon class="size-4" />
+                              {:else}
+                                <span class="size-4"></span>
+                              {/if}
+                              {impact.label}
+                            </span>
+                          </DropdownMenu.Item>
+                        {/each}
                       </DropdownMenu.Group>
                       <DropdownMenu.Separator />
                       <DropdownMenu.Item

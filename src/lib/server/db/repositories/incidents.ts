@@ -226,6 +226,18 @@ export class IncidentsRepository extends BaseRepository {
       .first<CountResult>();
   }
 
+  /**
+   * Updates an incident.
+   *
+   * The column list is explicit rather than spreading `data`, which is the right
+   * shape - callers hand this a whole record and a spread would let `id`,
+   * `created_at` or anything else ride along. The cost is that **a new column is
+   * invisible here until it is added**, and it fails quietly: C2's `severity` was
+   * computed, diffed and emitted as `incident.severity_changed` while the write
+   * silently dropped it, so the event log said the severity moved and the row
+   * said it never had. Anything added to `IncidentRecord` that an operator can
+   * edit belongs in this list.
+   */
   async updateIncident(data: IncidentRecord): Promise<number> {
     return await this.table("incidents").where({ id: data.id }).update({
       title: data.title,
@@ -234,6 +246,11 @@ export class IncidentsRepository extends BaseRepository {
       status: data.status,
       state: data.state,
       is_global: data.is_global,
+      severity: data.severity,
+      severity_changed_at: data.severity_changed_at,
+      impact_override: data.impact_override,
+      suppress_notifications: data.suppress_notifications,
+      template_id: data.template_id,
       updated_at: this.knexUnscoped.fn.now(),
     });
   }
@@ -249,6 +266,17 @@ export class IncidentsRepository extends BaseRepository {
     });
   }
 
+  /**
+   * One incident.
+   *
+   * The column list has to stay in step with `updateIncident`'s, and the pairing
+   * is not decorative: `UpdateIncident` reads the current row here and writes
+   * back every field it did not change. A column present in the write list and
+   * absent here reads as `undefined` and is written as `undefined` - which knex
+   * drops, so the value survives by luck rather than by design, and the moment
+   * anything compares against it the comparison is against nothing. That is how
+   * C2's `impact_override` would have become impossible to preserve.
+   */
   async getIncidentById(id: number): Promise<Omit<IncidentRecord, "incident_source"> | undefined> {
     return await this.table("incidents")
       .select(
@@ -262,6 +290,11 @@ export class IncidentsRepository extends BaseRepository {
         "state",
         "incident_type",
         "is_global",
+        "severity",
+        "severity_changed_at",
+        "impact_override",
+        "suppress_notifications",
+        "template_id",
       )
       .where("id", id)
       .first();
@@ -702,9 +735,9 @@ export class IncidentsRepository extends BaseRepository {
 
   async getIncidentMonitorsByIncidentID(
     incident_id: number,
-  ): Promise<Array<{ monitor_tag: string; monitor_impact: string | null }>> {
+  ): Promise<Array<{ monitor_tag: string; monitor_impact: string | null; component_impact: string | null }>> {
     return await this.table("incident_monitors")
-      .select("monitor_tag", "monitor_impact")
+      .select("monitor_tag", "monitor_impact", "component_impact")
       .where("incident_id", incident_id);
   }
 
@@ -717,10 +750,12 @@ export class IncidentsRepository extends BaseRepository {
    */
   async getIncidentMonitorsByIncidentIDs(
     incident_ids: number[],
-  ): Promise<Array<{ incident_id: number; monitor_tag: string; monitor_impact: string | null }>> {
+  ): Promise<
+    Array<{ incident_id: number; monitor_tag: string; monitor_impact: string | null; component_impact: string | null }>
+  > {
     if (incident_ids.length === 0) return [];
     return await this.table("incident_monitors")
-      .select("incident_id", "monitor_tag", "monitor_impact")
+      .select("incident_id", "monitor_tag", "monitor_impact", "component_impact")
       .whereIn("incident_id", incident_ids);
   }
 
@@ -759,10 +794,20 @@ export class IncidentsRepository extends BaseRepository {
       .insert({
         monitor_tag: data.monitor_tag,
         monitor_impact: data.monitor_impact,
+        component_impact: data.component_impact,
         incident_id: data.incident_id,
       })
       .onConflict(["monitor_tag", "incident_id"])
-      .merge({ monitor_impact: data.monitor_impact, updated_at: this.knexUnscoped.fn.now() });
+      // Both layers on the merge, not just the mechanical one. An operator
+      // moving a component from Partial Outage to Degraded Performance leaves
+      // `monitor_impact` at DEGRADED - the timeline genuinely does not change -
+      // so merging only that column would silently discard the change the
+      // customer was going to read about.
+      .merge({
+        monitor_impact: data.monitor_impact,
+        component_impact: data.component_impact,
+        updated_at: this.knexUnscoped.fn.now(),
+      });
   }
 
   async deleteIncidentMonitorsByTag(tag: string): Promise<number> {

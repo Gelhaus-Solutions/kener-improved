@@ -377,6 +377,16 @@ export interface IncidentRecord {
   incident_type: string;
   incident_source: string;
   is_global: string;
+  /** Customer impact (C2): NONE | MAINTENANCE | MINOR | MAJOR | CRITICAL. */
+  severity: string;
+  /** When `severity` last moved, in UTC seconds. Null until it first changes. */
+  severity_changed_at: number | null;
+  /** Pins the whole incident's component impact. Null means derive it. */
+  impact_override: string | null;
+  /** C7: YES on an imported historical incident, so it mails nobody. */
+  suppress_notifications: string;
+  /** C4: the template this incident was opened from, if any. */
+  template_id: number | null;
 }
 
 export interface IncidentMonitorImpact {
@@ -411,6 +421,10 @@ export interface IncidentRecordInsert {
   incident_type?: string;
   incident_source?: string;
   is_global?: string;
+  severity?: string;
+  impact_override?: string | null;
+  suppress_notifications?: string;
+  template_id?: number | null;
 }
 
 // ============ incident_monitors table ============
@@ -425,7 +439,10 @@ export interface IncidentMonitorRecord {
 
 export interface IncidentMonitorRecordInsert {
   monitor_tag: string;
+  /** Derived from `component_impact`; never set by a caller directly (C2). */
   monitor_impact?: string | null;
+  /** The communication layer, and the value a user actually chooses. */
+  component_impact?: string | null;
   incident_id: number;
 }
 

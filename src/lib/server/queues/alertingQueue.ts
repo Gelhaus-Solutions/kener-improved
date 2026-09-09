@@ -31,6 +31,7 @@ import { getUnixTime, differenceInSeconds } from "date-fns";
 import { parseDbTimestamp } from "../tool.js";
 import GC from "../../global-constants.js";
 import { dispatchTrigger } from "../notification/dispatchTrigger.js";
+import { incidentSeverityFromAlertSeverity } from "../incidents/impact.js";
 import { alertToVariables, siteDataToVariables } from "../notification/notification_utils.js";
 
 import type { SiteDataForNotification } from "../notification/types.js";
@@ -72,6 +73,12 @@ async function createNewIncident(
     title: monitorName + " " + config.alert_for + ": " + config.alert_value,
     start_date_time: startDateTime,
     incident_source: "ALERT",
+    // Mapped at the boundary, once, and an operator can change it afterwards.
+    // The alert vocabulary (CRITICAL|WARNING) describes how serious the rule
+    // considers itself; incident severity describes customer impact. They are
+    // deliberately not unified - see incidents/impact.ts - so this is a
+    // translation rather than a copy.
+    severity: incidentSeverityFromAlertSeverity(config.severity),
   };
 
   // Subscriber notification comes from AddIncidentComment (via

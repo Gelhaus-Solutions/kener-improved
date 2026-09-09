@@ -130,6 +130,13 @@ export const POST: RequestHandler = async ({ locals, request }) => {
     incident_type: incident.incident_type,
     incident_source: "",
     is_global: incident.is_global,
+    // Carried through unchanged: posting a comment must not reset the severity
+    // or clear an impact override an operator set.
+    severity: incident.severity,
+    severity_changed_at: incident.severity_changed_at,
+    impact_override: incident.impact_override,
+    suppress_notifications: incident.suppress_notifications,
+    template_id: incident.template_id,
   });
 
   const response: CreateCommentResponse = {

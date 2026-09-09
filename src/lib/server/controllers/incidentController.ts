@@ -18,6 +18,14 @@ import type {
 } from "../types/db.js";
 import { parseDbTimestamp } from "../tool.js";
 import GC from "../../global-constants.js";
+import {
+  COMPONENT_IMPACTS,
+  componentImpactFromMonitorImpact,
+  isComponentImpact,
+  isIncidentSeverity,
+  monitorImpactFor,
+  type ComponentImpact,
+} from "../incidents/impact.js";
 import { getUnixTime, differenceInSeconds } from "date-fns";
 import { siteDataToVariables } from "../notification/notification_utils.js";
 import { GetAllSiteData } from "./siteDataController.js";
@@ -45,9 +53,17 @@ export interface IncidentInput {
   incident_type?: string;
   incident_source?: string;
   is_global?: string;
+  /** Customer impact, not rule severity. See incidents/impact.ts. */
+  severity?: string;
+  /** Pins the whole incident's component impact; null means derive it. */
+  impact_override?: string | null;
+  /** C7: an imported historical incident must not mail anyone. */
+  suppress_notifications?: string;
 }
 
 interface IncidentUpdateInput {
+  severity?: string;
+  impact_override?: string | null;
   title?: string;
   start_date_time?: number;
   end_date_time?: number | null;
@@ -103,7 +119,7 @@ export const GetIncidentActiveComments = async (incident_id: number): Promise<In
 
 export const GetIncidentMonitors = async (
   incident_id: number,
-): Promise<Array<{ monitor_tag: string; monitor_impact: string | null }>> => {
+): Promise<Array<{ monitor_tag: string; monitor_impact: string | null; component_impact: ComponentImpact }>> => {
   let incidentExists = await db.getIncidentById(incident_id);
   if (!incidentExists) {
     throw new Error(`Incident with id ${incident_id} does not exist`);
@@ -112,6 +128,13 @@ export const GetIncidentMonitors = async (
   return incidentMonitors.map((m) => ({
     monitor_tag: m.monitor_tag,
     monitor_impact: m.monitor_impact,
+    // Inferred rather than passed through when the column is empty, so a row
+    // written before C2 and one written after look the same to every reader.
+    // Callers can then treat `component_impact` as always present, which is what
+    // stops the null-handling spreading into the UI and the webhook payload.
+    component_impact: isComponentImpact(m.component_impact)
+      ? m.component_impact
+      : componentImpactFromMonitorImpact(m.monitor_impact),
   }));
 };
 
@@ -346,6 +369,15 @@ export const CreateIncident = async (data: IncidentInput): Promise<{ incident_id
     incident_type: !!data.incident_type ? data.incident_type : "INCIDENT",
     incident_source: !!data.incident_source ? data.incident_source : "DASHBOARD",
     is_global: data.is_global || "YES",
+    // A maintenance-typed incident defaults to MAINTENANCE rather than NONE, so
+    // the two vocabularies agree without an operator having to say so twice.
+    severity: isIncidentSeverity(data.severity)
+      ? data.severity
+      : data.incident_type === "MAINTENANCE"
+        ? "MAINTENANCE"
+        : "NONE",
+    impact_override: isComponentImpact(data.impact_override) ? data.impact_override : null,
+    suppress_notifications: data.suppress_notifications === "YES" ? "YES" : "NO",
   };
 
   //incident_type == INCIDENT delete endDateTime
@@ -403,14 +435,41 @@ export const UpdateIncident = async (incident_id: number, data: IncidentUpdateIn
     state: data.state || incidentExists.state,
     end_date_time: data.end_date_time || incidentExists.end_date_time,
     is_global: data.is_global !== undefined ? data.is_global : incidentExists.is_global,
+    severity: isIncidentSeverity(data.severity) ? data.severity : incidentExists.severity,
+    // `undefined` means "not mentioned, keep it"; an explicit `null` means
+    // "clear it and go back to deriving". Collapsing the two would make an
+    // override impossible to remove, since every other update omits the field.
+    impact_override:
+      data.impact_override === undefined
+        ? incidentExists.impact_override
+        : isComponentImpact(data.impact_override)
+          ? data.impact_override
+          : null,
   };
+
+  // Stamped only when the value moves, so it answers "when did this become
+  // MAJOR" rather than "when was this incident last touched" - which `updated_at`
+  // already answers and which would make the field useless for the MTTR
+  // arithmetic C2c builds on it.
+  if (updateObject.severity !== incidentExists.severity) {
+    updateObject.severity_changed_at = GetNowSeconds();
+  }
 
   return await db.withTransaction(async () => {
     const rows = await db.updateIncident(updateObject as IncidentRecord);
 
     const before: Record<string, unknown> = {};
     const after: Record<string, unknown> = {};
-    for (const key of ["title", "start_date_time", "status", "state", "end_date_time", "is_global"] as const) {
+    for (const key of [
+      "title",
+      "start_date_time",
+      "status",
+      "state",
+      "end_date_time",
+      "is_global",
+      "severity",
+      "impact_override",
+    ] as const) {
       const previous = (incidentExists as unknown as Record<string, unknown>)[key];
       const next = (updateObject as unknown as Record<string, unknown>)[key];
       if (previous === next) continue;
@@ -431,6 +490,21 @@ export const UpdateIncident = async (incident_id: number, data: IncidentUpdateIn
 
     await emit({ ...base, type: "incident.updated" });
 
+    // Its own type for the same reason `incident.resolved` has one: "tell me when
+    // an incident becomes critical" is a subscription somebody wants to express
+    // without writing a filter over a diff.
+    if (incidentExists.severity !== updateObject.severity) {
+      await emit({
+        ...base,
+        type: "incident.severity_changed",
+        payload: {
+          incident_id,
+          severity: updateObject.severity,
+          previous_severity: incidentExists.severity,
+        },
+      });
+    }
+
     const stateChanged = incidentExists.state !== updateObject.state;
     if (stateChanged) {
       await emit({ ...base, type: "incident.state_changed" });
@@ -449,19 +523,35 @@ export const UpdateIncident = async (incident_id: number, data: IncidentUpdateIn
   });
 };
 
+/**
+ * Attaches a monitor to an incident with an impact.
+ *
+ * **Accepts either vocabulary and stores both** (C2). A caller that names a
+ * communication value - the admin UI, the API - has that value stored verbatim
+ * and the mechanical one derived from it. A caller that still names a mechanical
+ * value - the alerting queue, which knows a monitor is DOWN and nothing about how
+ * to describe that to customers - gets the communication value inferred.
+ *
+ * Accepting both rather than forcing every caller onto the new vocabulary is what
+ * keeps `alertingQueue` and the inherited API contract working unchanged. The
+ * inference direction is the lossy one, which is fine here: an alert genuinely
+ * has no better information than "this monitor is down".
+ */
 export const AddIncidentMonitor = async (
   incident_id: number,
   monitor_tag: string,
-  monitor_impact: string,
+  impact: string,
 ): Promise<number[]> => {
-  //monitor_impact must be DOWN or DEGRADED or MAINTENANCE or NONE
-  if (
-    ![GC.DOWN, GC.DEGRADED, GC.MAINTENANCE].includes(
-      monitor_impact as typeof GC.DOWN | typeof GC.DEGRADED | typeof GC.MAINTENANCE,
-    )
-  ) {
-    throw new Error("Monitor impact must be either DOWN, DEGRADED, MAINTENANCE");
+  // One of the five communication values, or one of the three mechanical ones
+  // inferred into the five. Anything else is rejected, which preserves the
+  // inherited guarantee that a typo cannot reach the column.
+  const component_impact = isComponentImpact(impact) ? impact : componentImpactFromMonitorImpact(impact);
+  if (!isComponentImpact(impact) && component_impact === "OPERATIONAL" && impact !== "OPERATIONAL") {
+    throw new Error(
+      `Impact must be one of ${COMPONENT_IMPACTS.join(", ")} or ${[GC.DOWN, GC.DEGRADED, GC.MAINTENANCE].join(", ")}`,
+    );
   }
+  const monitor_impact = monitorImpactFor(component_impact);
 
   //check if monitor exists
   let monitorExists = await db.getMonitorByTag(monitor_tag);
@@ -476,24 +566,41 @@ export const AddIncidentMonitor = async (
   }
 
   const existing = await db.getIncidentMonitorsByIncidentID(incident_id);
-  const previous = existing.find((m) => m.monitor_tag === monitor_tag)?.monitor_impact ?? null;
+  const existingRow = existing.find((m) => m.monitor_tag === monitor_tag);
+  // Compared on the communication layer, because that is what changed for the
+  // reader. Keying this on `monitor_impact` would miss a move between
+  // DEGRADED_PERFORMANCE and PARTIAL_OUTAGE entirely - both project onto
+  // DEGRADED - and that move is precisely the kind of update a status page
+  // exists to publish. Rows written before C2 have no `component_impact`, so
+  // they are inferred rather than read as null, or the first write after the
+  // migration would report a change nobody made.
+  const previous: ComponentImpact | null = existingRow
+    ? isComponentImpact(existingRow.component_impact)
+      ? existingRow.component_impact
+      : componentImpactFromMonitorImpact(existingRow.monitor_impact)
+    : null;
 
   return await db.withTransaction(async () => {
     const result = await db.insertIncidentMonitorWithMerge({
       incident_id,
       monitor_tag,
       monitor_impact,
+      component_impact,
     });
 
     // Only when the impact actually moved. Re-asserting the same impact is what
     // the alerting path does on every evaluation, and it is not news.
-    if (previous !== monitor_impact) {
+    if (previous !== component_impact) {
       await emit({
         org_id: currentOrgId(),
         type: "incident.component_impact_changed",
         aggregate_id: incident_id,
-        payload: { incident_id, monitor_tag, monitor_impact },
-        diff: { before: { monitor_impact: previous }, after: { monitor_impact } },
+        // Both layers on the wire. A receiver rendering a status page wants the
+        // communication value; one reconciling against the timeline wants the
+        // mechanical one, and deriving it themselves would mean reimplementing
+        // the projection outside this codebase.
+        payload: { incident_id, monitor_tag, component_impact, monitor_impact },
+        diff: { before: { component_impact: previous }, after: { component_impact } },
       });
     }
 

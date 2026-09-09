@@ -134,6 +134,14 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
     incident_type: existingIncident.incident_type,
     incident_source: "", // Not used by updateIncident
     is_global: existingIncident.is_global,
+    // Carried through unchanged. This endpoint does not edit them, and rebuilding
+    // the record without them would write the column defaults over an operator's
+    // severity every time somebody renamed an incident over the API.
+    severity: existingIncident.severity,
+    severity_changed_at: existingIncident.severity_changed_at,
+    impact_override: existingIncident.impact_override,
+    suppress_notifications: existingIncident.suppress_notifications,
+    template_id: existingIncident.template_id,
   };
 
   // Update the incident
