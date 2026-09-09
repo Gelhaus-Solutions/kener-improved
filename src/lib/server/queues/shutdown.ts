@@ -5,6 +5,7 @@ import subscriberQueue from "./subscriberQueue";
 import emailQueue from "./emailQueue";
 import eventRelayQueue from "./eventRelayQueue";
 import eventDispatchQueue from "./eventDispatchQueue";
+import backfillQueue from "./backfillQueue";
 import { flushAuditLog } from "../audit/writer";
 
 export default async () => {
@@ -17,6 +18,9 @@ export default async () => {
   // drains what it already has instead of racing a fresh batch of deliveries.
   await eventRelayQueue.shutdown();
   await eventDispatchQueue.shutdown();
+  // C7. A half-written overlay is harmless - the job is idempotent and BullMQ
+  // redelivers it - so this closes rather than draining.
+  await backfillQueue.stop();
   // Last: the audit writer buffers for up to half a second, so anything the
   // shutdowns above recorded is still in memory at this point.
   await flushAuditLog();

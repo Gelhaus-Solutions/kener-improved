@@ -87,8 +87,15 @@ export function dispatchJobId(
   return `${consumer}.${eventId}.${target}.${attempt}`;
 }
 
-/** Builds the delivery rows one event owes, across every active consumer. */
-async function deliveriesFor(event: OutboxEvent, now: number): Promise<EventDeliveryInsert[]> {
+/**
+ * Builds the delivery rows one event owes, across every active consumer.
+ *
+ * Exported so a verification driver can ask the relay directly whether a
+ * suppressed event owes anybody anything. Asserting on `event.suppress` alone
+ * would only prove the flag was written; this is the function that decides what
+ * the flag actually means.
+ */
+export async function deliveriesFor(event: OutboxEvent, now: number): Promise<EventDeliveryInsert[]> {
   // Recorded but never delivered: bulk imports and replays set this so a year of
   // backfilled incidents does not page anyone.
   if (event.suppress) return [];

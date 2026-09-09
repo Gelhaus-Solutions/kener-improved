@@ -1,5 +1,6 @@
 import type { Knex as KnexType } from "knex";
 import { BaseRepository } from "./base.js";
+import { requireOrgId } from "../orgContext.js";
 import { hasFloorFunction, supportsInsertReturning } from "../capabilities.js";
 import GC from "../../../global-constants.js";
 import type { MonitoringStatus } from "../../../types/status.js";
@@ -481,6 +482,24 @@ export class MonitoringRepository extends BaseRepository {
     });
   }
 
+  /**
+   * Overwrites a window of a monitor's timeline with a fixed status.
+   *
+   * The admin "update monitoring data" action, and C7's backfill overlay.
+   *
+   * **`org_id` is stamped explicitly here, and it was missing.** This method
+   * writes through `knexUnscoped` rather than the scoped builder - it has to,
+   * because it batches inside its own transaction and the scoped proxy is a
+   * query builder rather than a transaction - and the scoped builder is also
+   * what stamps `org_id` on an insert. So every row this wrote landed with a
+   * null org, and `monitoring_data` is a tenant table: every read of it is
+   * `where org_id = ?`, which matches no null. The rows existed and nothing
+   * could see them.
+   *
+   * That was true of the admin action before C7 and would have made the whole of
+   * C7 silently do nothing visible: the backfill's entire purpose is to put
+   * history on the bars, and the bars read through the scoped path.
+   */
   async updateMonitoringData(
     monitor_tag: string,
     start: number,
@@ -492,6 +511,11 @@ export class MonitoringRepository extends BaseRepository {
   ): Promise<unknown[]> {
     const count = Math.floor((end - start) / 60) + 1;
     const timestamps = Array.from({ length: count }, (_, i) => start + i * 60);
+
+    // Null under `runAsSystem`, which is the deliberate cross-tenant mode. A row
+    // written there keeps the null it would have had anyway, rather than being
+    // assigned to whichever org happened to be first.
+    const orgId = requireOrgId("monitoring_data");
 
     // Generate random latency as latency ± deviation (never below 0)
     const generateLatency = () => {
@@ -506,6 +530,7 @@ export class MonitoringRepository extends BaseRepository {
       status: newStatus,
       type,
       latency: generateLatency(),
+      ...(orgId === null ? {} : { org_id: orgId }),
     }));
 
     const batchSize = 500;
@@ -516,6 +541,9 @@ export class MonitoringRepository extends BaseRepository {
       for (let i = 0; i < records.length; i += batchSize) {
         const batch = records.slice(i, i + batchSize);
         // Use raw insert with ON CONFLICT to update all fields including latency
+        // `org_id` is deliberately not in the merge list: an existing row already
+        // belongs to an org, and a conflict here means this window is being
+        // rewritten rather than reassigned.
         const result = await trx("monitoring_data")
           .insert(batch)
           .onConflict(["monitor_tag", "timestamp"])

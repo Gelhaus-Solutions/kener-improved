@@ -63,6 +63,21 @@ export interface IncidentInput {
   template_id?: number | null;
   /** C2c: when Kener first observed the problem. Only the alerting queue knows. */
   detected_at?: number | null;
+  /**
+   * C7: this incident describes something that already ended.
+   *
+   * The only thing it changes here is the end-date clamp. Suppression is a
+   * separate field, because "this is historical" and "do not tell anyone" are
+   * different claims and an importer might reasonably want the first without the
+   * second - re-recording last week's outage that everyone already heard about.
+   */
+  backfill?: boolean;
+  /** C7: the historical lifecycle, handed over whole. */
+  acknowledged_at?: number | null;
+  acknowledged_by_user_id?: number | null;
+  identified_at?: number | null;
+  mitigated_at?: number | null;
+  resolved_at?: number | null;
 }
 
 interface IncidentUpdateInput {
@@ -167,6 +182,7 @@ export const RemoveIncidentMonitor = async (incident_id: number, monitor_tag: st
       type: "incident.component_impact_changed",
       aggregate_id: incident_id,
       payload: { incident_id, monitor_tag, monitor_impact: null },
+      suppress: incidentExists.suppress_notifications === "YES",
     });
     return await db.removeIncidentMonitor(incident_id, monitor_tag);
   });
@@ -395,14 +411,31 @@ export const CreateIncident = async (data: IncidentInput): Promise<{ incident_id
     suppress_notifications: data.suppress_notifications === "YES" ? "YES" : "NO",
     template_id: data.template_id ?? null,
     detected_at: data.detected_at ?? null,
+    acknowledged_at: data.acknowledged_at ?? null,
+    acknowledged_by_user_id: data.acknowledged_by_user_id ?? null,
+    identified_at: data.identified_at ?? null,
+    mitigated_at: data.mitigated_at ?? null,
+    resolved_at: data.resolved_at ?? null,
   };
 
-  //incident_type == INCIDENT delete endDateTime
-  if (incident.incident_type === "INCIDENT") {
+  // The inherited clamp: an INCIDENT-typed row is open by definition, so an end
+  // time handed to the creator is discarded and only a RESOLVED comment can
+  // close it.
+  //
+  // **C7 is the one exception, and it is explicit rather than inferred.** A
+  // backfilled incident describes something that already ended, so it is created
+  // closed - there is no live timeline to resolve. Nothing else gets to skip
+  // this: an ordinary caller passing an end time is still a caller who has
+  // misunderstood how incidents close.
+  if (incident.incident_type === "INCIDENT" && !data.backfill) {
     incident.end_date_time = null;
   }
 
   //if endDateTime is provided and it is less than startDateTime, throw error
+  //
+  // Kept for backfill too, unlike what C7 suggests. An incident that ended
+  // before it began is not a historical record, it is a typo, and the import
+  // path is exactly where a typo arrives in bulk with nobody reading it.
   if (!!incident.end_date_time && incident.end_date_time < incident.start_date_time) {
     throw new Error("End date time cannot be less than start date time");
   }
@@ -420,6 +453,10 @@ export const CreateIncident = async (data: IncidentInput): Promise<{ incident_id
       type: isBackfill ? "incident.backfilled" : "incident.created",
       aggregate_id: newIncident.id,
       payload: { ...incident, incident_id: newIncident.id },
+      // C7. Recorded, never delivered. The event exists so the history is
+      // complete and a replay is possible; no consumer sees it, so nobody is
+      // mailed about an outage that ended last March.
+      suppress: incident.suppress_notifications === "YES",
     });
 
     return {
@@ -570,6 +607,11 @@ export const UpdateIncident = async (incident_id: number, data: IncidentUpdateIn
       aggregate_id: incident_id,
       payload: { incident_id, title: updateObject.title, state: updateObject.state, status: updateObject.status },
       diff: { before, after },
+      // C7. Every event this update emits inherits the incident's suppression,
+      // and it has to be every one: `AddIncidentComment` calls this on each
+      // backfilled comment, so a single unsuppressed `incident.resolved` would
+      // page everybody about an outage from last March.
+      suppress: incidentExists.suppress_notifications === "YES",
     } as const;
 
     await emit({ ...base, type: "incident.updated" });
@@ -744,6 +786,9 @@ export const AddIncidentMonitor = async (
         // the projection outside this codebase.
         payload: { incident_id, monitor_tag, component_impact, monitor_impact },
         diff: { before: { component_impact: previous }, after: { component_impact } },
+        // C7. Attaching a component to a backfilled incident is part of writing
+        // history, not news about it.
+        suppress: incidentExists.suppress_notifications === "YES",
       });
     }
 
@@ -857,6 +902,8 @@ export const AddIncidentComment = async (
   return await db.withTransaction(async () => {
     const c = await db.insertIncidentComment(incident_id, comment, state, commented_at);
 
+    const suppressed = incidentExists.suppress_notifications === "YES";
+
     const commentEvent = await emit({
       org_id: currentOrgId(),
       type: "incident.comment_added",
@@ -865,6 +912,10 @@ export const AddIncidentComment = async (
       // The comment is the incident's public timeline entry, so one comment must
       // notify exactly once even if the write is retried.
       idempotency_key: `incident.comment_added:${c.id}`,
+      // C7. This is the event that would do the damage: `comment_added` is the
+      // single thing the subscribers consumer mails on, so a backfilled timeline
+      // of six comments is six emails about an outage nobody can act on.
+      suppress: suppressed,
     });
 
     //update incident state
@@ -887,7 +938,16 @@ export const AddIncidentComment = async (
       // Deferred past the commit rather than awaited here. A queue push inside a
       // transaction can be picked up by a worker before the transaction commits,
       // and the worker then reads a comment that does not exist yet.
-      afterCommit(() => notifySubscribersOfComment(incidentExists, c, commentEvent.event_id));
+      //
+      // **The legacy path needs its own guard.** `suppress` stops the bus from
+      // delivering anything, but this call does not go through the bus - it is
+      // the pre-cutover sender, still live wherever the `subscribers` consumer
+      // has not been flipped. Relying on the event flag alone would suppress
+      // exactly the installs that had already migrated and mail everybody on the
+      // ones that had not.
+      if (!suppressed) {
+        afterCommit(() => notifySubscribersOfComment(incidentExists, c, commentEvent.event_id));
+      }
     }
 
     return c;

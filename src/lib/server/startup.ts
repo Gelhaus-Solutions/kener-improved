@@ -4,6 +4,7 @@ import mainScheduler from "./schedulers/appScheduler.js";
 import maintenanceScheduler from "./schedulers/maintenanceScheduler.js";
 import dailyCleanupScheduler from "./schedulers/dailyCleanup.js";
 import eventRelayQueue from "./queues/eventRelayQueue.js";
+import backfillQueue from "./queues/backfillQueue.js";
 import { registerAllConsumers } from "./events/consumers/index.js";
 import { InstallEnvProxy } from "./proxy.js";
 import { InvalidateAllSiteDataCaches } from "./cache/siteDataCache.js";
@@ -41,6 +42,11 @@ async function Startup(): Promise<void> {
   // Last of the schedulers, and only in this process: the relay and its dispatch
   // worker belong together, and the web process must never become one.
   await eventRelayQueue.start();
+
+  // C7. In this process for the same reason the relay is: writing a hundred
+  // thousand `monitoring_data` rows is scheduler work, and the web process must
+  // never be the thing doing it.
+  await backfillQueue.start();
 
   const runtimeVersion = version();
 

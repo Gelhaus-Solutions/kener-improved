@@ -8,6 +8,7 @@
   import * as Table from "$lib/components/ui/table/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import PlusIcon from "@lucide/svelte/icons/plus";
+  import UploadIcon from "@lucide/svelte/icons/upload";
   import ChevronLeftIcon from "@lucide/svelte/icons/chevron-left";
   import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
   import ExternalLinkIcon from "@lucide/svelte/icons/external-link";
@@ -153,6 +154,10 @@
       {/if}
     </div>
     <div class="flex items-center gap-3">
+      <Button variant="outline" href={clientResolver(resolve, "/manage/app/incidents/import")}>
+        <UploadIcon class="size-4" />
+        Import history
+      </Button>
       <Button onclick={createNewIncident}>
         <PlusIcon class="size-4" />
         New Incident

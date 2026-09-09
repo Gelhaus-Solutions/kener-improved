@@ -90,6 +90,12 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   deleteIncidentTemplate: "incidents.write",
   noteIncidentTemplateUsed: "incidents.write",
 
+  // Incident backfill (C7). Validation writes nothing and is a read; the import
+  // itself creates incidents and rewrites historical uptime, which is as much a
+  // write as anything in this codebase.
+  validateIncidentBackfill: "incidents.read",
+  backfillIncidents: "incidents.write",
+
   // Component dependencies (C3). Reading the graph is part of reading monitors;
   // editing it is monitor configuration, so both reuse the upstream monitor
   // permissions rather than inventing a pair nobody would think to grant.
@@ -215,6 +221,11 @@ export const ORG_ROUTE_PERMISSION_MAP: Record<string, string | null> = {
   // and moving an unrelated existing screen to free the name would be a bigger
   // change than the feature.
   "/(manage)/manage/app/incident-templates": "incidents.read",
+
+  // The backfill importer (C7). Nested under incidents, safe for the same reason
+  // the postmortem editor is: the sibling segment is `[incident_id]`, a numeric
+  // id, so a static `import` cannot shadow a real incident.
+  "/(manage)/manage/app/incidents/import": "incidents.read",
 };
 
 /** Permission ids the fork owns. Used by the seeds to tell them from upstream's. */
