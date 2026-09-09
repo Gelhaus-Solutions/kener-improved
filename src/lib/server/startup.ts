@@ -6,7 +6,9 @@ import dailyCleanupScheduler from "./schedulers/dailyCleanup.js";
 import eventRelayQueue from "./queues/eventRelayQueue.js";
 import { registerAllConsumers } from "./events/consumers/index.js";
 import { InstallEnvProxy } from "./proxy.js";
-import { InvalidateSiteDataCache } from "./cache/siteDataCache.js";
+import { InvalidateAllSiteDataCaches } from "./cache/siteDataCache.js";
+import db from "./db/db.js";
+import { runAcrossOrgs } from "./db/orgContext.js";
 
 process.env.TZ = "UTC";
 
@@ -17,7 +19,15 @@ async function Startup(): Promise<void> {
   // Seeds insert missing site_data keys through knex, with no way to reach the
   // cache. main.ts runs them just before this, so drop the cache once on boot;
   // otherwise a warm Redis could mask a newly seeded key for the whole TTL.
-  await InvalidateSiteDataCache();
+  //
+  // Every org, not just the default one. This used to call the single-org
+  // invalidation with no org context, which resolves to org 1 - so on a
+  // multi-tenant instance the boot drop covered one tenant and left every other
+  // reading a pre-migration cache that outlives the restart by 300 seconds.
+  await runAcrossOrgs(async () => {
+    const orgs = await db.getAllOrgs();
+    await InvalidateAllSiteDataCaches(orgs.map((o) => o.id));
+  });
   await mainScheduler.start();
   await maintenanceScheduler.start();
   await dailyCleanupScheduler.start();

@@ -126,3 +126,34 @@ export async function InvalidateSiteDataCache(): Promise<void> {
     console.warn("site data cache: invalidation failed, config may be stale until the TTL expires:", err);
   }
 }
+
+/**
+ * Drops every organisation's entry, in both layers.
+ *
+ * For boot, and only for boot. `InvalidateSiteDataCache` answers "this org's
+ * config changed", which is the right shape for a settings save and the wrong
+ * shape for a process that has just run migrations and seeds: those write
+ * through knex for **every** org, with no way to reach the cache, and the
+ * boot-time call ran with no org context - so it resolved to the default org and
+ * cleared exactly one of them. Redis holds the rest for 300 seconds and survives
+ * the restart, so a newly seeded key stayed masked for a second tenant while
+ * appearing correctly for the first.
+ *
+ * Orgs come from the table rather than from a Redis key scan on purpose. A
+ * `SCAN` over a shared Redis is somebody else's keyspace to walk, and the list
+ * of orgs is a short query against a database this process has just migrated.
+ */
+export async function InvalidateAllSiteDataCaches(orgIds: number[]): Promise<void> {
+  // Cleared wholesale rather than per id: the memo is this process's own map,
+  // it is empty at boot anyway, and a partial clear is the failure this function
+  // exists to stop repeating.
+  memo.clear();
+  for (const orgId of orgIds) {
+    try {
+      await withDeadline(deleteCache(siteDataCacheKey(orgId)));
+    } catch (err) {
+      // One unreachable key must not stop the others. The TTL is the backstop.
+      console.warn(`site data cache: could not invalidate org ${orgId} at boot:`, err);
+    }
+  }
+}
