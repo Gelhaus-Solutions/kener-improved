@@ -1,33 +1,31 @@
 import { GetAllSiteData, GetMonitoringDataPaginated, GetTriggerByID } from "$lib/server/controllers/controller.js";
-import { type MonitorAlertConfigRecord, type MonitorAlertV2Record } from "$lib/server/controllers/monitorAlertConfigController.js";
-import sendDiscord from "$lib/server/notification/discord_notification.js";
-import sendEmail from "$lib/server/notification/email_notification.js";
+import {
+  type MonitorAlertConfigRecord,
+  type MonitorAlertV2Record,
+} from "$lib/server/controllers/monitorAlertConfigController.js";
+import { dispatchTrigger } from "$lib/server/notification/dispatchTrigger.js";
 import { alertToVariables, siteDataToVariables } from "$lib/server/notification/notification_utils";
-import sendSlack from "$lib/server/notification/slack_notification.js";
-import sendWebhook from "$lib/server/notification/webhook_notification.js";
-import { type TriggerMeta } from "$lib/server/types/db.js";
+import { ActionError } from "../../types.js";
 import type { ActionDefinition, LegacyPayload } from "../../types.js";
 
 /**
- * Transcribed from the inherited action chain; behaviour unchanged.
+ * Sends one trigger on demand, so an operator can see it arrive.
  *
- * **Known duplication, deliberately left in place.** The four-branch dispatch
- * below (email / webhook / discord / slack) is the same dispatch
- * `sendAlertNotifications` performs in `queues/alertingQueue.ts`. Two copies of
- * "how to deliver a trigger" is exactly the kind of thing that drifts, and P6
- * extracts it into `notification/dispatchTrigger.ts` for both callers.
+ * The four-branch email/webhook/slack/discord dispatch this used to carry
+ * verbatim now lives in `notification/dispatchTrigger.ts`, shared with
+ * `alertingQueue` and the `triggers` consumer. It was flagged as known
+ * duplication when this action was transcribed, and E-cut2 is where it went:
+ * three copies of "how to send a trigger" was one more than the two that already
+ * risked drifting.
  *
- * It is not extracted here because that is a behaviour change to the alerting
- * path, and this item is a transcription. What this file does do is keep the
- * dispatch as one self-contained block reading from `triggerMetaParsed` and the
- * template variables, so the swap is a deletion plus one call rather than an
- * untangling.
+ * The alert below is fabricated on purpose. A test has no real alert to describe,
+ * so it builds one that exercises every template variable a real notification
+ * would fill in, which is the point of the button: an operator wants to know the
+ * template renders and the endpoint accepts it, not what yesterday's outage said.
  */
 export default {
   action: "testTrigger",
   handler: async (data: LegacyPayload) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let resp: any;
     const trigger = await GetTriggerByID(data.trigger_id);
     const siteData = await GetAllSiteData();
     if (!trigger || !siteData) {
@@ -39,7 +37,6 @@ export default {
     if (lastMonitoringData && lastMonitoringData.data && lastMonitoringData.data.length > 0) {
       testTag = lastMonitoringData.data[0].monitor_tag;
     }
-    const triggerMetaParsed = JSON.parse(trigger.trigger_meta) as TriggerMeta;
     const testAlert: MonitorAlertConfigRecord = {
       id: 1,
       monitor_tag: testTag,
@@ -66,41 +63,21 @@ export default {
 
     const templateSiteVars = siteDataToVariables(siteData);
     const templateAlertVars = alertToVariables(testAlert, testAlertData, templateSiteVars);
-    if (trigger.trigger_type === "webhook") {
-      resp = await sendWebhook(
-        triggerMetaParsed.webhook_body,
-        { ...templateAlertVars, ...templateSiteVars },
-        triggerMetaParsed.url,
-        JSON.stringify(triggerMetaParsed.headers),
-      );
-    } else if (trigger.trigger_type === "email") {
-      const toAddresses = triggerMetaParsed.to
-        .trim()
-        .split(",")
-        .map((addr) => addr.trim())
-        .filter((addr) => addr.length > 0);
-      resp = await sendEmail(
-        triggerMetaParsed.email_body,
-        triggerMetaParsed.email_subject,
-        { ...templateAlertVars, ...templateSiteVars },
-        toAddresses,
-        triggerMetaParsed.from,
-      );
-    } else if (trigger.trigger_type === "discord") {
-      resp = await sendDiscord(
-        triggerMetaParsed.discord_body,
-        { ...templateAlertVars, ...templateSiteVars },
-        triggerMetaParsed.url,
-      );
-    } else if (trigger.trigger_type === "slack") {
-      resp = await sendSlack(
-        triggerMetaParsed.slack_body,
-        { ...templateAlertVars, ...templateSiteVars },
-        triggerMetaParsed.url,
-      );
-    } else {
-      throw new Error("Unsupported trigger type for testing");
+
+    const result = await dispatchTrigger(trigger, { ...templateAlertVars, ...templateSiteVars });
+
+    // A test that quietly reports success when nothing was sent is worse than no
+    // test at all, so the two non-sending outcomes are raised rather than
+    // returned. The alerting path treats them as a row and carries on, because
+    // there it must not abandon the triggers behind this one; here there is
+    // nobody behind it and somebody is watching.
+    if (result.unsupported || result.skipped) {
+      throw new ActionError(400, result.error ?? `Nothing to send for a "${trigger.trigger_type}" trigger`);
     }
-    return resp;
+    if (!result.ok) {
+      throw new ActionError(502, result.error ?? "The trigger could not be delivered");
+    }
+
+    return result.response;
   },
 } satisfies ActionDefinition<LegacyPayload>;

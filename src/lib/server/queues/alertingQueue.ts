@@ -14,7 +14,7 @@ import {
   IsUptimeLessThanXPercent,
   IsUptimeGreaterThanXPercent,
 } from "../controllers/controller.js";
-import type { MonitorSettings, MonitorAlertConfigRecord, MonitorAlertV2Record, TriggerMeta } from "../types/db.js";
+import type { MonitorSettings, MonitorAlertConfigRecord, MonitorAlertV2Record } from "../types/db.js";
 import { GetMonitorsParsed } from "../controllers/controller.js";
 import {
   AddIncidentToAlert,
@@ -30,17 +30,16 @@ import { MayHaveAlertConfig } from "../cache/alertConfigTags.js";
 import { getUnixTime, differenceInSeconds } from "date-fns";
 import { parseDbTimestamp } from "../tool.js";
 import GC from "../../global-constants.js";
+import { dispatchTrigger } from "../notification/dispatchTrigger.js";
 import { alertToVariables, siteDataToVariables } from "../notification/notification_utils.js";
-import sendEmail from "../notification/email_notification.js";
-import sendWebhook from "$lib/server/notification/webhook_notification.js";
-import sendSlack from "$lib/server/notification/slack_notification.js";
-import sendDiscord from "$lib/server/notification/discord_notification.js";
 
 import type { SiteDataForNotification } from "../notification/types.js";
 import { emit } from "../events/emit.js";
 import { currentOrgId } from "../events/eventContext.js";
 import { recordLegacyDelivery } from "../events/legacyDeliveries.js";
 import { ALERT_TRIGGER_CONSUMER } from "../events/consumers/alertTrigger.js";
+import { effectiveMode } from "../events/consumers.js";
+import triggersConsumer from "../events/consumers/triggers.js";
 let alertingQueue: Queue | null = null;
 
 let worker: Worker | null = null;
@@ -122,113 +121,58 @@ async function sendAlertNotifications(
   /**
    * The alert event these notifications belong to, when the caller has one.
    *
-   * Optional so the trigger test path and anything else that calls this without
-   * an event keeps working. When it is present, each trigger gets a delivery row
-   * and a failure becomes visible on the delivery log instead of being swallowed
-   * along with everything else `notifyQuietly` catches.
+   * Optional so anything that calls this without an event keeps working. When it
+   * is present, each trigger gets a delivery row and a failure becomes visible
+   * on the delivery log instead of being swallowed along with everything else
+   * `notifyQuietly` catches.
    */
   eventId?: string,
 ): Promise<void> {
+  // The cutover switch. Once the `triggers` consumer is live it resolves the
+  // same triggers from the same event and sends them through the same
+  // `dispatchTrigger`, so continuing here would notify every destination twice.
+  //
+  // Checked at the top rather than per trigger: a flip landing halfway through
+  // this loop would send some of an alert's triggers from each path, which is
+  // the one outcome worse than either path alone.
+  if ((await effectiveMode(triggersConsumer)) === "live") {
+    return;
+  }
+
   const templateAlertVars = alertToVariables(monitor_alerts_configured, activeAlert, templateSiteVars, monitorTag);
   const triggers = await GetTriggersByMonitorAlertConfigId(monitor_alerts_configured.id);
   const orgId = currentOrgId();
+  const variables = { ...templateAlertVars, ...templateSiteVars };
 
-  for (let i = 0; i < triggers.length; i++) {
-    const trigger = triggers[i];
+  for (const trigger of triggers) {
+    const result = await dispatchTrigger(trigger, variables);
 
-    // Fetch trigger template
-    const triggerMetaParsed = JSON.parse(trigger.trigger_meta) as TriggerMeta;
-
-    // Recorded per trigger rather than per alert. One dead Discord webhook among
-    // four healthy destinations is the case that matters, and an alert-level row
-    // would report that as a single ambiguous outcome.
-    const started = Date.now();
-    let failure: string | null = null;
-    let sent = false;
-    let requestHeaders: Record<string, string> | null = null;
-
-    try {
-      // Handle only email for now
-      if (trigger.trigger_type === "email") {
-        const toAddresses = triggerMetaParsed.to
-          .trim()
-          .split(",")
-          .map((addr) => addr.trim())
-          .filter((addr) => addr.length > 0);
-        if (toAddresses.length === 0) {
-          continue;
-        }
-        requestHeaders = { to: toAddresses.join(", ") };
-        await sendEmail(
-          triggerMetaParsed.email_body,
-          triggerMetaParsed.email_subject,
-          { ...templateAlertVars, ...templateSiteVars },
-          toAddresses,
-          triggerMetaParsed.from,
-        );
-        sent = true;
-      } else if (trigger.trigger_type === "webhook") {
-        requestHeaders = { url: triggerMetaParsed.url };
-        const result = await sendWebhook(
-          triggerMetaParsed.webhook_body,
-          { ...templateAlertVars, ...templateSiteVars },
-          triggerMetaParsed.url,
-          JSON.stringify(triggerMetaParsed.headers),
-        );
-        // These senders report a failure by returning `{ error }` rather than by
-        // throwing, so a try/catch alone would record every one of them as a
-        // success.
-        failure = result?.error ?? null;
-        sent = !failure;
-      } else if (trigger.trigger_type === "discord") {
-        requestHeaders = { url: triggerMetaParsed.url };
-        const result = await sendDiscord(
-          triggerMetaParsed.discord_body,
-          { ...templateAlertVars, ...templateSiteVars },
-          triggerMetaParsed.url,
-        );
-        failure = result?.error ?? null;
-        sent = !failure;
-      } else if (trigger.trigger_type === "slack") {
-        requestHeaders = { url: triggerMetaParsed.url };
-        const result = await sendSlack(
-          triggerMetaParsed.slack_body,
-          { ...templateAlertVars, ...templateSiteVars },
-          triggerMetaParsed.url,
-        );
-        failure = result?.error ?? null;
-        sent = !failure;
-      } else {
-        throw new Error("Unsupported trigger type for testing");
-      }
-    } catch (error) {
-      failure = error instanceof Error ? error.message : String(error);
-    }
-
-    if (eventId) {
-      // The rendered body is deliberately not stored. The senders render it
-      // internally after substituting `$env` secrets, so capturing what actually
-      // went out would put credentials in the delivery log; the `triggers`
-      // consumer's shadow row carries the rendered body with those secrets left
-      // unresolved, which is the readable half of the pair.
+    // A skip writes no row, matching what this loop did before the delivery log
+    // existed. An email trigger with its addresses deleted is a configuration
+    // the operator can see on the triggers screen; a DEAD row per alert for it
+    // would be noise on the one screen that must stay readable.
+    if (eventId && !result.skipped) {
       await recordLegacyDelivery({
         event_id: eventId,
         org_id: orgId,
         consumer: ALERT_TRIGGER_CONSUMER,
         target_type: "trigger",
         target_id: String(trigger.id),
-        ok: sent,
-        error: failure,
-        request_headers: requestHeaders,
-        duration_ms: Date.now() - started,
+        ok: result.ok,
+        error: result.error,
+        request_headers: result.request_headers,
+        duration_ms: result.duration_ms,
       });
     }
 
     // Preserved from before the delivery log existed: one bad trigger must not
-    // stop the ones after it. The row above is what makes that survivable rather
-    // than silent.
-    if (failure) {
-      console.error(`Trigger ${trigger.id} (${trigger.trigger_type}) failed for alert ${activeAlert.id}: ${failure}`);
+    // stop the ones after it. An unsupported type used to `throw` here, which
+    // abandoned every trigger queued behind it; `dispatchTrigger` returns it as
+    // an ordinary failure instead, so the loop finishes.
+    if (result.error) {
+      console.error(
+        `Trigger ${trigger.id} (${trigger.trigger_type}) failed for alert ${activeAlert.id}: ${result.error}`,
+      );
     }
   }
 }

@@ -42,9 +42,11 @@ export const ALL_CONSUMERS: readonly EventConsumer[] = [
  * that teaches its legacy caller to stand down.
  *
  * `subscribers` left in E-cut1, when `subscriberQueue.push` learned to return
- * without doing anything once the consumer is live. `triggers` is still here
- * because `alertingQueue` still fires triggers inline; E-cut2 is what empties
- * this set.
+ * without doing anything once the consumer is live, and `triggers` left in
+ * E-cut2, when `sendAlertNotifications` learned the same. Empty is the correct
+ * end state rather than a sign this is unused: it stays because the next channel
+ * moved onto the bus needs it, and a consumer added without a thought about its
+ * flip is a consumer whose flip nobody thought about.
  *
  * Deliberately a named set rather than the old test, which was
  * `declared mode === "shadow"`. That test conflated two unrelated things: what
@@ -53,7 +55,7 @@ export const ALL_CONSUMERS: readonly EventConsumer[] = [
  * once one consumer was cut over the old test would have gone on refusing a flip
  * that is now perfectly safe.
  */
-export const UNCUT_CONSUMERS: ReadonlySet<string> = new Set(["triggers"]);
+export const UNCUT_CONSUMERS: ReadonlySet<string> = new Set<string>();
 
 /**
  * What each consumer is for, in an operator's words.
@@ -67,9 +69,10 @@ export const CONSUMER_DESCRIPTIONS: Record<string, string> = {
   webhook: "Delivers signed webhooks to your configured endpoints.",
   subscribers:
     "Sends the incident and maintenance emails your status page subscribers receive. In shadow it only rehearses them and the older path keeps sending.",
-  triggers: "Rehearses the alert notifications sent to your triggers. The existing path still sends them.",
+  triggers:
+    "Sends the alert notifications your triggers deliver, each with its own retries. In shadow it only rehearses them and the older path keeps sending.",
   email: "Retries subscriber emails sent before the notification cutover.",
-  alert_trigger: "Records alert trigger sends on the delivery log so a failed one is visible.",
+  alert_trigger: "Retries alert notifications sent before the notification cutover.",
 };
 
 /**

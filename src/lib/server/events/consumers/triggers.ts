@@ -3,6 +3,7 @@ import Mustache from "mustache";
 import { GetAllSiteData } from "../../controllers/siteDataController.js";
 import { GetTriggersByMonitorAlertConfigId } from "../../controllers/monitorAlertConfigController.js";
 import { alertToVariables, siteDataToVariables } from "../../notification/notification_utils.js";
+import { dispatchTrigger } from "../../notification/dispatchTrigger.js";
 import type { TriggerMeta, TriggerRecord } from "../../types/db.js";
 import type { EventConsumer, OutboxEvent, DeliveryTarget, DeliveryResult, DeliveryOptions } from "../types.js";
 
@@ -126,18 +127,6 @@ export const triggersConsumer: EventConsumer = {
   },
 
   async deliver(event: OutboxEvent, target: DeliveryTarget, options?: DeliveryOptions): Promise<DeliveryResult> {
-    if (!options?.dryRun) {
-      // As with the subscribers consumer: going live here also means
-      // `alertingQueue.notifyQuietly` must stop firing, in the same change, or
-      // every alert notifies twice.
-      return {
-        ok: false,
-        error:
-          "The triggers consumer is shadow-only until the P6 cutover. Going live also requires alertingQueue to stop calling notifyQuietly, or every alert notifies twice.",
-        permanent: true,
-      };
-    }
-
     const payload = payloadOf(event);
     const alertId = Number(payload.alert_id ?? event.aggregate_id);
     const configId = Number(payload.config_id);
@@ -158,21 +147,55 @@ export const triggersConsumer: EventConsumer = {
 
     const siteVars = siteDataToVariables(await GetAllSiteData());
     const alertVars = alertToVariables(config, alert, siteVars, String(payload.monitor_tag ?? ""));
-    const rendered = renderTrigger(trigger, meta, { ...alertVars, ...siteVars });
+    const variables = { ...alertVars, ...siteVars };
+    const rendered = renderTrigger(trigger, meta, variables);
 
-    if (!rendered) {
+    if (options?.dryRun) {
+      if (!rendered) {
+        return {
+          ok: false,
+          error: `Nothing to send for trigger ${trigger.id} of type "${trigger.trigger_type}"`,
+          permanent: true,
+        };
+      }
       return {
-        ok: false,
-        error: `Nothing to send for trigger ${trigger.id} of type "${trigger.trigger_type}"`,
-        permanent: true,
+        ok: true,
+        request_headers: rendered.headers,
+        request_body: rendered.body,
+        response_body: `Shadow: rendered ${trigger.trigger_type} trigger "${trigger.name}", not sent`,
       };
     }
 
+    // Live. The four-branch send is `notification/dispatchTrigger.ts`, the same
+    // call the alerting queue and the test button make, so a trigger delivered
+    // from the bus is delivered by exactly the code that delivered it before.
+    const result = await dispatchTrigger(trigger, variables);
+
+    // The body recorded is the one rendered above, not the one sent, and the
+    // difference is deliberate: `dispatchTrigger` returns no body because the
+    // senders substitute `$env` secrets immediately before sending, and storing
+    // that would put credentials in the delivery log. What is stored instead is
+    // the same message with `$env.FOO` left literal - readable enough to explain
+    // a failure, and safe to keep.
+    const request = {
+      request_headers: result.request_headers ?? rendered?.headers ?? null,
+      request_body: rendered?.body ?? null,
+      duration_ms: result.duration_ms,
+    };
+
+    if (result.ok) {
+      return { ok: true, ...request, response_body: `Sent ${trigger.trigger_type} trigger "${trigger.name}"` };
+    }
+
+    // An unsupported type and a trigger with nothing to send both go straight to
+    // DEAD. Neither can succeed on a retry, and both are configuration an
+    // operator can fix on the triggers screen - which they can only do if the
+    // row says so. The old path skipped both silently.
     return {
-      ok: true,
-      request_headers: rendered.headers,
-      request_body: rendered.body,
-      response_body: `Shadow: rendered ${trigger.trigger_type} trigger "${trigger.name}", not sent`,
+      ok: false,
+      ...request,
+      error: result.error ?? `Trigger ${trigger.id} could not be delivered`,
+      permanent: result.unsupported || result.skipped,
     };
   },
 };
