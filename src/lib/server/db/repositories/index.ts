@@ -12,6 +12,7 @@ export { UsersRepository } from "./users.js";
 export { SiteDataRepository } from "./site-data.js";
 export { IncidentsRepository } from "./incidents.js";
 export { PostmortemsRepository } from "./postmortems.js";
+export { IncidentTemplatesRepository } from "./incidentTemplates.js";
 export { ImagesRepository } from "./images.js";
 export { PagesRepository } from "./pages.js";
 export { MaintenancesRepository } from "./maintenances.js";

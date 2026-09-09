@@ -16,6 +16,7 @@ import { SiteDataRepository } from "./repositories/site-data.js";
 import { IncidentsRepository } from "./repositories/incidents.js";
 import { DependenciesRepository } from "./repositories/dependencies.js";
 import { PostmortemsRepository } from "./repositories/postmortems.js";
+import { IncidentTemplatesRepository } from "./repositories/incidentTemplates.js";
 import { ImagesRepository } from "./repositories/images.js";
 import { PagesRepository } from "./repositories/pages.js";
 import { MaintenancesRepository } from "./repositories/maintenances.js";
@@ -56,6 +57,16 @@ class DbImpl {
   private incidents!: IncidentsRepository;
   private dependencies!: DependenciesRepository;
   private postmortems!: PostmortemsRepository;
+  private incidentTemplates!: IncidentTemplatesRepository;
+
+  // ============ Incident templates (C4) ============
+  getIncidentTemplates!: IncidentTemplatesRepository["getIncidentTemplates"];
+  getIncidentTemplateById!: IncidentTemplatesRepository["getIncidentTemplateById"];
+  getIncidentTemplateByName!: IncidentTemplatesRepository["getIncidentTemplateByName"];
+  insertIncidentTemplate!: IncidentTemplatesRepository["insertIncidentTemplate"];
+  updateIncidentTemplate!: IncidentTemplatesRepository["updateIncidentTemplate"];
+  deleteIncidentTemplate!: IncidentTemplatesRepository["deleteIncidentTemplate"];
+  incrementIncidentTemplateUsage!: IncidentTemplatesRepository["incrementIncidentTemplateUsage"];
 
   // ============ Postmortems (C1) ============
   getPostmortemByIncidentId!: PostmortemsRepository["getPostmortemByIncidentId"];
@@ -553,6 +564,17 @@ class DbImpl {
     this.users = new UsersRepository(this.knex);
     this.siteData = new SiteDataRepository(this.knex);
     this.incidents = new IncidentsRepository(this.knex);
+    this.incidentTemplates = new IncidentTemplatesRepository(this.knex);
+    this.getIncidentTemplates = this.incidentTemplates.getIncidentTemplates.bind(this.incidentTemplates);
+    this.getIncidentTemplateById = this.incidentTemplates.getIncidentTemplateById.bind(this.incidentTemplates);
+    this.getIncidentTemplateByName = this.incidentTemplates.getIncidentTemplateByName.bind(this.incidentTemplates);
+    this.insertIncidentTemplate = this.incidentTemplates.insertIncidentTemplate.bind(this.incidentTemplates);
+    this.updateIncidentTemplate = this.incidentTemplates.updateIncidentTemplate.bind(this.incidentTemplates);
+    this.deleteIncidentTemplate = this.incidentTemplates.deleteIncidentTemplate.bind(this.incidentTemplates);
+    this.incrementIncidentTemplateUsage = this.incidentTemplates.incrementIncidentTemplateUsage.bind(
+      this.incidentTemplates,
+    );
+
     this.postmortems = new PostmortemsRepository(this.knex);
     this.getPostmortemByIncidentId = this.postmortems.getPostmortemByIncidentId.bind(this.postmortems);
     this.getPostmortemById = this.postmortems.getPostmortemById.bind(this.postmortems);

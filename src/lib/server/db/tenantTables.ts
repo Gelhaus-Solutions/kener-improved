@@ -54,6 +54,7 @@ export const TENANT_TABLES: ReadonlySet<string> = new Set([
   "component_dependencies",
   "monitor_rollup_settings",
   "incident_postmortems",
+  "incident_templates",
   "audit_log",
   "event_outbox",
   "event_deliveries",

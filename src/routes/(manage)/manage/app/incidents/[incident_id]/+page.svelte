@@ -119,6 +119,105 @@
 
   const states = [GC.INVESTIGATING, GC.IDENTIFIED, GC.MONITORING, GC.RESOLVED];
 
+  // C4: start from a template.
+  //
+  // **Applying a template fills this form. It never creates anything.** The
+  // Create button below is the same one a hand-written incident uses, so there is
+  // exactly one write path and a future change to incident creation is made once.
+  interface TemplateSummary {
+    id: number;
+    name: string;
+    description: string | null;
+    usage_count: number;
+    default_severity: string | null;
+    variables: Array<{
+      key: string;
+      label: string;
+      type: string;
+      required: boolean;
+      default: string;
+      options: string[];
+    }>;
+  }
+
+  interface AppliedTemplate {
+    incident: { title: string; severity: string | null; state: string | null; template_id: number };
+    first_comment: string | null;
+    components: Array<{ monitor_tag: string; component_impact: string }>;
+    missing_required: string[];
+    unresolved: string[];
+  }
+
+  let templates = $state<TemplateSummary[]>([]);
+  let templateDialogOpen = $state(false);
+  let selectedTemplate = $state<TemplateSummary | null>(null);
+  let templateValues = $state<Record<string, string>>({});
+  let preview = $state<AppliedTemplate | null>(null);
+  let previewing = $state(false);
+  // Recorded on the incident and counted after it is created, so the usage count
+  // measures incidents opened rather than previews rendered.
+  let appliedTemplateId = $state<number | null>(null);
+
+  async function fetchTemplates() {
+    try {
+      const response = await fetch(clientResolver(resolve, "/manage/api"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "getIncidentTemplates", data: {} })
+      });
+      const result = await response.json();
+      if (Array.isArray(result)) templates = result;
+    } catch {
+      // A missing template list must not break the create form around it.
+    }
+  }
+
+  function openTemplate(template: TemplateSummary) {
+    selectedTemplate = template;
+    templateValues = Object.fromEntries(template.variables.map((v) => [v.key, v.default]));
+    preview = null;
+    void refreshPreview();
+  }
+
+  async function refreshPreview() {
+    if (!selectedTemplate) return;
+    previewing = true;
+    try {
+      const response = await fetch(clientResolver(resolve, "/manage/api"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "applyIncidentTemplate",
+          data: { id: selectedTemplate.id, values: templateValues }
+        })
+      });
+      const result = await response.json();
+      if (!result?.error) preview = result;
+    } catch {
+      // Leave the last good preview on screen rather than blanking it.
+    } finally {
+      previewing = false;
+    }
+  }
+
+  /** Fills the form from the preview. Still creates nothing. */
+  function useTemplate() {
+    if (!preview) return;
+    incident.title = preview.incident.title;
+    if (preview.incident.severity) incident.severity = preview.incident.severity;
+    if (preview.first_comment) firstComment = preview.first_comment;
+    if (preview.components.length > 0) {
+      incidentMonitors = preview.components.map((c) => ({
+        monitor_tag: c.monitor_tag,
+        component_impact: c.component_impact
+      }));
+    }
+    appliedTemplateId = preview.incident.template_id;
+    templateDialogOpen = false;
+    selectedTemplate = null;
+    toast.success("Template applied. Review it and create the incident.");
+  }
+
   // C2c: the response timeline and the durations derived from it.
   interface IncidentMetrics {
     timestamps: {
@@ -375,7 +474,9 @@
               state: GC.INVESTIGATING,
               incident_type: GC.INCIDENT,
               is_global: incident.is_global,
-              severity: incident.severity
+              severity: incident.severity,
+              // C4. The only trace a template leaves on the incident it produced.
+              template_id: appliedTemplateId
             }
           })
         });
@@ -384,6 +485,17 @@
           toast.error(result.error);
         } else {
           const incidentId = result.incident_id;
+
+          // Counted here rather than when the preview rendered, so the number
+          // says what people reach for during an outage rather than who was
+          // browsing.
+          if (appliedTemplateId !== null) {
+            await fetch(clientResolver(resolve, "/manage/api"), {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "noteIncidentTemplateUsed", data: { id: appliedTemplateId } })
+            });
+          }
 
           // Add monitors
           for (const monitor of incidentMonitors) {
@@ -798,6 +910,10 @@
   $effect(() => {
     fetchIncident();
     fetchAvailableMonitors();
+    // Only on the create form: a template is something you start from, never
+    // something you apply to an incident that already exists and already has
+    // customers reading it.
+    if (isNew) fetchTemplates();
   });
 </script>
 
@@ -816,6 +932,12 @@
       </Breadcrumb.List>
     </Breadcrumb.Root>
     <div class="flex gap-2">
+      {#if isNew && templates.length > 0}
+        <Button variant="outline" size="sm" onclick={() => (templateDialogOpen = true)}>
+          <FileTextIcon class="size-4" />
+          Start from template
+        </Button>
+      {/if}
       {#if !isNew}
         <Button
           variant="outline"
@@ -1371,3 +1493,147 @@
     {/if}
   {/if}
 </div>
+
+<!-- C4: pick a template, fill its variables, see exactly what would be created.
+     Choosing one fills the form above; the Create button is still what writes. -->
+<Dialog.Root bind:open={templateDialogOpen} onOpenChange={(o) => !o && (selectedTemplate = null)}>
+  <Dialog.Content class="max-h-[85vh] max-w-2xl overflow-y-auto">
+    <Dialog.Header>
+      <Dialog.Title>{selectedTemplate ? selectedTemplate.name : "Start from a template"}</Dialog.Title>
+      <Dialog.Description>
+        {#if selectedTemplate}
+          Fill in what this template asks for. Nothing is created until you review it and hit Create Incident.
+        {:else}
+          Most used first, because during an outage the one you want is usually the one you used last time.
+        {/if}
+      </Dialog.Description>
+    </Dialog.Header>
+
+    {#if !selectedTemplate}
+      <div class="space-y-2 py-2">
+        {#each templates as template (template.id)}
+          <button
+            type="button"
+            class="hover:bg-muted w-full rounded-md border p-3 text-left transition-colors"
+            onclick={() => openTemplate(template)}
+          >
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="font-medium">{template.name}</span>
+              {#if template.default_severity}
+                <Badge variant="outline">{template.default_severity}</Badge>
+              {/if}
+              <Badge variant="secondary">Used {template.usage_count}×</Badge>
+            </div>
+            {#if template.description}
+              <p class="text-muted-foreground mt-1 text-sm">{template.description}</p>
+            {/if}
+          </button>
+        {/each}
+      </div>
+    {:else}
+      <div class="space-y-4 py-2">
+        {#each selectedTemplate.variables as variable (variable.key)}
+          <div class="space-y-2">
+            <Label for={`tv-${variable.key}`}>
+              {variable.label}
+              {#if variable.required}<span class="text-destructive">*</span>{/if}
+            </Label>
+            {#if variable.type === "select"}
+              <Select.Root
+                type="single"
+                value={templateValues[variable.key] ?? ""}
+                onValueChange={(v) => {
+                  templateValues[variable.key] = v ?? "";
+                  void refreshPreview();
+                }}
+              >
+                <Select.Trigger class="w-full">{templateValues[variable.key] || "Choose"}</Select.Trigger>
+                <Select.Content>
+                  {#each variable.options as option (option)}
+                    <Select.Item value={option}>{option}</Select.Item>
+                  {/each}
+                </Select.Content>
+              </Select.Root>
+            {:else if variable.type === "textarea"}
+              <Textarea
+                id={`tv-${variable.key}`}
+                rows={3}
+                value={templateValues[variable.key] ?? ""}
+                oninput={(e) => {
+                  templateValues[variable.key] = (e.currentTarget as HTMLTextAreaElement).value;
+                }}
+                onblur={() => void refreshPreview()}
+              />
+            {:else}
+              <Input
+                id={`tv-${variable.key}`}
+                type={variable.type === "number" ? "number" : "text"}
+                value={templateValues[variable.key] ?? ""}
+                oninput={(e) => {
+                  templateValues[variable.key] = (e.currentTarget as HTMLInputElement).value;
+                }}
+                onblur={() => void refreshPreview()}
+              />
+            {/if}
+          </div>
+        {/each}
+
+        {#if preview}
+          <div class="space-y-3 rounded-md border p-3">
+            <div>
+              <p class="text-muted-foreground text-xs tracking-wide uppercase">Title</p>
+              <p class="font-medium wrap-break-word">{preview.incident.title}</p>
+            </div>
+            {#if preview.first_comment}
+              <div>
+                <p class="text-muted-foreground text-xs tracking-wide uppercase">First update</p>
+                <div class="prose prose-sm dark:prose-invert max-w-none">
+                  <SveltePurify html={mdToHTML(preview.first_comment)} />
+                </div>
+              </div>
+            {/if}
+            {#if preview.components.length > 0}
+              <div>
+                <p class="text-muted-foreground text-xs tracking-wide uppercase">Components</p>
+                <p class="text-sm">
+                  {preview.components
+                    .map(
+                      (c) =>
+                        `${availableMonitors.find((m) => m.tag === c.monitor_tag)?.name ?? c.monitor_tag} (${impactLabel(c.component_impact)})`
+                    )
+                    .join(", ")}
+                </p>
+              </div>
+            {/if}
+
+            {#if preview.missing_required.length > 0}
+              <p class="text-destructive flex items-center gap-1 text-sm">
+                <AlertTriangleIcon class="size-4" />
+                Still needed: {preview.missing_required.join(", ")}
+              </p>
+            {/if}
+            {#if preview.unresolved.length > 0}
+              <p class="text-destructive flex items-center gap-1 text-sm">
+                <AlertTriangleIcon class="size-4" />
+                Nothing fills {preview.unresolved.map((u) => `{{${u}}}`).join(", ")}, so it will render blank.
+              </p>
+            {/if}
+          </div>
+        {:else if previewing}
+          <div class="flex justify-center py-4"><Spinner /></div>
+        {/if}
+      </div>
+    {/if}
+
+    <Dialog.Footer>
+      {#if selectedTemplate}
+        <Button variant="outline" onclick={() => (selectedTemplate = null)}>Back</Button>
+        <Button onclick={useTemplate} disabled={!preview || preview.missing_required.length > 0}>
+          Use this template
+        </Button>
+      {:else}
+        <Button variant="outline" onclick={() => (templateDialogOpen = false)}>Cancel</Button>
+      {/if}
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>

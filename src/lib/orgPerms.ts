@@ -78,6 +78,18 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   unpublishPostmortem: "incidents.write",
   deletePostmortem: "incidents.write",
 
+  // Incident templates (C4). Same call as postmortems: a template is incident
+  // communication written in advance, so it reuses the incident permissions.
+  // `applyIncidentTemplate` is a *read* - it renders a preview and writes
+  // nothing - and mapping it to `incidents.write` would mean somebody who may
+  // look at incidents but not open one could not see what a template would
+  // produce, which is the wrong side of the line.
+  getIncidentTemplates: "incidents.read",
+  applyIncidentTemplate: "incidents.read",
+  saveIncidentTemplate: "incidents.write",
+  deleteIncidentTemplate: "incidents.write",
+  noteIncidentTemplateUsed: "incidents.write",
+
   // Component dependencies (C3). Reading the graph is part of reading monitors;
   // editing it is monitor configuration, so both reuse the upstream monitor
   // permissions rather than inventing a pair nobody would think to grant.
@@ -197,6 +209,12 @@ export const ORG_ROUTE_PERMISSION_MAP: Record<string, string | null> = {
   // shadow anything. Opening it needs only `incidents.read`; every button on it
   // is gated on `incidents.write` by its own action.
   "/(manage)/manage/app/incidents/[incident_id]/postmortem": "incidents.read",
+
+  // The incident template manager (C4). A sibling of `/incidents/` rather than a
+  // child, because `/manage/app/templates` is already the email template editor
+  // and moving an unrelated existing screen to free the name would be a bigger
+  // change than the feature.
+  "/(manage)/manage/app/incident-templates": "incidents.read",
 };
 
 /** Permission ids the fork owns. Used by the seeds to tell them from upstream's. */

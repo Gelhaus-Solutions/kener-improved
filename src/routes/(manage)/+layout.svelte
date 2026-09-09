@@ -15,6 +15,7 @@
   import BellIcon from "@lucide/svelte/icons/bell";
   import CodeIcon from "@lucide/svelte/icons/code";
   import CloudAlertIcon from "@lucide/svelte/icons/cloud-alert";
+  import FileTextIcon from "@lucide/svelte/icons/file-text";
   import ClockAlertIcon from "@lucide/svelte/icons/clock-alert";
   import BookOpenIcon from "@lucide/svelte/icons/book-open";
   import KeyIcon from "@lucide/svelte/icons/key";
@@ -54,6 +55,10 @@
       items: [
         { title: "Monitors", url: "/manage/app/monitors", icon: BlendIcon },
         { title: "Incidents", url: "/manage/app/incidents", icon: CloudAlertIcon },
+        // C4. Beside Incidents rather than nested under it: an operator opening
+        // an incident reaches a template through the create form, and the only
+        // people who come here are the ones maintaining the templates themselves.
+        { title: "Incident Templates", url: "/manage/app/incident-templates", icon: FileTextIcon },
         { title: "Maintenances", url: "/manage/app/maintenances", icon: ClockAlertIcon },
         { title: "Alerts", url: "/manage/app/alerts", icon: SirenIcon },
         { title: "Monitoring Data", url: "/manage/app/monitoring-data", icon: DatabaseIcon }
