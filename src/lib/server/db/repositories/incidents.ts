@@ -513,6 +513,48 @@ export class IncidentsRepository extends BaseRepository {
     return this.groupIncidentsByIdForMonitorList(rows);
   }
 
+  /**
+   * The component impacts open incidents currently declare, for page status.
+   *
+   * A separate, narrower query rather than a reuse of
+   * `getOngoingIncidentsForMonitorList`, and the separation is the point: that
+   * one exists to render the incident list and is called only when the page's
+   * display settings say to show incidents. Deriving status from it would mean
+   * an operator hiding the incident list also made the page report itself
+   * healthy. What a page *is* and what it *shows* are different questions.
+   *
+   * Carries `impact_override` alongside each row so the caller can apply the
+   * incident-level pin without a second query.
+   */
+  async getDeclaredIncidentImpacts(
+    timestamp: number,
+    monitorTags: string[],
+  ): Promise<
+    Array<{
+      monitor_tag: string;
+      monitor_impact: string | null;
+      component_impact: string | null;
+      impact_override: string | null;
+    }>
+  > {
+    if (monitorTags.length === 0) return [];
+    return await this.table("incidents")
+      .select(
+        "incident_monitors.monitor_tag",
+        "incident_monitors.monitor_impact",
+        "incident_monitors.component_impact",
+        "incidents.impact_override",
+      )
+      .join("incident_monitors", "incidents.id", "incident_monitors.incident_id")
+      .whereIn("incident_monitors.monitor_tag", monitorTags)
+      .andWhere("incidents.state", "!=", GC.RESOLVED)
+      .andWhere("incidents.incident_type", GC.INCIDENT)
+      .andWhere("incidents.start_date_time", "<=", timestamp)
+      .andWhere(function () {
+        this.whereNull("incidents.end_date_time").orWhere("incidents.end_date_time", ">=", timestamp);
+      });
+  }
+
   async geAllGlobalOngoingIncidents(timestamp: number, tags?: string[]): Promise<IncidentForMonitorList[]> {
     const query = this.table("incidents")
       .select(

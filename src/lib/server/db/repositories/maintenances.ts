@@ -526,6 +526,33 @@ export class MaintenancesRepository extends BaseRepository {
       .orderBy("maintenances_events.start_date_time", "desc");
     return this.groupMaintenancesByIdForMonitorList(rows);
   }
+  /**
+   * The component impacts ongoing maintenances currently declare.
+   *
+   * The maintenance twin of `getDeclaredIncidentImpacts`, and separate from the
+   * rendering query for the same reason: page status must not depend on whether
+   * the page is configured to display maintenances.
+   */
+  async getDeclaredMaintenanceImpacts(
+    timestamp: number,
+    monitorTags: string[],
+  ): Promise<Array<{ monitor_tag: string; monitor_impact: string | null; component_impact: string | null }>> {
+    if (monitorTags.length === 0) return [];
+    return await this.table("maintenances_events")
+      .select(
+        "maintenance_monitors.monitor_tag",
+        "maintenance_monitors.monitor_impact",
+        "maintenance_monitors.component_impact",
+      )
+      .join("maintenances", "maintenances_events.maintenance_id", "maintenances.id")
+      .join("maintenance_monitors", "maintenances_events.maintenance_id", "maintenance_monitors.maintenance_id")
+      .whereIn("maintenance_monitors.monitor_tag", monitorTags)
+      .andWhere("maintenances.status", GC.ACTIVE)
+      .whereIn("maintenances_events.status", [GC.ONGOING])
+      .andWhere("maintenances_events.start_date_time", "<=", timestamp)
+      .andWhere("maintenances_events.end_date_time", ">=", timestamp);
+  }
+
   async getAllGlobalOngoingMaintenanceEvents(
     timestamp: number,
     tags?: string[],

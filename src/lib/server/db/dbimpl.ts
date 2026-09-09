@@ -220,6 +220,7 @@ class DbImpl {
   getLastMaintenanceByMonitorTags!: IncidentsRepository["getLastMaintenanceByMonitorTags"];
   getOngoingIncidentsByMonitorTags!: IncidentsRepository["getOngoingIncidentsByMonitorTags"];
   getOngoingIncidentsForMonitorList!: IncidentsRepository["getOngoingIncidentsForMonitorList"];
+  getDeclaredIncidentImpacts!: IncidentsRepository["getDeclaredIncidentImpacts"];
   getOngoingIncidentsForMonitorListWithComments!: IncidentsRepository["getOngoingIncidentsForMonitorListWithComments"];
   geAllGlobalOngoingIncidents!: IncidentsRepository["geAllGlobalOngoingIncidents"];
   getAllGlobalOngoingIncidentsWithComments!: IncidentsRepository["getAllGlobalOngoingIncidentsWithComments"];
@@ -318,6 +319,7 @@ class DbImpl {
 
   // ============ Maintenance Events for Monitor List ============
   getOngoingMaintenanceEventsForMonitorList!: MaintenancesRepository["getOngoingMaintenanceEventsForMonitorList"];
+  getDeclaredMaintenanceImpacts!: MaintenancesRepository["getDeclaredMaintenanceImpacts"];
   getAllGlobalOngoingMaintenanceEvents!: MaintenancesRepository["getAllGlobalOngoingMaintenanceEvents"];
   getPastMaintenanceEventsForMonitorList!: MaintenancesRepository["getPastMaintenanceEventsForMonitorList"];
   getUpcomingMaintenanceEventsForMonitorList!: MaintenancesRepository["getUpcomingMaintenanceEventsForMonitorList"];
@@ -716,6 +718,7 @@ class DbImpl {
     this.getLastMaintenanceByMonitorTags = this.incidents.getLastMaintenanceByMonitorTags.bind(this.incidents);
     this.getOngoingIncidentsByMonitorTags = this.incidents.getOngoingIncidentsByMonitorTags.bind(this.incidents);
     this.getOngoingIncidentsForMonitorList = this.incidents.getOngoingIncidentsForMonitorList.bind(this.incidents);
+    this.getDeclaredIncidentImpacts = this.incidents.getDeclaredIncidentImpacts.bind(this.incidents);
     this.getOngoingIncidentsForMonitorListWithComments =
       this.incidents.getOngoingIncidentsForMonitorListWithComments.bind(this.incidents);
     this.getResolvedIncidentsForMonitorList = this.incidents.getResolvedIncidentsForMonitorList.bind(this.incidents);
@@ -820,6 +823,7 @@ class DbImpl {
     this.getUpcomingMaintenanceEventsByMonitorTags = this.maintenances.getUpcomingMaintenanceEventsByMonitorTags.bind(
       this.maintenances,
     );
+    this.getDeclaredMaintenanceImpacts = this.maintenances.getDeclaredMaintenanceImpacts.bind(this.maintenances);
     this.getOngoingMaintenanceEventsForMonitorList = this.maintenances.getOngoingMaintenanceEventsForMonitorList.bind(
       this.maintenances,
     );

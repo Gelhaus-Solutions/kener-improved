@@ -5,6 +5,7 @@ import auditConsumer from "./audit.js";
 import subscribersConsumer from "./subscribers.js";
 import triggersConsumer from "./triggers.js";
 import alertTriggerConsumer from "./alertTrigger.js";
+import pageStatusConsumer from "./pageStatus.js";
 import type { EventConsumer } from "../types.js";
 
 // The one place that says which consumers exist.
@@ -25,6 +26,7 @@ import type { EventConsumer } from "../types.js";
 /** Every consumer, in the order the admin screen lists them. */
 export const ALL_CONSUMERS: readonly EventConsumer[] = [
   auditConsumer,
+  pageStatusConsumer,
   webhookConsumer,
   subscribersConsumer,
   triggersConsumer,
@@ -66,6 +68,8 @@ export const UNCUT_CONSUMERS: ReadonlySet<string> = new Set<string>();
  */
 export const CONSUMER_DESCRIPTIONS: Record<string, string> = {
   audit: "Writes an audit log entry for every change that reaches the bus, including API and scheduler changes.",
+  page_status:
+    "Recomputes each status page's overall status when an incident, maintenance or monitor changes, and announces a transition.",
   webhook: "Delivers signed webhooks to your configured endpoints.",
   subscribers:
     "Sends the incident and maintenance emails your status page subscribers receive. In shadow it only rehearses them and the older path keeps sending.",

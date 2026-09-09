@@ -2,7 +2,7 @@ import db from "../db/db.js";
 import { GetMinuteStartNowTimestampUTC, BeginningOfMinute, BeginningOfDay } from "../tool.js";
 import { GetPageByPathWithMonitors, GetLatestMonitoringDataAllActive } from "./controller.js";
 import { GetMonitorsParsed } from "./monitorsController.js";
-import { GetStatusSummary, GetStatusBgColor } from "../../clientTools";
+import { getPageStatus, type LatestStatus, type PageStatus } from "../incidents/pageStatus.js";
 
 import type {
   IncidentRecord,
@@ -149,7 +149,7 @@ export interface PageNavItem {
 }
 
 export interface PageDashboardData {
-  pageStatus: { statusSummary: string; statusClass: string };
+  pageStatus: PageStatus;
   ongoingIncidents: IncidentForMonitorListWithComments[];
   ongoingMaintenances: MaintenanceEventsMonitorList[];
   upcomingMaintenances: MaintenanceEventsMonitorList[];
@@ -161,52 +161,12 @@ export interface PageDashboardData {
   metaPageDescription?: string;
 }
 
-const BuildPageStatus = (latestData: Array<{ status?: string | null; latency?: number | null }>, nowTs: number) => {
-  let upsInLatestData = 0;
-  let downsInLatestData = 0;
-  let degradedsInLatestData = 0;
-  let maintenancesInLatestData = 0;
-  let latencySum = 0;
-  let maxLatency = 0;
-  let minLatency = Infinity;
-
-  for (const data of latestData) {
-    if (data.status === GC.UP) {
-      upsInLatestData++;
-    } else if (data.status === GC.DOWN) {
-      downsInLatestData++;
-    } else if (data.status === GC.DEGRADED) {
-      degradedsInLatestData++;
-    } else if (data.status === GC.MAINTENANCE) {
-      maintenancesInLatestData++;
-    }
-
-    const latency = data.latency || 0;
-    latencySum += latency;
-    if (latency > maxLatency) {
-      maxLatency = latency;
-    }
-    if (latency < minLatency) {
-      minLatency = latency;
-    }
-  }
-
-  const item: TimestampStatusCount = {
-    ts: nowTs,
-    countOfUp: upsInLatestData,
-    countOfDown: downsInLatestData,
-    countOfDegraded: degradedsInLatestData,
-    countOfMaintenance: maintenancesInLatestData,
-    avgLatency: latencySum / (latestData.length || 1),
-    maxLatency,
-    minLatency: minLatency === Infinity ? 0 : minLatency,
-  };
-
-  return {
-    statusSummary: GetStatusSummary(item),
-    statusClass: GetStatusBgColor(item),
-  };
-};
+// `BuildPageStatus` lived here and collapsed the latest sample of every monitor
+// into one headline. It is gone: the same collapse now happens in
+// `incidents/pageStatus.ts`, over each component's *derived* status rather than
+// its raw sample, so an operator declaring a Partial Outage is reflected in the
+// headline and in the API answer identically. See ADR 0007 for the collapse
+// itself, which is unchanged.
 
 export const BuildNotificationPayload = (
   ongoingIncidents: IncidentForMonitorListWithComments[],
@@ -357,7 +317,7 @@ export const GetPageDashboardData = async (
 
   if (monitorTags.length === 0) {
     return {
-      pageStatus: BuildPageStatus([], nowTs),
+      pageStatus: await getPageStatus([], nowTs),
       ongoingIncidents: [],
       ongoingMaintenances: [],
       upcomingMaintenances: [],
@@ -390,7 +350,11 @@ export const GetPageDashboardData = async (
       : Promise.resolve([] as MaintenanceEventsMonitorList[]),
   ]);
 
-  const pageStatus = BuildPageStatus(latestData, nowTs);
+  // Derived server-side over the components, not collapsed from raw samples
+  // (C2b). The value the page prints, the value the API returns and the value a
+  // `page.status_changed` webhook carries are now the same computation, which is
+  // what makes them capable of agreeing.
+  const pageStatus = await getPageStatus(monitorTags, nowTs, latestData as LatestStatus[]);
   const monitorGroupMembersByTag: Record<string, string[]> = {};
 
   for (const monitor of parsedMonitors) {
