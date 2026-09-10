@@ -2,7 +2,7 @@ import { json, error } from "@sveltejs/kit";
 import type { APIServerRequest } from "$lib/server/types/api-server";
 import db from "$lib/server/db/db";
 import { BeginningOfDay, GetMinuteStartNowTimestampUTC, GetMinuteStartTimestampUTC } from "$lib/server/tool";
-import { GetMonitorsParsed } from "../../controllers/monitorsController";
+import { ResolveVisiblePublicMonitor } from "../../controllers/publicMonitorResolver.js";
 import { ParseLatency } from "$lib/clientTools";
 
 interface DayDetailRequest {
@@ -111,11 +111,12 @@ export default async function post(req: APIServerRequest): Promise<Response> {
       req.body.nowAtTz ? parseInt(req.body.nowAtTz || "0", 10) : GetMinuteStartNowTimestampUTC(),
     ) + 60;
 
-  const monitors = await GetMonitorsParsed({ tag: body.tag });
-  if (!monitors || monitors.length === 0) {
+  // Visible, not merely existing (KENER-126). Only `monitor.tag` is used below,
+  // so the raw record this returns is all this endpoint ever needed.
+  const monitor = await ResolveVisiblePublicMonitor(body.tag);
+  if (!monitor) {
     return error(404, { message: "Monitor not found" });
   }
-  const monitor = monitors[0];
 
   // Get raw monitoring data for the day
   const rawData = await db.getMonitoringData(monitor.tag, startOfDayTodayAtTz, nowAtTz);

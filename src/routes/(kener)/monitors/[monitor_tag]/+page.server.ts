@@ -85,6 +85,17 @@ export const load: PageServerLoad = async ({ params, parent }) => {
 
   if (extendedTags.length > 0) {
     const parsedExtendedMonitors = await GetMonitorsParsed({ tags: extendedTags, status: "ACTIVE", is_hidden: "NO" });
+    // KENER-126: this list is serialised into the page and the browser then asks
+    // the bar endpoint for each tag in it. Taken straight from `type_data` it
+    // published the tag of any hidden or inactive group member, which is how a
+    // monitor an operator hid became reachable. Narrowed to the members that
+    // survived the query above, which already applies the visibility filter.
+    //
+    // A GROUP monitor's own *status* still comes from every member, hidden ones
+    // included, because that is what `groupCall` computed at check time. Hiding a
+    // member conceals it; it does not remove it from the group.
+    const visibleTags = new Set(parsedExtendedMonitors.map((m) => m.tag));
+    extendedTags = extendedTags.filter((tag) => visibleTags.has(tag));
     for (const parsedMonitor of parsedExtendedMonitors) {
       if (parsedMonitor.monitor_type !== "GROUP") continue;
 

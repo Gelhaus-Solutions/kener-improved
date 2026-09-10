@@ -1,6 +1,6 @@
 import { json, error } from "@sveltejs/kit";
 import type { APIServerRequest } from "$lib/server/types/api-server";
-import db from "$lib/server/db/db";
+import { ResolveVisiblePublicMonitor } from "$lib/server/controllers/publicMonitorResolver";
 import { GetMinuteStartNowTimestampUTC } from "$lib/server/tool";
 import type { StatusType } from "$lib/types/status";
 import type { TimestampStatusCount } from "$lib/server/types/db";
@@ -44,7 +44,10 @@ export default async function get(req: APIServerRequest): Promise<Response> {
     return error(400, { message: "tag query parameter is required" });
   }
 
-  const monitor = await db.getMonitorByTag(tag);
+  // Visible, not merely existing (KENER-126). This endpoint answered for any
+  // monitor whose tag you knew, hidden and inactive included, and returned its
+  // name, description, image and ninety days of history.
+  const monitor = await ResolveVisiblePublicMonitor(tag);
   if (!monitor) {
     return error(404, { message: "Monitor not found" });
   }

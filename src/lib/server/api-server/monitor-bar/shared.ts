@@ -29,7 +29,7 @@ interface ParsedMonitorSettings {
   uptime_formula_denominator?: string;
 }
 
-const parseMonitorSettings = (value: string | null): ParsedMonitorSettings => {
+export const parseMonitorSettings = (value: string | null): ParsedMonitorSettings => {
   if (!value) return {};
   try {
     const parsed = JSON.parse(value) as ParsedMonitorSettings;

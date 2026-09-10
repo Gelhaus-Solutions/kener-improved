@@ -1,4 +1,5 @@
 import db from "../db/db.js";
+import GC from "../../global-constants.js";
 import type { MonitorRecord } from "../types/db.js";
 
 /**
@@ -52,4 +53,57 @@ export async function ResolvePublicMonitor(nameInUrl: string): Promise<MonitorRe
 export async function ResolvePublicMonitorTag(nameInUrl: string): Promise<string | null> {
   const monitor = await ResolvePublicMonitor(nameInUrl);
   return monitor?.tag ?? null;
+}
+
+/**
+ * Is this monitor one an anonymous visitor is allowed to see at all?
+ *
+ * **One definition, because the codebase had nine and only some of them agreed.**
+ * The page route, the four badge types and the RSS feed each apply "ACTIVE and
+ * not hidden" in their own words; every `dashboard-apis` endpoint and both embed
+ * routes applied nothing, and served a hidden monitor's name, description, image
+ * and ninety days of history to anyone who knew its tag (KENER-126).
+ *
+ * Hiding a monitor in v4 means it is not publicly reachable, not merely
+ * unlisted: `(kener)/monitors/[monitor_tag]` answers 404 for one, and a badge
+ * renders an error. (v3's changelog described hidden *categories* as still
+ * reachable by direct link. That is v3, and v4's own routes settled it the other
+ * way long before this function existed.)
+ *
+ * The test matches the query the rest of the codebase issues - `status =
+ * 'ACTIVE' AND is_hidden = 'NO'` - rather than a looser one, so a monitor cannot
+ * be visible through here and invisible through the page route. `is_hidden` is
+ * NOT NULL DEFAULT 'NO', so there is no third state to worry about.
+ */
+export function isPubliclyVisible(monitor: Pick<MonitorRecord, "status" | "is_hidden">): boolean {
+  return monitor.status === GC.ACTIVE && monitor.is_hidden === GC.NO;
+}
+
+/**
+ * The monitor behind a public URL segment, but only if the public may see it.
+ *
+ * What every anonymous read surface should call. `ResolvePublicMonitor` is the
+ * wrong function for those: it answers "which monitor is this name", which is
+ * also what an authenticated API request and a heartbeat ingest need, and both
+ * of those must keep reaching hidden monitors. Splitting the visibility check
+ * into its own function is what lets those two keep working while the public
+ * surfaces get the check they were missing.
+ */
+export async function ResolveVisiblePublicMonitor(nameInUrl: string): Promise<MonitorRecord | undefined> {
+  const monitor = await ResolvePublicMonitor(nameInUrl);
+  if (!monitor) return undefined;
+  return isPubliclyVisible(monitor) ? monitor : undefined;
+}
+
+/**
+ * The subset of these physical tags the public may see.
+ *
+ * For the batch endpoint, which takes up to a hundred tags at once and must not
+ * turn that into a hundred round trips. Tags rather than slugs on purpose: the
+ * only caller receives them from a page's own serialised data, where they are
+ * already physical.
+ */
+export async function GetVisiblePublicMonitorsByTags(tags: string[]): Promise<MonitorRecord[]> {
+  if (tags.length === 0) return [];
+  return (await db.getMonitorsByTags(tags)).filter(isPubliclyVisible);
 }

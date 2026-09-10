@@ -1,6 +1,6 @@
 import { json, error } from "@sveltejs/kit";
 import type { APIServerRequest } from "$lib/server/types/api-server";
-import db from "$lib/server/db/db";
+import { GetVisiblePublicMonitorsByTags } from "$lib/server/controllers/publicMonitorResolver";
 import { GetMinuteStartNowTimestampUTC } from "$lib/server/tool";
 import type { StatusType } from "$lib/types/status";
 import GC from "$lib/global-constants";
@@ -56,7 +56,11 @@ export default async function get(req: APIServerRequest): Promise<Response> {
   const startTime = endOfDayTodayAtTz - days * 24 * 60 * 60;
 
   const [monitors, latestDataAll, aggregatedData] = await Promise.all([
-    db.getMonitorsByTags(tags),
+    // Visible ones only (KENER-126). A tag the caller may not see falls through
+    // to `missingTags` below, which is exactly how a tag that does not exist is
+    // already reported - so the response cannot be used to tell "hidden" from
+    // "never existed".
+    GetVisiblePublicMonitorsByTags(tags),
     GetLatestMonitoringDataAllActive(tags),
     GetStatusCountsByIntervalGroupedByMonitor(tags, startTime, 86400, days),
   ]);

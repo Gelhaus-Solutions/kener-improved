@@ -1,4 +1,4 @@
-import { ResolvePublicMonitor } from "$lib/server/controllers/publicMonitorResolver";
+import { ResolveVisiblePublicMonitor } from "$lib/server/controllers/publicMonitorResolver";
 import type { PageServerLoad } from "./$types";
 import { error } from "@sveltejs/kit";
 import db from "$lib/server/db/db";
@@ -27,7 +27,9 @@ export const load: PageServerLoad = async ({ params, url }) => {
 
   // I3e: the embed URL carries the per-org slug; identical to the tag for the
   // default org, so existing embed snippets keep working.
-  const monitor = await ResolvePublicMonitor(tag);
+  // Visible, not merely existing (KENER-126): an embed is a public surface, and
+  // this one rendered a hidden monitor's whole bar to anyone who framed it.
+  const monitor = await ResolveVisiblePublicMonitor(tag);
   if (!monitor) {
     throw error(404, { message: "Monitor not found" });
   }

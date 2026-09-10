@@ -6,6 +6,7 @@ import {
   GetMaintenanceEventById,
 } from "$lib/server/controllers/maintenanceController.js";
 import db from "$lib/server/db/db";
+import { GetVisiblePublicMonitorsByTags } from "$lib/server/controllers/publicMonitorResolver";
 import type { MaintenanceEventRecord } from "$lib/server/db/dbimpl";
 
 export const load: PageServerLoad = async ({ params, url }) => {
@@ -64,15 +65,17 @@ export const load: PageServerLoad = async ({ params, url }) => {
   }> = [];
 
   if (monitorTags.length > 0) {
-    const monitors = await db.getMonitorsByTags(monitorTags);
-    affectedMonitors = monitors
-      .filter((m) => m.is_hidden !== "YES") // Exclude hidden monitors
-      .map((m) => ({
-        monitor_tag: m.tag,
-        monitor_name: m.name,
-        monitor_image: m.image || null,
-        monitor_impact: monitorRecords.find((mr) => mr.monitor_tag === m.tag)?.monitor_impact || "",
-      }));
+    // KENER-126: this filtered hidden monitors but not inactive ones, which is a
+    // third hand-rolled spelling of a rule that now has one definition. Folding
+    // it in also stops a deactivated monitor being listed as affected by an
+    // upcoming maintenance, which it no longer is.
+    const monitors = await GetVisiblePublicMonitorsByTags(monitorTags);
+    affectedMonitors = monitors.map((m) => ({
+      monitor_tag: m.tag,
+      monitor_name: m.name,
+      monitor_image: m.image || null,
+      monitor_impact: monitorRecords.find((mr) => mr.monitor_tag === m.tag)?.monitor_impact || "",
+    }));
   }
 
   return {

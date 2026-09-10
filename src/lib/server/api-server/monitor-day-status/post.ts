@@ -9,7 +9,8 @@ import {
   UptimeCalculator,
 } from "$lib/server/tool";
 import GC from "$lib/global-constants";
-import { GetMonitorsParsed } from "../../controllers/monitorsController";
+import { ResolveVisiblePublicMonitor } from "../../controllers/publicMonitorResolver.js";
+import { parseMonitorSettings } from "../monitor-bar/shared";
 import type { TimestampStatusCount } from "$lib/server/types/db";
 
 interface DayDetailRequest {
@@ -41,11 +42,15 @@ export default async function post(req: APIServerRequest): Promise<Response> {
       req.body.nowAtTz ? parseInt(req.body.nowAtTz || "0", 10) : GetMinuteStartNowTimestampUTC(),
     ) + 60;
 
-  const monitors = await GetMonitorsParsed({ tag: body.tag });
-  if (!monitors || monitors.length === 0) {
+  // Visible, not merely existing (KENER-126).
+  const monitor = await ResolveVisiblePublicMonitor(body.tag);
+  if (!monitor) {
     return error(404, { message: "Monitor not found" });
   }
-  const monitor = monitors[0];
+  // Unlike its three siblings this endpoint needs the uptime formula, and the
+  // resolver returns the raw row. Parsed with the helper the bar builder already
+  // uses, rather than by re-reading the monitor through a second query.
+  const monitorSettings = parseMonitorSettings(monitor.monitor_settings_json);
 
   // Get raw monitoring data for the day
   const rawData = await db.getMonitoringData(monitor.tag, startOfDayTodayAtTz, nowAtTz);
@@ -88,8 +93,8 @@ export default async function post(req: APIServerRequest): Promise<Response> {
 
   const uptimeCalculationResult = UptimeCalculator(
     [item],
-    monitor.monitor_settings_json?.uptime_formula_numerator,
-    monitor.monitor_settings_json?.uptime_formula_denominator,
+    monitorSettings.uptime_formula_numerator,
+    monitorSettings.uptime_formula_denominator,
   );
 
   return json({
