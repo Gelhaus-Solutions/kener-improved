@@ -33,6 +33,8 @@ export const ROUTE_SCOPE_MAP: Record<string, MethodScopes> = {
   },
   // Pushing heartbeat/status samples. A write even though it creates no monitor:
   // it is what decides whether a status page shows green.
+  // B4. Read-only, and mapped explicitly because an unmapped route fails closed.
+  "/(api)/api/v5/monitors/[monitor_tag]/latency": { GET: "monitors.read" },
   "/(api)/api/v4/monitors/[monitor_tag]/data": { GET: "monitors.read", PATCH: "monitors.write" },
   "/(api)/api/v4/monitors/[monitor_tag]/data/[timestamp]": { GET: "monitors.read", PATCH: "monitors.write" },
 

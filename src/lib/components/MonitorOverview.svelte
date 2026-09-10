@@ -14,6 +14,9 @@
   import { getEndOfDayAtTz } from "$lib/client/datetime";
   import { formatDate } from "$lib/stores/datetime";
   import { requestMonitorBar, clearMonitorBarCache } from "$lib/client/monitor-bar-client";
+  import { ParseLatency } from "$lib/clientTools";
+  import { resolve } from "$app/paths";
+  import clientResolver from "$lib/client/resolver.js";
   import * as Popover from "$lib/components/ui/popover/index.js";
   import * as ToggleGroup from "$lib/components/ui/toggle-group/index.js";
   import GroupMonitorPopover from "$lib/components/GroupMonitorPopover.svelte";
@@ -66,8 +69,73 @@
   let selectedDays = $derived(dayOptions[selectedDayIndex]?.days ?? maxDays);
   let endOfDayTodayAtTz = $derived(getEndOfDayAtTz($selectedTimezone));
 
-  // Latency metric toggle: "average" | "maximum" | "minimum"
+  // Latency metric toggle: "average" | "maximum" | "minimum" | "p50".."p99" (B4)
   let latencyMetric = $state("average");
+
+  // --- percentiles (B4) ----------------------------------------------------
+  //
+  // Fetched only when a percentile is actually selected. The avg/max/min series
+  // come free with the bar data the page already has; percentiles need the
+  // histograms merged, which is a second request, and most visitors never ask.
+  interface PercentilePoint {
+    ts: number;
+    count: number;
+    p50: number | null;
+    p90: number | null;
+    p95: number | null;
+    p99: number | null;
+  }
+  const PERCENTILES = ["p50", "p90", "p95", "p99"];
+  let percentileData = $state<PercentilePoint[] | null>(null);
+  let percentileRange = $state<PercentilePoint | null>(null);
+  let percentileLoading = $state(false);
+  // Regions with latency in the window. One entry until probe regions (B1b)
+  // exist, and the selector stays hidden while there is nothing to choose.
+  let regions = $state<number[]>([]);
+  let selectedRegion = $state(0);
+  let showingPercentile = $derived(PERCENTILES.includes(latencyMetric));
+
+  async function fetchPercentiles(days: number, endOfDay: number, region: number) {
+    percentileLoading = true;
+    try {
+      const query = new URLSearchParams({
+        tag: monitorTag,
+        grain: "1d",
+        points: String(days),
+        // The viewer's day boundary, not a UTC one. The server takes an explicit
+        // `to` literally rather than snapping it, so these buckets line up with
+        // the bar above them even at a half-hour offset.
+        to: String(endOfDay),
+        region: String(region)
+      });
+      const response = await fetch(
+        clientResolver(resolve, "/dashboard-apis/monitor-latency-percentiles") + "?" + query.toString()
+      );
+      if (!response.ok) throw new Error("failed");
+      const body = await response.json();
+      percentileData = body.points ?? [];
+      percentileRange = body.range ?? null;
+      regions = body.regions ?? [];
+    } catch {
+      // The chart falls back to showing nothing for this metric rather than
+      // taking the page down; avg/max/min still work.
+      percentileData = [];
+      percentileRange = null;
+    } finally {
+      percentileLoading = false;
+    }
+  }
+
+  $effect(() => {
+    const metric = latencyMetric;
+    const days = selectedDays;
+    const endOfDay = endOfDayTodayAtTz;
+    const region = selectedRegion;
+    untrack(() => {
+      if (!PERCENTILES.includes(metric)) return;
+      fetchPercentiles(days, endOfDay, region);
+    });
+  });
 
   // Display values from API response (already formatted as strings)
   let displayUptime = $derived(overviewData?.uptime ?? "--");
@@ -83,11 +151,24 @@
   const metricLabels: Record<string, string> = {
     average: $t("Avg Latency"),
     maximum: $t("Max Latency"),
-    minimum: $t("Min Latency")
+    minimum: $t("Min Latency"),
+    p50: "p50",
+    p90: "p90",
+    p95: "p95",
+    p99: "p99"
   };
 
   // Transform uptimeData into chart-ready points based on selected metric
   let latencyChartData = $derived.by(() => {
+    if (showingPercentile) {
+      // A percentile series comes from its own endpoint, because percentiles
+      // cannot be derived from the avg/min/max the bar carries.
+      if (!percentileData) return [];
+      return percentileData.map((point) => ({
+        date: new Date(point.ts * 1000),
+        value: (point[latencyMetric as "p50" | "p90" | "p95" | "p99"] ?? 0) as number
+      }));
+    }
     if (!displayData) return [];
     return displayData.map((d) => ({
       date: new Date(d.ts * 1000),
@@ -260,25 +341,84 @@
                 <ToggleGroup.Item value="maximum" aria-label="Maximum latency">{$t("Max Latency")}</ToggleGroup.Item>
                 <ToggleGroup.Item value="minimum" aria-label="Minimum latency">{$t("Min Latency")}</ToggleGroup.Item>
               </ToggleGroup.Root>
+              <!--
+                B4. A second row rather than more items in the one above, because
+                these are a different kind of answer: avg/max/min describe the
+                bucket, a percentile describes the distribution inside it.
+              -->
+              <ToggleGroup.Root
+                type="single"
+                spacing={2}
+                size="sm"
+                value={latencyMetric}
+                onValueChange={(v) => {
+                  if (v) latencyMetric = v;
+                }}
+                class="flex justify-between"
+              >
+                {#each PERCENTILES as percentile (percentile)}
+                  <ToggleGroup.Item value={percentile} aria-label="{percentile} latency">
+                    {percentile}
+                  </ToggleGroup.Item>
+                {/each}
+              </ToggleGroup.Root>
+              {#if regions.length > 1}
+                <!--
+                  Only when there is something to choose. Region 0 is the merged
+                  verdict and always exists; a probe region appears here on its
+                  own once B1b starts reporting one.
+                -->
+                <select
+                  class="border-input bg-background h-8 rounded-md border px-2 text-xs"
+                  value={String(selectedRegion)}
+                  onchange={(e) => (selectedRegion = Number(e.currentTarget.value))}
+                >
+                  {#each regions as region (region)}
+                    <option value={String(region)}>
+                      {region === 0 ? $t("All regions") : $t("Region %id", { id: String(region) })}
+                    </option>
+                  {/each}
+                </select>
+              {/if}
             </Popover.Content>
           </Popover.Root>
         </p>
 
         <!-- Latency Stats -->
-        <div class="mb-3 flex justify-between gap-4">
-          <div class="flex flex-col items-start gap-1">
-            <p class="text-lg font-semibold">{displayMinLatency}</p>
-            <p class="text-muted-foreground text-xs">{$t("Minimum Latency")}</p>
+        {#if showingPercentile}
+          <!--
+            The range's percentiles, merged from every bucket's histogram rather
+            than averaged across the points on the chart - the p95 of a window is
+            not any function of the per-day p95s.
+          -->
+          <div class="mb-3 flex justify-between gap-4">
+            {#each PERCENTILES as percentile (percentile)}
+              <div class="flex flex-col items-center gap-1">
+                <p class="text-lg font-semibold">
+                  {percentileLoading || !percentileRange
+                    ? "--"
+                    : ParseLatency(percentileRange[percentile as "p50" | "p90" | "p95" | "p99"] ?? 0)}
+                </p>
+                <p class="text-muted-foreground text-xs">{percentile}</p>
+              </div>
+            {/each}
           </div>
-          <div class="flex flex-col items-center gap-1">
-            <p class="text-lg font-semibold">{displayAvgLatency}</p>
-            <p class="text-muted-foreground text-xs">{$t("Average Latency")}</p>
+        {:else}
+          <div class="mb-3 flex justify-between gap-4">
+            <div class="flex flex-col items-start gap-1">
+              <p class="text-lg font-semibold">{displayMinLatency}</p>
+              <p class="text-muted-foreground text-xs">{$t("Minimum Latency")}</p>
+            </div>
+            <div class="flex flex-col items-center gap-1">
+              <p class="text-lg font-semibold">{displayAvgLatency}</p>
+              <p class="text-muted-foreground text-xs">{$t("Average Latency")}</p>
+            </div>
+            <div class="flex flex-col items-end gap-1">
+              <p class="text-lg font-semibold">{displayMaxLatency}</p>
+              <p class="text-muted-foreground text-xs">{$t("Maximum Latency")}</p>
+            </div>
           </div>
-          <div class="flex flex-col items-end gap-1">
-            <p class="text-lg font-semibold">{displayMaxLatency}</p>
-            <p class="text-muted-foreground text-xs">{$t("Maximum Latency")}</p>
-          </div>
-        </div>
+        {/if}
 
         <LatencyTrendChart data={latencyChartData} label={latencyChartLabel} height={128} />
       </div>

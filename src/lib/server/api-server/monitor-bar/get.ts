@@ -14,6 +14,14 @@ export interface BarData {
   timestamp: number;
 }
 
+/** p50/p90/p95/p99 in milliseconds, null where there were no samples (B4). */
+export interface LatencyPercentileSet {
+  p50: number | null;
+  p90: number | null;
+  p95: number | null;
+  p99: number | null;
+}
+
 export interface MonitorBarResponse {
   name: string;
   description: string;
@@ -26,6 +34,20 @@ export interface MonitorBarResponse {
   toTimeStamp: number;
   maxLatency: string;
   minLatency: string;
+  /**
+   * The whole window's percentiles, merged from the histograms (B4).
+   *
+   * **Optional, and absent rather than zeroed when unavailable.** Every existing
+   * consumer of this shape predates B4 and must be unaffected, and a monitor
+   * whose rollups have not been backfilled has no percentiles to report - which
+   * is a different statement from "its p95 is 0".
+   *
+   * Range-level only. A per-day breakdown belongs to whoever is drawing a chart,
+   * and `monitor-latency-percentiles` is the endpoint for that; putting 90 days
+   * of four percentiles into every bar response would grow a payload that a
+   * status page fetches for every monitor on the page.
+   */
+  latencyPercentiles?: LatencyPercentileSet;
 }
 
 /**

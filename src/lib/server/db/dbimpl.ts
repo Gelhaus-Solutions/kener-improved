@@ -102,6 +102,9 @@ class DbImpl {
   upsertRollups!: RollupsRepository["upsertRollups"];
   getRollups!: RollupsRepository["getRollups"];
   getRollupBucketsAggregated!: RollupsRepository["getRollupBucketsAggregated"];
+  getRollupLatencyBuckets!: RollupsRepository["getRollupLatencyBuckets"];
+  getLatencyRegions!: RollupsRepository["getLatencyRegions"];
+  getRawSamples!: RollupsRepository["getRawSamples"];
   deleteRollups!: RollupsRepository["deleteRollups"];
   getRawSamplesForRollup!: RollupsRepository["getRawSamples"];
   getRawSampleBounds!: RollupsRepository["getRawSampleBounds"];
@@ -631,6 +634,9 @@ class DbImpl {
     this.upsertRollups = this.rollups.upsertRollups.bind(this.rollups);
     this.getRollups = this.rollups.getRollups.bind(this.rollups);
     this.getRollupBucketsAggregated = this.rollups.getRollupBucketsAggregated.bind(this.rollups);
+    this.getRollupLatencyBuckets = this.rollups.getRollupLatencyBuckets.bind(this.rollups);
+    this.getLatencyRegions = this.rollups.getLatencyRegions.bind(this.rollups);
+    this.getRawSamples = this.rollups.getRawSamples.bind(this.rollups);
     this.deleteRollups = this.rollups.deleteRollups.bind(this.rollups);
     this.getRawSamplesForRollup = this.rollups.getRawSamples.bind(this.rollups);
     this.getRawSampleBounds = this.rollups.getRawSampleBounds.bind(this.rollups);

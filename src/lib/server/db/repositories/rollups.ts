@@ -280,6 +280,100 @@ export class RollupsRepository extends BaseRepository {
     }));
   }
 
+  /**
+   * Latency columns and histograms for one monitor's buckets in a window (B4).
+   *
+   * The counterpart the aggregated read deliberately does not do. Percentiles
+   * cannot be merged in SQL - `SUM` over a JSON blob means nothing - so a
+   * percentile read has to bring the histograms into the process and merge them
+   * there. That is affordable because it is one monitor rather than a page of
+   * them, and because a chart is capped at a few dozen points: the 30-day chart
+   * spans 720 hourly buckets, against the 43,200 raw rows the endpoint used to
+   * pull for the same picture.
+   *
+   * **A narrow select, not `*`.** These rows carry a JSON histogram each, and the
+   * twenty-odd count columns beside it are exactly the ones a percentile read has
+   * no use for.
+   */
+  async getRollupLatencyBuckets(
+    grain: RollupGrain,
+    monitorTag: string,
+    regionId: number,
+    from: number,
+    to: number,
+  ): Promise<
+    Array<{
+      bucket_start: number;
+      region_id: number;
+      latency_count: number;
+      latency_sum: number;
+      latency_min: number | null;
+      latency_max: number | null;
+      latency_p50: number | null;
+      latency_p90: number | null;
+      latency_p95: number | null;
+      latency_p99: number | null;
+      latency_histogram: string | null;
+    }>
+  > {
+    const rows = await this.table(ROLLUP_TABLES[grain])
+      .where("monitor_tag", monitorTag)
+      .where("region_id", regionId)
+      .where("bucket_start", ">=", from)
+      .where("bucket_start", "<", to)
+      .orderBy("bucket_start", "asc")
+      .select(
+        "bucket_start",
+        "region_id",
+        "latency_count",
+        "latency_sum",
+        "latency_min",
+        "latency_max",
+        "latency_p50",
+        "latency_p90",
+        "latency_p95",
+        "latency_p99",
+        "latency_histogram",
+      );
+    return rows.map((row: Record<string, unknown>) => ({
+      bucket_start: Number(row.bucket_start),
+      region_id: Number(row.region_id),
+      latency_count: Number(row.latency_count ?? 0),
+      latency_sum: Number(row.latency_sum ?? 0),
+      latency_min: row.latency_min == null ? null : Number(row.latency_min),
+      latency_max: row.latency_max == null ? null : Number(row.latency_max),
+      latency_p50: row.latency_p50 == null ? null : Number(row.latency_p50),
+      latency_p90: row.latency_p90 == null ? null : Number(row.latency_p90),
+      latency_p95: row.latency_p95 == null ? null : Number(row.latency_p95),
+      latency_p99: row.latency_p99 == null ? null : Number(row.latency_p99),
+      latency_histogram: row.latency_histogram == null ? null : String(row.latency_histogram),
+    }));
+  }
+
+  /**
+   * Which regions actually reported latency for this monitor in a window (B4).
+   *
+   * **Read from `monitoring_data`, not from the rollup tables**, and that is not
+   * an oversight. The rollup engine rolls up `MERGED_REGION_ID` and nothing else
+   * - `rollupScheduler` passes it to `advanceWatermark`, `backfillChunk` and
+   * `getTagsWithSamples` alike - so the rollup tables contain region 0 and only
+   * region 0. Asking them which regions exist would answer "just the one"
+   * however many probes were reporting.
+   *
+   * The samples know the truth, and this is one indexed DISTINCT over a window a
+   * caller already bounded.
+   */
+  async getLatencyRegions(monitorTag: string, from: number, to: number): Promise<number[]> {
+    const rows = await this.table("monitoring_data")
+      .where("monitor_tag", monitorTag)
+      .where("timestamp", ">=", from)
+      .where("timestamp", "<", to)
+      .whereNotNull("latency")
+      .distinct("region_id")
+      .select("region_id");
+    return rows.map((row: { region_id: number }) => Number(row.region_id)).sort((a, b) => a - b);
+  }
+
   /** Removes buckets in a window. Used when the samples behind them are deleted. */
   async deleteRollups(
     grain: RollupGrain,

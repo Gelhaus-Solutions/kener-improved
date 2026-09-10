@@ -3,6 +3,8 @@ import type { APIServerRequest } from "$lib/server/types/api-server";
 import db from "$lib/server/db/db";
 import { ResolveVisiblePublicMonitor } from "$lib/server/controllers/publicMonitorResolver";
 import { GetMinuteStartNowTimestampUTC } from "$lib/server/tool";
+import { readLatencySeries, snapToGrain } from "$lib/server/services/latencyPercentiles";
+import { MERGED_REGION_ID } from "$lib/server/db/regions";
 
 /**
  * Time range definitions with aggregation intervals
@@ -53,52 +55,50 @@ export default async function get(req: APIServerRequest): Promise<Response> {
   }
 
   const now = GetMinuteStartNowTimestampUTC();
-  const startTimestamp = now - rangeConfig.minutes * 60;
-
-  // Fetch raw monitoring data
-  const rawData = await db.getMonitoringData(monitor.tag, startTimestamp, now);
-
-  // Aggregate data by intervals
-  const aggregatedData: {
-    timestamp: number;
-    avgLatency: number | null;
-    minLatency: number | null;
-    maxLatency: number | null;
-  }[] = [];
   const intervalSeconds = rangeConfig.avgInterval * 60;
 
-  // Create time buckets
-  let bucketStart = startTimestamp;
-  while (bucketStart < now) {
-    const bucketEnd = bucketStart + intervalSeconds;
+  // Snapped onto the rollup grid (B4). The range used to be `now - N minutes`,
+  // whose edges land wherever the current minute happens to be and so almost
+  // never on a 5m or 1h boundary - and `pickGrain` refuses an unaligned request,
+  // because a rollup bucket straddling two output buckets cannot be attributed
+  // to either. Every range therefore fell through to raw samples, which is how
+  // the 30-day chart came to pull 43,200 rows and bucket them in a nested
+  // `filter()` loop.
+  //
+  // Snapping moves an edge by less than one grain, and has a second effect worth
+  // having anyway: the buckets stop sliding every minute, so the chart is stable
+  // between refreshes instead of redrawing itself with every point shifted.
+  const points = Math.max(1, Math.ceil(rangeConfig.minutes / rangeConfig.avgInterval));
+  const startTimestamp = snapToGrain(now - rangeConfig.minutes * 60, intervalSeconds);
 
-    // Find all data points in this bucket
-    const bucketData = rawData.filter((d) => d.timestamp >= bucketStart && d.timestamp < bucketEnd);
-
-    // Calculate aggregates for latency
-    const validLatencies = bucketData
-      .filter((d) => d.latency !== null && d.latency !== undefined && d.latency > 0)
-      .map((d) => d.latency as number);
-
-    let avgLatency: number | null = null;
-    let minLatency: number | null = null;
-    let maxLatency: number | null = null;
-
-    if (validLatencies.length > 0) {
-      avgLatency = Math.round(validLatencies.reduce((sum, l) => sum + l, 0) / validLatencies.length);
-      minLatency = Math.min(...validLatencies);
-      maxLatency = Math.max(...validLatencies);
-    }
-
-    aggregatedData.push({
-      timestamp: bucketStart + Math.floor(intervalSeconds / 2), // Use middle of bucket as timestamp
-      avgLatency,
-      minLatency,
-      maxLatency,
-    });
-
-    bucketStart = bucketEnd;
+  const regionParam = req.query.get("region");
+  const regionId = regionParam !== null && regionParam !== "" ? Number(regionParam) : MERGED_REGION_ID;
+  if (!Number.isFinite(regionId) || regionId < 0) {
+    return error(400, { message: "region must be a non-negative integer" });
   }
+
+  const series = await readLatencySeries({
+    monitorTag: monitor.tag,
+    regionId,
+    startTimestamp,
+    intervalSeconds,
+    points,
+  });
+
+  const round = (value: number | null) => (value === null ? null : Math.round(value));
+
+  const aggregatedData = series.points.map((point) => ({
+    // The middle of the bucket, as before, so the existing chart plots unchanged.
+    timestamp: point.ts + Math.floor(intervalSeconds / 2),
+    avgLatency: round(point.avg),
+    minLatency: round(point.min),
+    maxLatency: round(point.max),
+    // B4. Null where the bucket has no samples, exactly like the three above.
+    p50: round(point.p50),
+    p90: round(point.p90),
+    p95: round(point.p95),
+    p99: round(point.p99),
+  }));
 
   return json({
     data: aggregatedData,
@@ -106,6 +106,23 @@ export default async function get(req: APIServerRequest): Promise<Response> {
     rangeLabel: rangeConfig.label,
     avgInterval: rangeConfig.avgInterval,
     periodStart: startTimestamp,
-    periodEnd: now,
+    periodEnd: startTimestamp + points * intervalSeconds,
+    // The whole window as one figure, merged from the histograms rather than
+    // averaged across the points above - percentiles do not average.
+    rangePercentiles: {
+      p50: round(series.range.p50),
+      p90: round(series.range.p90),
+      p95: round(series.range.p95),
+      p99: round(series.range.p99),
+      avg: round(series.range.avg),
+      min: round(series.range.min),
+      max: round(series.range.max),
+      count: series.range.count,
+    },
+    // Which grain answered, and which regions have data. Both are here so an
+    // operator debugging a number can see where it came from without guessing.
+    source: series.source,
+    regions: series.regions,
+    regionId,
   });
 }

@@ -1,4 +1,5 @@
 import db from "$lib/server/db/db";
+import { readLatencySeries } from "../../services/latencyPercentiles.js";
 import GC from "$lib/global-constants";
 import type { StatusType } from "$lib/types/status";
 import type { MonitorRecord, TimestampStatusCount } from "$lib/server/types/db";
@@ -85,13 +86,47 @@ export const buildMonitorBarResponse = async (
     latestStatus ? Promise.resolve(null) : db.getLatestMonitoringData(monitor.tag),
   ]);
 
-  return buildMonitorBarResponseFromRawData(
+  const response = buildMonitorBarResponseFromRawData(
     monitor,
     rawUptimeData,
     days,
     endOfDayTodayAtTz,
     latestStatus || (latestData?.status as StatusType) || GC.NO_DATA,
   );
+
+  // B4: the window's percentiles, merged from the histograms.
+  //
+  // **Only on this path, never in `buildMonitorBarResponseFromRawData`.** That
+  // function is synchronous and is what the batch endpoint calls for up to a
+  // hundred monitors at once; giving it a percentile read would turn one page
+  // render into a hundred extra queries. This path serves a single monitor - the
+  // embeds and the single-bar endpoint - where one more query is the right price
+  // for a real number.
+  //
+  // A failure here costs the percentiles and not the bar: the uptime figures are
+  // already computed above and a monitor whose rollups are not backfilled simply
+  // has none to report.
+  try {
+    const series = await readLatencySeries({
+      monitorTag: monitor.tag,
+      startTimestamp: startTime,
+      intervalSeconds: 86400,
+      points: days,
+    });
+    const round = (value: number | null) => (value === null ? null : Math.round(value));
+    if (series.range.count > 0) {
+      response.latencyPercentiles = {
+        p50: round(series.range.p50),
+        p90: round(series.range.p90),
+        p95: round(series.range.p95),
+        p99: round(series.range.p99),
+      };
+    }
+  } catch {
+    // Left absent, which is what the optional field means.
+  }
+
+  return response;
 };
 
 export const buildMonitorBarResponseFromRawData = (
