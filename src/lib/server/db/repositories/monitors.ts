@@ -28,6 +28,11 @@ export class MonitorsRepository extends BaseRepository {
   async insertMonitor(data: MonitorRecordInsert): Promise<number[]> {
     return await this.table("monitors").insert({
       tag: data.tag,
+      // I3e. Absent from this whitelist until now, so every monitor created
+      // through the admin since that migration was written with a null slug -
+      // and the public page hands the browser the *slug*, not the tag. The
+      // migration's one-time backfill is the only thing that had ever set it.
+      slug: data.slug ?? data.tag,
       name: data.name,
       description: data.description,
       image: data.image,
@@ -36,6 +41,10 @@ export class MonitorsRepository extends BaseRepository {
       status: data.status,
       category_name: data.category_name,
       monitor_type: data.monitor_type,
+      // Also missing from the whitelist, and `CloneMonitor` has always passed
+      // both - so a cloned monitor silently lost its triggers.
+      down_trigger: data.down_trigger,
+      degraded_trigger: data.degraded_trigger,
       type_data: data.type_data,
       day_degraded_minimum_count: data.day_degraded_minimum_count,
       day_down_minimum_count: data.day_down_minimum_count,

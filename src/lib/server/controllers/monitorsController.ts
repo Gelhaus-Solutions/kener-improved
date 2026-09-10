@@ -11,6 +11,7 @@ import { getCache, setCache } from "../cache/cache.js";
 import { getUptimeBucketsCached } from "../cache/rollupCache.js";
 import { pickGrain, rollupsUsable } from "../services/uptimeAggregator.js";
 import { MERGED_REGION_ID } from "../db/regions.js";
+import { currentOrgIdOrDefault } from "../db/orgContext.js";
 import type {
   MonitorRecordInsert,
   MonitorAlertInsert,
@@ -228,9 +229,33 @@ export const CreateUpdateMonitor = async (monitor: MonitorInput): Promise<number
     return await db.updateMonitor(monitorData as MonitorRecord);
   } else {
     validateMonitorTag(monitorData.tag);
+    // I3e: this is the path the admin screen uses, so it is the one that had been
+    // creating monitors with a null slug ever since the column was added.
+    if (!monitorData.slug) monitorData.slug = await slugForTag(monitorData.tag);
     return await db.insertMonitor(monitorData);
   }
 };
+
+/**
+ * The per-org slug for a tag (I3e).
+ *
+ * `tag` is globally unique and carries the org's prefix; `slug` is the per-org
+ * name the public URL is built from. On the default org the prefix is empty and
+ * the two are identical, which is exactly why forgetting this stayed invisible:
+ * nothing goes wrong until a second org exists.
+ */
+async function slugForTag(tag: string): Promise<string> {
+  try {
+    const org = await db.getOrgById(currentOrgIdOrDefault());
+    const prefix = org?.tag_prefix ?? "";
+    return prefix && tag.startsWith(`${prefix}_`) ? tag.slice(prefix.length + 1) : tag;
+  } catch {
+    // No org context, or the org row is unreadable. The tag is always a legal
+    // slug, and a monitor with a usable-but-prefixed slug is far better than one
+    // with a null slug and no public page at all.
+    return tag;
+  }
+}
 
 export const CreateMonitor = async (monitor: MonitorInput): Promise<number[]> => {
   let monitorData = { ...monitor };
@@ -239,6 +264,9 @@ export const CreateMonitor = async (monitor: MonitorInput): Promise<number[]> =>
   }
   validateMonitorTag(monitorData.tag);
   validateTypeDataProxy(monitorData);
+  // I3e: set explicitly rather than left to the repository's fallback, which
+  // cannot know the org prefix.
+  if (!monitorData.slug) monitorData.slug = await slugForTag(monitorData.tag);
   return await db.insertMonitor(monitorData);
 };
 
@@ -282,8 +310,9 @@ export const CloneMonitor = async ({ sourceTag, newTag, newName }: CloneMonitorI
     throw new Error("Monitor name already exists");
   }
 
-  return await db.insertMonitor({
+  const inserted = await db.insertMonitor({
     tag: newTagTrimmed,
+    slug: await slugForTag(newTagTrimmed),
     name: newNameTrimmed,
     description: source.description,
     image: source.image,
@@ -303,7 +332,116 @@ export const CloneMonitor = async ({ sourceTag, newTag, newName }: CloneMonitorI
     monitor_settings_json: source.monitor_settings_json,
     external_url: source.external_url,
   });
+
+  await cloneMonitorRelations(sourceTagTrimmed, newTagTrimmed);
+
+  return inserted;
 };
+
+/**
+ * Copies the side tables a monitor owns onto its clone.
+ *
+ * **A monitor is not just its row.** Before this, cloning produced a monitor
+ * that was on no status page, had no dependencies, and no rollup settings - so
+ * it was invisible to the public, sat outside the component graph, and had to be
+ * rebuilt by hand. "Clone" that copies a third of the thing is worse than no
+ * clone, because the gaps are silent.
+ *
+ * **What is deliberately not copied**, and why:
+ *
+ *   `monitor_alerts_config_monitors`  attaching a clone to live alert rules means
+ *                                     creating one can start paging people. That
+ *                                     is the only relation here with an outward
+ *                                     side effect, and it needs to be a decision
+ *                                     rather than a side effect of a button.
+ *   `monitoring_data`                 the clone has no history; it never ran.
+ *   `incident_monitors`,              somebody else's past, not this monitor's
+ *   `maintenance_monitors`            configuration.
+ *   `subscriber_subscriptions`        customers chose those, per component. A
+ *                                     clone inheriting them would sign people up
+ *                                     for something they never asked for.
+ *
+ * Best-effort per relation. A clone whose row exists but whose page membership
+ * failed is recoverable by hand; a clone that throws half way leaves a monitor
+ * the caller was told was not created, which is worse.
+ */
+async function cloneMonitorRelations(sourceTag: string, newTag: string): Promise<void> {
+  // ---- page membership ---------------------------------------------------
+  try {
+    for (const row of await db.getPagesByMonitorTag(sourceTag)) {
+      // Appended rather than sharing the source's position, which would put two
+      // monitors at the same index and leave the order to whatever the sort
+      // happens to do. Computed per page because each has its own sequence.
+      const existing = await db.getPageMonitors(row.page_id);
+      const nextPosition = existing.reduce((max, m) => Math.max(max, Number(m.position ?? 0)), -1) + 1;
+      await db.addMonitorToPage({
+        page_id: row.page_id,
+        monitor_tag: newTag,
+        monitor_settings_json: row.monitor_settings_json ?? "",
+        position: nextPosition,
+      });
+    }
+  } catch (error) {
+    console.error(`clone ${sourceTag} -> ${newTag}: page membership failed`, error);
+  }
+
+  // ---- dependency edges, both directions ---------------------------------
+  //
+  // Both, because a like-for-like copy sits in the graph the same way: it depends
+  // on what the original depends on, and it is part of whatever the original is
+  // part of. An edge between the source and itself would be meaningless, so a
+  // self-referential edge is remapped to the clone rather than pointing back.
+  try {
+    const { children, parents } = await db.getDependenciesForMonitor(sourceTag);
+    const remap = (tag: string) => (tag === sourceTag ? newTag : tag);
+    for (const edge of children) {
+      await db.insertDependency({
+        parent_monitor_tag: newTag,
+        child_monitor_tag: remap(edge.child_monitor_tag),
+        relation: edge.relation,
+        propagation: edge.propagation,
+        weight: edge.weight,
+      });
+    }
+    for (const edge of parents) {
+      await db.insertDependency({
+        parent_monitor_tag: remap(edge.parent_monitor_tag),
+        child_monitor_tag: newTag,
+        relation: edge.relation,
+        propagation: edge.propagation,
+        weight: edge.weight,
+      });
+    }
+  } catch (error) {
+    console.error(`clone ${sourceTag} -> ${newTag}: dependencies failed`, error);
+  }
+
+  // ---- rollup settings ---------------------------------------------------
+  //
+  // Only when the source has a row: absence is meaningful (it means "defaults"),
+  // and writing one for the clone would make it configured where the original is
+  // not.
+  //
+  // **The manual pin is deliberately not carried over.** It says "this component
+  // is X right now whatever rolls up", which is a statement about an incident in
+  // progress on the original. A brand-new monitor that has never run must not
+  // start life pinned to a status somebody set for something else.
+  try {
+    const setting = await db.getRollupSetting(sourceTag);
+    if (setting) {
+      await db.upsertRollupSetting({
+        monitor_tag: newTag,
+        rollup_mode: setting.rollup_mode,
+        manual_override: null,
+        manual_override_reason: null,
+        manual_override_expires_at: null,
+        show_dependencies: setting.show_dependencies,
+      });
+    }
+  } catch (error) {
+    console.error(`clone ${sourceTag} -> ${newTag}: rollup settings failed`, error);
+  }
+}
 
 export const UpdateMonitor = async (monitor: MonitorInput): Promise<number> => {
   let monitorData = { ...monitor };

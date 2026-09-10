@@ -251,6 +251,13 @@ export interface MonitorRecordTyped {
 
 export interface MonitorRecordInsert {
   tag: string;
+  /**
+   * The per-org public name (I3e). Optional here and defaulted to `tag` by the
+   * repository, but callers with org context should derive it properly: on an
+   * org with a `tag_prefix`, `tag` is `<prefix>_<slug>` and the slug is the part
+   * after the prefix.
+   */
+  slug?: string | null;
   name: string;
   description?: string | null;
   image?: string | null;
