@@ -29,6 +29,17 @@
     // full.
     "checkJs": false
   },
-  "include": ["scripts/**/*.ts", "migrations/**/*.ts", "seeds/**/*.ts"],
+  // SvelteKit's generated ambient declarations come first. Scripts import from
+  // `src/`, so files that rely on the `App.Locals` augmentation get pulled in;
+  // without these they are checked as if that augmentation did not exist and
+  // report errors that `npm run check` does not.
+  "include": [
+    ".svelte-kit/ambient.d.ts",
+    ".svelte-kit/non-ambient.d.ts",
+    "src/app.d.ts",
+    "scripts/**/*.ts",
+    "migrations/**/*.ts",
+    "seeds/**/*.ts"
+  ],
   "exclude": ["node_modules/**", "build/**"]
 }
