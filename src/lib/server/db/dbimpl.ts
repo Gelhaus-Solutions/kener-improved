@@ -15,6 +15,7 @@ import { UsersRepository } from "./repositories/users.js";
 import { SiteDataRepository } from "./repositories/site-data.js";
 import { IncidentsRepository } from "./repositories/incidents.js";
 import { DependenciesRepository } from "./repositories/dependencies.js";
+import { RollupsRepository } from "./repositories/rollups.js";
 import { PostmortemsRepository } from "./repositories/postmortems.js";
 import { IncidentTemplatesRepository } from "./repositories/incidentTemplates.js";
 import { ImagesRepository } from "./repositories/images.js";
@@ -56,6 +57,7 @@ class DbImpl {
   private siteData!: SiteDataRepository;
   private incidents!: IncidentsRepository;
   private dependencies!: DependenciesRepository;
+  private rollups!: RollupsRepository;
   private postmortems!: PostmortemsRepository;
   private incidentTemplates!: IncidentTemplatesRepository;
 
@@ -86,6 +88,24 @@ class DbImpl {
   deleteDependency!: DependenciesRepository["deleteDependency"];
   getRollupSetting!: DependenciesRepository["getRollupSetting"];
   upsertRollupSetting!: DependenciesRepository["upsertRollupSetting"];
+
+  // F6b. Named for what they are rather than shortened, because `getRollups`
+  // and `getRollupSetting` are already one letter apart and mean unrelated
+  // things: one is a computed bucket, the other is a component's rollup mode.
+  getRollupState!: RollupsRepository["getRollupState"];
+  getAllRollupStates!: RollupsRepository["getAllRollupStates"];
+  upsertRollupState!: RollupsRepository["upsertRollupState"];
+  markRollupDirty!: RollupsRepository["markDirty"];
+  takeDirtyHours!: RollupsRepository["takeDirtyHours"];
+  countDirtyHours!: RollupsRepository["countDirtyHours"];
+  clearDirtyHours!: RollupsRepository["clearDirtyHours"];
+  upsertRollups!: RollupsRepository["upsertRollups"];
+  getRollups!: RollupsRepository["getRollups"];
+  deleteRollups!: RollupsRepository["deleteRollups"];
+  getRawSamplesForRollup!: RollupsRepository["getRawSamples"];
+  getRawSampleBounds!: RollupsRepository["getRawSampleBounds"];
+  getTagsWithSamples!: RollupsRepository["getTagsWithSamples"];
+  getMaintenanceWindowsForRollup!: RollupsRepository["getMaintenanceWindows"];
   private images!: ImagesRepository;
   private pages!: PagesRepository;
   private maintenances!: MaintenancesRepository;
@@ -595,6 +615,23 @@ class DbImpl {
     this.deleteDependency = this.dependencies.deleteDependency.bind(this.dependencies);
     this.getRollupSetting = this.dependencies.getRollupSetting.bind(this.dependencies);
     this.upsertRollupSetting = this.dependencies.upsertRollupSetting.bind(this.dependencies);
+
+    this.rollups = new RollupsRepository(this.knex);
+    this.getRollupState = this.rollups.getRollupState.bind(this.rollups);
+    this.getAllRollupStates = this.rollups.getAllRollupStates.bind(this.rollups);
+    this.upsertRollupState = this.rollups.upsertRollupState.bind(this.rollups);
+    this.markRollupDirty = this.rollups.markDirty.bind(this.rollups);
+    this.takeDirtyHours = this.rollups.takeDirtyHours.bind(this.rollups);
+    this.countDirtyHours = this.rollups.countDirtyHours.bind(this.rollups);
+    this.clearDirtyHours = this.rollups.clearDirtyHours.bind(this.rollups);
+    this.upsertRollups = this.rollups.upsertRollups.bind(this.rollups);
+    this.getRollups = this.rollups.getRollups.bind(this.rollups);
+    this.deleteRollups = this.rollups.deleteRollups.bind(this.rollups);
+    this.getRawSamplesForRollup = this.rollups.getRawSamples.bind(this.rollups);
+    this.getRawSampleBounds = this.rollups.getRawSampleBounds.bind(this.rollups);
+    this.getTagsWithSamples = this.rollups.getTagsWithSamples.bind(this.rollups);
+    this.getMaintenanceWindowsForRollup = this.rollups.getMaintenanceWindows.bind(this.rollups);
+
     this.images = new ImagesRepository(this.knex);
     this.pages = new PagesRepository(this.knex);
     this.maintenances = new MaintenancesRepository(this.knex);

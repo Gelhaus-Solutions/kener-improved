@@ -3,6 +3,7 @@ import version from "../version.js";
 import mainScheduler from "./schedulers/appScheduler.js";
 import maintenanceScheduler from "./schedulers/maintenanceScheduler.js";
 import dailyCleanupScheduler from "./schedulers/dailyCleanup.js";
+import rollupScheduler from "./schedulers/rollupScheduler.js";
 import eventRelayQueue from "./queues/eventRelayQueue.js";
 import backfillQueue from "./queues/backfillQueue.js";
 import { registerAllConsumers } from "./events/consumers/index.js";
@@ -32,6 +33,10 @@ async function Startup(): Promise<void> {
   await mainScheduler.start();
   await maintenanceScheduler.start();
   await dailyCleanupScheduler.start();
+  // F6b. Scheduler process only, like the relay and the backfill queue: it reads
+  // and writes the largest table in the schema, and the web process must never
+  // be the thing doing that.
+  await rollupScheduler.start();
   // Consumers must be registered before the relay starts, or the first pass
   // publishes events with no delivery rows and they are never reconsidered.
   // What each one is allowed to do is not decided here: it is read per event

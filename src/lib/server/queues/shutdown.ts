@@ -6,6 +6,7 @@ import emailQueue from "./emailQueue";
 import eventRelayQueue from "./eventRelayQueue";
 import eventDispatchQueue from "./eventDispatchQueue";
 import backfillQueue from "./backfillQueue";
+import rollupScheduler from "../schedulers/rollupScheduler";
 import { flushAuditLog } from "../audit/writer";
 
 export default async () => {
@@ -21,6 +22,10 @@ export default async () => {
   // C7. A half-written overlay is harmless - the job is idempotent and BullMQ
   // redelivers it - so this closes rather than draining.
   await backfillQueue.stop();
+  // F6b. Same reasoning as the backfill queue: a rollup pass killed halfway
+  // leaves the hours it had not reached still marked dirty, and the next boot
+  // recomputes them. Nothing to drain.
+  await rollupScheduler.shutdown();
   // Last: the audit writer buffers for up to half a second, so anything the
   // shutdowns above recorded is still in memory at this point.
   await flushAuditLog();

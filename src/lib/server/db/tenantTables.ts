@@ -62,6 +62,8 @@ export const TENANT_TABLES: ReadonlySet<string> = new Set([
   "monitor_rollup_5m",
   "monitor_rollup_1h",
   "monitor_rollup_1d",
+  "rollup_state",
+  "rollup_dirty",
   "incident_postmortems",
   "incident_templates",
   "audit_log",

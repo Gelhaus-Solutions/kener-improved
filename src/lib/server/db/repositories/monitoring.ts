@@ -2,10 +2,12 @@ import type { Knex as KnexType } from "knex";
 import { BaseRepository } from "./base.js";
 import { requireOrgId } from "../orgContext.js";
 import { MERGED_REGION_ID } from "../regions.js";
+import { markRollupDirty } from "../rollupDirty.js";
 import { hasFloorFunction, supportsInsertReturning } from "../capabilities.js";
 import GC from "../../../global-constants.js";
 import type { MonitoringStatus } from "../../../types/status.js";
-import { GetMinuteStartNowTimestampUTC } from "../../tool.js";
+import { GetMinuteStartNowTimestampUTC, GetNowTimestampUTC } from "../../tool.js";
+import { ROLLUP_TABLES } from "../../types/db.js";
 import type {
   MonitoringData,
   MonitoringDataInsert,
@@ -472,9 +474,22 @@ export class MonitoringRepository extends BaseRepository {
   ): Promise<number> {
     if (timestamps.length === 0) return 0;
 
+    // **The rollup invalidation lives inside this method, not at the call site
+    // in `confirmationThreshold.ts`.** A flip restates minutes that are already
+    // behind the rollup watermark, so nothing else would ever revisit them - and
+    // a future caller of this method would have no reason to know that. Putting
+    // the mark here means the only way to rewrite these rows is to invalidate
+    // the buckets built from them.
+    const dirtyRange = {
+      monitor_tag,
+      region_id: MERGED_REGION_ID,
+      from: Math.min(...timestamps),
+      to: Math.max(...timestamps),
+    };
+
     // Recovery (confirmed UP): rows become the UP side — clear any held error text in one update.
     if (confirmThreshold === null) {
-      return await this.table("monitoring_data")
+      const updated = await this.table("monitoring_data")
         .where("monitor_tag", monitor_tag)
         .where("region_id", MERGED_REGION_ID)
         .whereIn("timestamp", timestamps)
@@ -483,6 +498,8 @@ export class MonitoringRepository extends BaseRepository {
           status: this.knexUnscoped.ref("raw_status"),
           error_message: null,
         });
+      await markRollupDirty(this.knexUnscoped, [dirtyRange], GetNowTimestampUTC());
+      return updated;
     }
 
     // Confirmed unhealthy: set each row's status from its observed raw_status and APPEND a
@@ -516,6 +533,10 @@ export class MonitoringRepository extends BaseRepository {
           .where({ monitor_tag, region_id: MERGED_REGION_ID, timestamp: row.timestamp })
           .update({ status: row.raw_status, error_message: nextMessage });
       }
+      // Inside the same transaction as the rewrite, so a rollback takes the
+      // invalidation with it rather than leaving a bucket marked dirty for a
+      // change that never happened.
+      await markRollupDirty(trx, [dirtyRange], GetNowTimestampUTC());
       return updated;
     });
   }
@@ -549,6 +570,7 @@ export class MonitoringRepository extends BaseRepository {
   ): Promise<unknown[]> {
     const count = Math.floor((end - start) / 60) + 1;
     const timestamps = Array.from({ length: count }, (_, i) => start + i * 60);
+    const nowTs = GetNowTimestampUTC();
 
     // Null under `runAsSystem`, which is the deliberate cross-tenant mode. A row
     // written there keeps the null it would have had anyway, rather than being
@@ -592,33 +614,96 @@ export class MonitoringRepository extends BaseRepository {
         results.push(result);
       }
 
+      // Same reasoning as `backfillConfirmedStatus`: this rewrites an arbitrary
+      // window that is already behind the watermark, so the buckets over it have
+      // to be recomputed and nothing else will notice they should be.
+      await markRollupDirty(trx, [{ monitor_tag, region_id: MERGED_REGION_ID, from: start, to: end }], nowTs);
+
       return results;
     });
   }
 
   /**
-   * Deletes a window of a monitor's samples.
+   * Deletes a window of a monitor's samples, and the rollups built from them.
    *
    * **Every region, like `background` and for the same reason.** This is the
    * only path that removes a monitor's history on purpose, so leaving a probe's
    * rows behind would leave orphans that no read returns and no later delete
    * finds.
+   *
+   * **The rollups are handled two different ways, and which one applies turns on
+   * `status`.**
+   *
+   *   - No status filter: every sample in the window goes, so the buckets over
+   *     it are simply *deleted*. There is nothing left to recompute them from,
+   *     and marking them dirty would schedule work whose only outcome is to
+   *     delete them anyway.
+   *   - With a status filter: only some samples go and the rest still need
+   *     buckets, so the window is marked dirty as well. The recompute then
+   *     rebuilds each bucket from what survived.
+   *
+   * Both happen in the same transaction as the delete. A crash between deleting
+   * samples and deleting their buckets would leave rollups asserting uptime for
+   * minutes that no longer exist - the one failure mode where a stale rollup
+   * actively lies rather than merely lagging.
    */
   async deleteMonitorDataByTag(tag?: string, start?: number, end?: number, status?: MonitoringStatus): Promise<number> {
-    const query = this.table("monitoring_data");
-    if (tag) {
-      query.where("monitor_tag", tag);
-    }
-    if (start !== undefined) {
-      query.where("timestamp", ">=", start);
-    }
-    if (end !== undefined) {
-      query.where("timestamp", "<=", end);
-    }
-    if (status) {
-      query.where("status", status);
-    }
-    return await query.del();
+    const nowTs = GetNowTimestampUTC();
+
+    return await this.knexUnscoped.transaction(async (trx: KnexType.Transaction) => {
+      const scope = (builder: KnexType.QueryBuilder) => {
+        if (tag) builder.where("monitor_tag", tag);
+        if (start !== undefined) builder.where("timestamp", ">=", start);
+        if (end !== undefined) builder.where("timestamp", "<=", end);
+        return builder;
+      };
+
+      // The affected tags, read before the delete removes the evidence. A
+      // tagless call is a bulk delete across every monitor, and each one's
+      // buckets have to be found by name.
+      const affected: string[] = tag
+        ? [tag]
+        : (await scope(trx("monitoring_data").distinct("monitor_tag"))).map(
+            (row: { monitor_tag: string }) => row.monitor_tag,
+          );
+
+      const orgId = requireOrgId("monitoring_data");
+      const rollupFrom = start ?? null;
+      // Rollup buckets are keyed by their START, so a bucket beginning before
+      // `end` can still cover samples up to `end`. The exclusive bound has to be
+      // `end + 1` or the last partially-covered bucket survives the delete.
+      const rollupTo = end === undefined ? null : end + 1;
+
+      for (const affectedTag of affected) {
+        for (const grain of ["5m", "1h", "1d"] as const) {
+          const deleteRollups = trx(ROLLUP_TABLES[grain]).where("monitor_tag", affectedTag);
+          if (orgId !== null) deleteRollups.where("org_id", orgId);
+          if (rollupFrom !== null) deleteRollups.where("bucket_start", ">=", rollupFrom);
+          if (rollupTo !== null) deleteRollups.where("bucket_start", "<", rollupTo);
+          await deleteRollups.del();
+        }
+      }
+
+      const query = scope(trx("monitoring_data"));
+      if (orgId !== null) query.where("org_id", orgId);
+      if (status) query.where("status", status);
+      const removed = await query.del();
+
+      if (status && affected.length > 0 && start !== undefined && end !== undefined) {
+        await markRollupDirty(
+          trx,
+          affected.map((affectedTag) => ({
+            monitor_tag: affectedTag,
+            region_id: MERGED_REGION_ID,
+            from: start,
+            to: end,
+          })),
+          nowTs,
+        );
+      }
+
+      return removed;
+    });
   }
 
   /**

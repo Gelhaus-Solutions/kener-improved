@@ -92,6 +92,17 @@ export interface MonitorRollup {
   rollup_version: number;
 }
 
+/**
+ * A rollup row on its way in, before the org is known.
+ *
+ * `org_id` is stamped by `BaseRepository.table()` at insert time, so the compute
+ * layer must NOT carry one. Passing `org_id: 0` as a placeholder would be worse
+ * than omitting it: the stamp spreads the row over the org (`{ org_id, ...row }`),
+ * so an explicit value wins and every rollup would land in org 0, which no
+ * scoped read can see.
+ */
+export type MonitorRollupInput = Omit<MonitorRollup, "org_id">;
+
 /** The three grains, and the table each lives in. */
 export const ROLLUP_TABLES = {
   "5m": "monitor_rollup_5m",
