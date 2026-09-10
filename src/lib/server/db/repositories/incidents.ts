@@ -1,5 +1,6 @@
 import { BaseRepository, type IncidentFilter, type CountResult } from "./base.js";
 import { GetDbType } from "../../tool.js";
+import { hasFullTextSearch } from "../capabilities.js";
 import GC from "../../../global-constants.js";
 import type {
   IncidentRecord,
@@ -13,6 +14,47 @@ import type {
   IncidentMonitorImpact,
   DbTimestamp,
 } from "../../types/db.js";
+
+/** G7. A position in the incident history, not a count of rows skipped. */
+export interface PublicIncidentCursor {
+  startDateTime: number;
+  id: number;
+}
+
+export interface PublicIncidentQuery {
+  /**
+   * The monitor tags this page shows. Omit for an unscoped history.
+   *
+   * These must already exclude hidden and inactive monitors - pass what
+   * `getPageMonitorsExcludeHidden` returned, not every tag on the page.
+   */
+  monitorTags?: string[];
+  search?: string;
+  start?: number;
+  end?: number;
+  state?: string;
+  cursor?: PublicIncidentCursor | null;
+  limit: number;
+}
+
+export interface PublicIncidentPage {
+  incidents: IncidentForMonitorListWithComments[];
+  /** Null when this is the last page. */
+  nextCursor: PublicIncidentCursor | null;
+}
+
+/**
+ * Escapes the wildcards in a user's search term for a `LIKE` pattern.
+ *
+ * Without this, searching for `50%` matches every incident and searching for
+ * `a_b` matches `axb` - and the user has no way to know why. The backslash is
+ * escaped first, or escaping the wildcards would then double-escape it.
+ *
+ * Only the non-Postgres path needs this; full text does not use `LIKE` at all.
+ */
+function escapeLikePattern(term: string): string {
+  return term.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
 
 // Raw row type from DB query before grouping
 interface IncidentRowWithMonitor {
@@ -72,13 +114,192 @@ export class IncidentsRepository extends BaseRepository {
     return Array.from(incidentMap.values());
   }
 
+  // ============ G7: public incident history ============
+
+  /**
+   * One keyset page of the publicly visible incident history.
+   *
+   * **Keyset, not OFFSET, and the reason is correctness before speed.**
+   * `getIncidentsPaginated` pages with `.offset((page-1)*limit)`, which is not
+   * merely slow at depth: incidents are ordered newest-first, so a new incident
+   * arriving while somebody is reading page 3 shifts every later row down one
+   * and the reader sees a row they already saw on page 2. A cursor on
+   * `(start_date_time DESC, id DESC)` describes a *position in the data* rather
+   * than a count of rows skipped, so concurrent inserts cannot duplicate or skip
+   * anything, and the page is found by index seek instead of by counting.
+   *
+   * **The visibility rules are copied from `getIncidentsForEventsByDateRange`
+   * deliberately, not approximated.** This is an anonymous, public endpoint, so
+   * getting them wrong publishes something an operator did not: only
+   * `incident_type = INCIDENT` (the same table stores maintenances), only
+   * `status = OPEN` (which is the *published* flag, not "unresolved"), and only
+   * incidents attached to a monitor this page shows or marked `is_global`.
+   * Comments are matched and returned only when `status = ACTIVE`, so a retracted
+   * update cannot be found by searching for its text.
+   *
+   * Resolved in two steps - ids first, then hydrate - because the monitor join
+   * multiplies rows per incident, and a `LIMIT` over multiplied rows returns a
+   * number of *rows* rather than a number of incidents.
+   */
+  async getPublicIncidentsPaginated(query: PublicIncidentQuery): Promise<PublicIncidentPage> {
+    const limit = Math.max(1, Math.min(100, query.limit));
+    const self = this;
+
+    let ids = this.table("incidents")
+      .distinct("incidents.id", "incidents.start_date_time")
+      .where("incidents.incident_type", GC.INCIDENT)
+      .andWhere("incidents.status", "OPEN");
+
+    if (query.monitorTags) {
+      ids = ids.leftJoin("incident_monitors", "incidents.id", "incident_monitors.incident_id").andWhere(function () {
+        this.whereIn("incident_monitors.monitor_tag", query.monitorTags!).orWhere("incidents.is_global", "YES");
+      });
+    }
+
+    if (query.start !== undefined) ids = ids.andWhere("incidents.start_date_time", ">=", query.start);
+    if (query.end !== undefined) ids = ids.andWhere("incidents.start_date_time", "<=", query.end);
+    if (query.state) ids = ids.andWhere("incidents.state", query.state);
+
+    // The cursor predicate. Written out rather than as a row comparison
+    // `(a,b) < (x,y)`, which SQLite does not support.
+    if (query.cursor) {
+      const cursor = query.cursor;
+      ids = ids.andWhere(function () {
+        this.where("incidents.start_date_time", "<", cursor.startDateTime).orWhere(function () {
+          this.where("incidents.start_date_time", cursor.startDateTime).andWhere("incidents.id", "<", cursor.id);
+        });
+      });
+    }
+
+    const search = query.search?.trim();
+    if (search) {
+      if (hasFullTextSearch()) {
+        // `websearch_to_tsquery`, not `to_tsquery`: this is a public search box,
+        // and `to_tsquery` throws a syntax error on ordinary punctuation - an
+        // apostrophe, a stray colon - which would turn a normal query into a 500.
+        // `websearch_to_tsquery` accepts anything a person types and understands
+        // quoted phrases and `-exclusions` the way a search engine does.
+        const commentMatch = this.table("incident_comments")
+          .select(1)
+          .whereRaw("incident_comments.incident_id = incidents.id")
+          .andWhere("incident_comments.status", "ACTIVE")
+          .andWhereRaw("incident_comments.search_tsv @@ websearch_to_tsquery('english', ?)", [search]);
+
+        ids = ids.andWhere(function () {
+          this.whereRaw("incidents.search_tsv @@ websearch_to_tsquery('english', ?)", [search]).orWhereExists(
+            commentMatch,
+          );
+        });
+      } else {
+        const pattern = `%${escapeLikePattern(search)}%`;
+        const commentMatch = this.table("incident_comments")
+          .select(1)
+          .whereRaw("incident_comments.incident_id = incidents.id")
+          .andWhere("incident_comments.status", "ACTIVE")
+          .andWhereRaw("incident_comments.comment LIKE ? ESCAPE '\\'", [pattern]);
+
+        ids = ids.andWhere(function () {
+          this.whereRaw("incidents.title LIKE ? ESCAPE '\\'", [pattern]).orWhereExists(commentMatch);
+        });
+      }
+    }
+
+    // One more than asked for: its existence is what says there is another page,
+    // without a second COUNT query that would be wrong by the time it returned.
+    const idRows = (await ids
+      .orderBy("incidents.start_date_time", "desc")
+      .orderBy("incidents.id", "desc")
+      .limit(limit + 1)) as Array<{ id: number; start_date_time: number }>;
+
+    const pageRows = idRows.slice(0, limit);
+    const nextCursor =
+      idRows.length > limit
+        ? { startDateTime: pageRows[pageRows.length - 1].start_date_time, id: pageRows[pageRows.length - 1].id }
+        : null;
+
+    if (pageRows.length === 0) return { incidents: [], nextCursor: null };
+
+    const incidents = await self.hydratePublicIncidents(pageRows.map((r) => r.id));
+    return { incidents, nextCursor };
+  }
+
+  /**
+   * Loads full incidents for `ids`, newest first, with their public comments.
+   *
+   * Ordered here rather than trusting the database to return `whereIn` results in
+   * any particular order, which it does not promise.
+   */
+  private async hydratePublicIncidents(ids: number[]): Promise<IncidentForMonitorListWithComments[]> {
+    const rows = await this.table("incidents")
+      .select(
+        "incidents.id",
+        "incidents.title",
+        "incidents.start_date_time",
+        "incidents.end_date_time",
+        "incidents.created_at",
+        "incidents.updated_at",
+        "incidents.status",
+        "incidents.state",
+        "incident_monitors.monitor_impact",
+        "incident_monitors.monitor_tag",
+        "monitors.name as monitor_name",
+        "monitors.image as monitor_image",
+        "monitors.is_hidden as monitor_is_hidden",
+      )
+      .leftJoin("incident_monitors", "incidents.id", "incident_monitors.incident_id")
+      .leftJoin("monitors", "incident_monitors.monitor_tag", "monitors.tag")
+      .whereIn("incidents.id", ids)
+      .orderBy("incidents.start_date_time", "desc")
+      .orderBy("incidents.id", "desc");
+
+    const incidents = this.groupIncidentsByIdForMonitorListFilterHidden(rows);
+    if (incidents.length === 0) return [];
+
+    const comments = await this.table("incident_comments")
+      .select("*")
+      .whereIn(
+        "incident_id",
+        incidents.map((incident) => incident.id),
+      )
+      .andWhere("status", "ACTIVE")
+      .orderBy("commented_at", "desc")
+      .orderBy("id", "desc");
+
+    const byIncident = new Map<number, IncidentCommentRecord[]>();
+    for (const comment of comments) {
+      const existing = byIncident.get(comment.incident_id) || [];
+      existing.push(comment);
+      byIncident.set(comment.incident_id, existing);
+    }
+
+    return incidents.map((incident) => ({
+      ...incident,
+      comments: byIncident.get(incident.id) || [],
+    }));
+  }
+
   // ============ Incidents ============
 
+  /**
+   * Incidents by page number, or - when `cursor` is supplied - by keyset.
+   *
+   * **The cursor is additive and changes nothing for callers that do not pass
+   * one.** v5 publishes a `?page=` contract that third parties already poll, so
+   * the OFFSET path stays byte-identical, including its `ORDER BY id`. A caller
+   * that opts into a cursor gets the correct ordering for paging a newest-first
+   * list, `(start_date_time DESC, id DESC)`, and with it the guarantee OFFSET
+   * cannot give: an incident created mid-browse cannot make a row appear twice.
+   *
+   * Ordering differs between the two modes on purpose. Switching the OFFSET path
+   * to the keyset ordering would silently reorder every existing client's
+   * results, which is a breaking change wearing a bugfix's clothes.
+   */
   async getIncidentsPaginated(
     page: number,
     limit: number,
     filter: IncidentFilter | null,
     direction: "after" | "before" = "after",
+    cursor?: PublicIncidentCursor | null,
   ): Promise<IncidentRecord[]> {
     let query = this.table("incidents").select("*").whereRaw("1=1");
     if (filter && filter.status) {
@@ -108,6 +329,20 @@ export class IncidentsRepository extends BaseRepository {
     if (filter && filter.incident_source) {
       query = query.andWhere("incident_source", filter.incident_source);
     }
+    if (cursor !== undefined) {
+      // Keyset mode. `cursor: null` means "the first page", which is different
+      // from `undefined` meaning "this caller does not use cursors at all".
+      if (cursor) {
+        const position = cursor;
+        query = query.andWhere(function () {
+          this.where("start_date_time", "<", position.startDateTime).orWhere(function () {
+            this.where("start_date_time", position.startDateTime).andWhere("id", "<", position.id);
+          });
+        });
+      }
+      return await query.orderBy("start_date_time", "desc").orderBy("id", "desc").limit(limit);
+    }
+
     if (direction === "after") {
       query = query
         .orderBy("id", "desc")

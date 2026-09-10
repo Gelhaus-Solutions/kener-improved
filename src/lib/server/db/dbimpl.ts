@@ -317,6 +317,9 @@ class DbImpl {
   getResolvedIncidentsForMonitorList!: IncidentsRepository["getResolvedIncidentsForMonitorList"];
   getResolvedIncidentsForMonitorListWithComments!: IncidentsRepository["getResolvedIncidentsForMonitorListWithComments"];
   getIncidentsForEventsByDateRange!: IncidentsRepository["getIncidentsForEventsByDateRange"];
+  // G7. Both a declared field AND a constructor bind, or it typechecks and
+  // fails at runtime. See the note on this whitelist family.
+  getPublicIncidentsPaginated!: IncidentsRepository["getPublicIncidentsPaginated"];
   getIncidentsForEventsByDateRangeMonitor!: IncidentsRepository["getIncidentsForEventsByDateRangeMonitor"];
   getLastIncidentByMonitorTags!: IncidentsRepository["getLastIncidentByMonitorTags"];
   getIncidentsCountByTypeAndDateRangeAndMonitorTags!: IncidentsRepository["getIncidentsCountByTypeAndDateRangeAndMonitorTags"];
@@ -908,6 +911,7 @@ class DbImpl {
     this.getResolvedIncidentsForMonitorListWithComments =
       this.incidents.getResolvedIncidentsForMonitorListWithComments.bind(this.incidents);
     this.getIncidentsForEventsByDateRange = this.incidents.getIncidentsForEventsByDateRange.bind(this.incidents);
+    this.getPublicIncidentsPaginated = this.incidents.getPublicIncidentsPaginated.bind(this.incidents);
     this.getIncidentsForEventsByDateRangeMonitor = this.incidents.getIncidentsForEventsByDateRangeMonitor.bind(
       this.incidents,
     );

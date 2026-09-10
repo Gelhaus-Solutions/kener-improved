@@ -29,6 +29,14 @@ export interface IncidentFilter {
   id?: number;
   incident_type?: string;
   incident_source?: string;
+  /**
+   * G7. Free text, matched against the incident title and its ACTIVE comments.
+   *
+   * Interpreted by whichever search the dialect supports - Postgres full text,
+   * `LIKE` elsewhere - so this is a user's words, never query syntax. See
+   * `getPublicIncidentsPaginated`.
+   */
+  search?: string;
 }
 
 export interface CountResult {

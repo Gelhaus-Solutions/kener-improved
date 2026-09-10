@@ -15,6 +15,30 @@ import { BackfillIncident, ValidateBackfill } from "$lib/server/incidents/backfi
 
 const MAX_LIMIT = 200;
 
+/**
+ * The keyset cursor, opaque to clients.
+ *
+ * Encoded rather than exposed as two query parameters so the server can change
+ * what a position means without every stored cursor silently returning the wrong
+ * page. It hides nothing: both halves appear in the response already.
+ */
+function encodeIncidentCursor(cursor: { startDateTime: number; id: number }): string {
+  return Buffer.from(`${cursor.startDateTime}:${cursor.id}`, "utf8").toString("base64url");
+}
+
+function decodeIncidentCursor(raw: string): { startDateTime: number; id: number } | null {
+  if (!raw) return null;
+  try {
+    const [ts, id] = Buffer.from(raw, "base64url").toString("utf8").split(":");
+    const startDateTime = Number(ts);
+    const parsedId = Number(id);
+    if (!Number.isFinite(startDateTime) || !Number.isFinite(parsedId)) return null;
+    return { startDateTime, id: parsedId };
+  } catch {
+    return null;
+  }
+}
+
 export const GET: RequestHandler = async ({ url }) => {
   const page = Math.max(1, Number(url.searchParams.get("page") ?? 1) || 1);
   const limit = Math.min(MAX_LIMIT, Math.max(1, Number(url.searchParams.get("limit") ?? 50) || 50));
@@ -29,7 +53,27 @@ export const GET: RequestHandler = async ({ url }) => {
   const state = url.searchParams.get("state");
   if (state) filter.state = state;
 
-  const rows = await db.getIncidentsPaginated(page, limit, Object.keys(filter).length > 0 ? filter : null);
+  const appliedFilter = Object.keys(filter).length > 0 ? filter : null;
+
+  // G7. `?cursor=` is additive: without it this behaves exactly as it always
+  // has, including the `?page=` response shape third parties already depend on.
+  // With it, paging is keyset - correct under concurrent inserts, and constant
+  // time at depth. `cursor=` with an empty value means "first keyset page".
+  const rawCursor = url.searchParams.get("cursor");
+  if (rawCursor !== null) {
+    const cursor = decodeIncidentCursor(rawCursor);
+    const rows = await db.getIncidentsPaginated(1, limit, appliedFilter, "after", cursor);
+    const incidents = await Promise.all(rows.map((row) => serializeIncident(row)));
+    const last = rows.at(-1);
+    // Null only when this page came back short: a full page might still be the
+    // last one, and the alternative is a COUNT that is stale by the time it
+    // returns. A client following the cursor simply gets an empty final page.
+    const nextCursor =
+      rows.length === limit && last ? encodeIncidentCursor({ startDateTime: last.start_date_time, id: last.id }) : null;
+    return json({ incidents, limit, nextCursor });
+  }
+
+  const rows = await db.getIncidentsPaginated(page, limit, appliedFilter);
   const incidents = await Promise.all(rows.map((row) => serializeIncident(row)));
 
   return json({ incidents, page, limit });

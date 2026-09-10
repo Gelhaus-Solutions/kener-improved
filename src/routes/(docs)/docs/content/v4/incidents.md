@@ -139,6 +139,17 @@ Plan maintenance windows in advance:
 - **Document everything** - For post-mortems
 - **Follow up** - Post-incident review
 
+## Public incident history {#public-incident-history}
+
+Every status page has a searchable history of past incidents at `/history`, or `/<page-path>/history` for a named page.
+
+- **Search** covers incident titles and the text of published incident updates, so an old update is findable by what it said.
+- **Paging** loads more on demand and stays correct while new incidents are being created.
+- Only what the page already publishes appears: incidents on that page's components (or global ones), and only published incidents and updates. Retracted updates are not searchable.
+
+> [!NOTE]
+> On PostgreSQL, search uses full-text indexing and understands quoted `"exact phrases"` and `-exclusions`. On SQLite and MySQL it falls back to a substring match, which returns the same incidents but cannot rank them.
+
 ## Notifications
 
 Configure how users are notified:
