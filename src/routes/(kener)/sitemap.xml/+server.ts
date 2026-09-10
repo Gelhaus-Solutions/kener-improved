@@ -4,8 +4,9 @@ import { GetMonitors } from "$lib/server/controllers/monitorsController.js";
 import serverResolver from "$lib/server/resolver.js";
 import type { SitemapXMLConfig } from "$lib/types/site.js";
 import type { RequestHandler } from "./$types";
+import { publicBaseUrlFromRequest } from "$lib/server/http/publicUrl.js";
 
-export const GET: RequestHandler = async () => {
+export const GET: RequestHandler = async ({ request, locals }) => {
   const sitemap = (await GetSiteDataByKey("sitemap")) as SitemapXMLConfig | null;
   const mode = sitemap?.mode ?? "auto";
 
@@ -24,17 +25,26 @@ export const GET: RequestHandler = async () => {
   }
 
   // auto mode
-  const siteURL = (await GetSiteDataByKey("siteURL")) as string | null;
+  //
+  // G4. Built from the host this sitemap was fetched on, falling back to the
+  // configured `siteURL`. A sitemap listing another domain's URLs is worse than
+  // no sitemap: search engines treat cross-domain entries as unverifiable and
+  // may ignore the file entirely.
+  const siteURL = publicBaseUrlFromRequest(request, (await GetSiteDataByKey("siteURL")) as string | null);
   if (!siteURL) {
     return new Response("Not found", { status: 404 });
   }
 
   const locs: string[] = [];
 
-  // Add pages
+  // G4. On a hostname bound to one page, that page IS the site: listing the
+  // instance's other pages under this domain would advertise URLs that serve
+  // somebody else's status page.
+  const boundPagePath = locals.pagePath;
   const pages = await GetAllPages();
   for (const page of pages) {
-    const path = page.page_path ? `/${page.page_path}` : "/";
+    if (boundPagePath !== undefined && page.page_path !== boundPagePath) continue;
+    const path = boundPagePath !== undefined ? "/" : page.page_path ? `/${page.page_path}` : "/";
     locs.push(siteURL + serverResolver(path));
   }
 

@@ -58,6 +58,12 @@ export const TENANT_TABLES: ReadonlySet<string> = new Set([
   "regions",
   "subscriber_subscriptions",
   "component_dependencies",
+  // G4. Per-page custom domains. A tenant table, unlike `org_domains`, which is
+  // how the org is *found* and therefore cannot be scoped by one: by the time
+  // anything reads `page_domains` for management the org is already established.
+  // The public resolution path reads it under `runAcrossOrgs`, deliberately and
+  // in one place - see `http/orgResolve.ts`.
+  "page_domains",
   "monitor_rollup_settings",
   "monitor_rollup_5m",
   "monitor_rollup_1h",

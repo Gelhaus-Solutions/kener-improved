@@ -13,6 +13,7 @@ import {
 import type { EventDisplaySettings, GlobalPageVisibilitySettings, SiteDateTimeFormat } from "$lib/types/site.js";
 import serverResolve from "../resolver.js";
 import { GetSwitcherPages } from "./pagesController.js";
+import { publicBaseUrlFromRequest } from "../http/publicUrl.js";
 import type { PageNavItem } from "./dashboardController.js";
 
 export interface LayoutServerData {
@@ -179,7 +180,10 @@ export async function GetLayoutServerData(cookies: Cookies, request: Request): P
     siteStatusColorsDark,
     navItems: siteData.nav || [],
     siteName: siteData.siteName || "Kener",
-    siteUrl: siteData.siteURL || "",
+    // G4. Host-derived, so `og:image` and friends point at the domain the
+    // visitor is actually on. A social preview whose image URL is another domain
+    // is fetched cross-origin by every scraper and is often simply dropped.
+    siteUrl: publicBaseUrlFromRequest(request, siteData.siteURL) ?? "",
     logo: siteData.logo,
     // Browsers fetch <link rel="icon"> from the SSR HTML before hydration.
     // SvelteKit's resolve() uses a relative base on the app-root page, so

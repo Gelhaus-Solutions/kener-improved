@@ -104,11 +104,24 @@ export async function GetSwitcherPages(): Promise<PageNavItem[]> {
     });
   }
 
+  // G4. One query for the whole org rather than one per page: the switcher is
+  // rendered on every public request, and N+1 there is N+1 on the hot path.
+  const domains = await db.getPageDomainsForOrg();
+  const primaryByPage = new Map<number, string>();
+  for (const domain of domains) {
+    if (domain.status !== "ACTIVE") continue;
+    const existing = primaryByPage.get(domain.page_id);
+    // Primary wins; otherwise first active by id, matching
+    // `getPrimaryHostnameForPage` so the switcher and the page agree.
+    if (!existing || domain.is_primary === "YES") primaryByPage.set(domain.page_id, domain.hostname);
+  }
+
   return ordered.map((p) => ({
     page_title: p.page_title,
     page_path: p.page_path,
     page_header: p.page_header,
     page_logo: p.page_logo,
+    primary_hostname: primaryByPage.get(p.id) ?? null,
   }));
 }
 

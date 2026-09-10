@@ -129,7 +129,11 @@
     loading = true;
     try {
       const response = await fetch(
-        clientResolver(resolve, "/dashboard-apis/events-by-month") + `?page_path=${page.params.page_path}`,
+        // G4. On a hostname bound to a page, this root-level archive is that
+        // page's archive. `boundPagePath` comes from layout data and is null on
+        // a shared host, which is the pre-G4 behaviour.
+        clientResolver(resolve, "/dashboard-apis/events-by-month") +
+          `?page_path=${encodeURIComponent(page.params.page_path ?? page.data.boundPagePath ?? "")}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

@@ -21,8 +21,26 @@
   // list is resolved server-side through `BaseRepository.table()`, under the org
   // that `orgResolveHandle` established from the hostname.
 
-  const currentPath = $derived(page.params.page_path ?? "");
+  // G4. On a hostname bound to a page, the site root *is* that page, so the
+  // current entry is the bound one rather than the empty home path.
+  const currentPath = $derived(page.params.page_path ?? page.data.boundPagePath ?? "");
   const pages = $derived<PageNavItem[]>(page.data.switcherPages ?? []);
+
+  /**
+   * Where a switcher entry points.
+   *
+   * G4's constraint on G3: a page that lives on its own domain must be linked to
+   * absolutely. A relative path would resolve against whichever domain the
+   * visitor is currently on, and on a bound host that path either 404s or serves
+   * a different page entirely.
+   */
+  function hrefFor(item: PageNavItem): string {
+    if (item.primary_hostname) {
+      const scheme = typeof window !== "undefined" ? window.location.protocol : "https:";
+      return `${scheme}//${item.primary_hostname}`;
+    }
+    return clientResolver(resolve, `/${item.page_path}`);
+  }
 
   const currentPage = $derived(pages.find((p) => p.page_path === currentPath) ?? pages.find((p) => p.page_path === ""));
 
@@ -60,7 +78,7 @@
           <Button
             variant={item.page_path === currentPath ? "outline" : "ghost"}
             size="sm"
-            href={clientResolver(resolve, `/${item.page_path}`)}
+            href={hrefFor(item)}
             class="w-full justify-start rounded-full text-xs shadow-none"
           >
             {item.page_title}

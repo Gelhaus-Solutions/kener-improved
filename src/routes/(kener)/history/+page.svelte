@@ -23,5 +23,6 @@
       </Item.Content>
     </Item.Root>
   </div>
-  <IncidentHistory pagePath="" />
+  <!-- G4. The bound page on a custom domain, the home page otherwise. -->
+  <IncidentHistory pagePath={data.boundPagePath ?? ""} />
 </div>

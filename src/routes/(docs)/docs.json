@@ -250,6 +250,10 @@
                       "content": "v4/live-updates"
                     },
                     {
+                      "title": "Custom Domains",
+                      "content": "v4/custom-domains"
+                    },
+                    {
                       "title": "Internationalization",
                       "content": "v4/internationalization"
                     },

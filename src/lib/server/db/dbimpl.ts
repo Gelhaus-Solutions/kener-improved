@@ -32,6 +32,7 @@ import { MfaRepository } from "./repositories/mfa.js";
 import { SubscriptionSystemRepository } from "./repositories/subscriptionSystem.js";
 import { EmailTemplateConfigRepository } from "./repositories/emailTemplateConfig.js";
 import { OrgsRepository } from "./repositories/orgs.js";
+import { PageDomainsRepository } from "./repositories/pageDomains.js";
 
 // Re-export types from base
 export type { MonitorFilter, TriggerFilter, IncidentFilter, CountResult } from "./repositories/base.js";
@@ -146,6 +147,7 @@ class DbImpl {
   private events!: EventsRepository;
   private webhooks!: WebhooksRepository;
   private orgs!: OrgsRepository;
+  private pageDomains!: PageDomainsRepository;
   private sessions!: SessionsRepository;
   private mfa!: MfaRepository;
   private subscriptionSystem!: SubscriptionSystemRepository;
@@ -494,6 +496,17 @@ class DbImpl {
   deleteWebhookEndpoint!: WebhooksRepository["deleteEndpoint"];
   getWebhookEndpointById!: WebhooksRepository["getEndpointById"];
   // Organisations (P4). Unscoped by design; see repositories/orgs.ts.
+  // G4. Per-page custom domains.
+  getActivePageDomains!: PageDomainsRepository["getActivePageDomains"];
+  getPageDomains!: PageDomainsRepository["getPageDomains"];
+  getPageDomainsForOrg!: PageDomainsRepository["getPageDomainsForOrg"];
+  getPageDomainById!: PageDomainsRepository["getPageDomainById"];
+  getPrimaryHostnameForPage!: PageDomainsRepository["getPrimaryHostnameForPage"];
+  createPageDomain!: PageDomainsRepository["createPageDomain"];
+  updatePageDomain!: PageDomainsRepository["updatePageDomain"];
+  setPrimaryPageDomain!: PageDomainsRepository["setPrimaryPageDomain"];
+  deletePageDomain!: PageDomainsRepository["deletePageDomain"];
+  hostnameExists!: PageDomainsRepository["hostnameExists"];
   getOrgById!: OrgsRepository["getOrgById"];
   getOrgBySlug!: OrgsRepository["getOrgBySlug"];
   getAllOrgs!: OrgsRepository["getAllOrgs"];
@@ -711,6 +724,7 @@ class DbImpl {
     this.events = new EventsRepository(this.knex);
     this.webhooks = new WebhooksRepository(this.knex);
     this.orgs = new OrgsRepository(this.knex);
+    this.pageDomains = new PageDomainsRepository(this.knex);
     this.sessions = new SessionsRepository(this.knex);
     this.mfa = new MfaRepository(this.knex);
     this.subscriptionSystem = new SubscriptionSystemRepository(this.knex);
@@ -1357,6 +1371,16 @@ class DbImpl {
     this.updateWebhookEndpoint = this.webhooks.updateEndpoint.bind(this.webhooks);
     this.deleteWebhookEndpoint = this.webhooks.deleteEndpoint.bind(this.webhooks);
     this.getWebhookEndpointById = this.webhooks.getEndpointById.bind(this.webhooks);
+    this.getActivePageDomains = this.pageDomains.getActivePageDomains.bind(this.pageDomains);
+    this.getPageDomains = this.pageDomains.getPageDomains.bind(this.pageDomains);
+    this.getPageDomainsForOrg = this.pageDomains.getPageDomainsForOrg.bind(this.pageDomains);
+    this.getPageDomainById = this.pageDomains.getPageDomainById.bind(this.pageDomains);
+    this.getPrimaryHostnameForPage = this.pageDomains.getPrimaryHostnameForPage.bind(this.pageDomains);
+    this.createPageDomain = this.pageDomains.createPageDomain.bind(this.pageDomains);
+    this.updatePageDomain = this.pageDomains.updatePageDomain.bind(this.pageDomains);
+    this.setPrimaryPageDomain = this.pageDomains.setPrimaryPageDomain.bind(this.pageDomains);
+    this.deletePageDomain = this.pageDomains.deletePageDomain.bind(this.pageDomains);
+    this.hostnameExists = this.pageDomains.hostnameExists.bind(this.pageDomains);
     this.getOrgById = this.orgs.getOrgById.bind(this.orgs);
     this.getOrgBySlug = this.orgs.getOrgBySlug.bind(this.orgs);
     this.getAllOrgs = this.orgs.getAllOrgs.bind(this.orgs);

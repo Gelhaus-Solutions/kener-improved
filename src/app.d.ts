@@ -16,6 +16,12 @@ declare global {
       maintenance?: import("$lib/server/types/db").MaintenanceRecord;
       // Set by hooks.server.ts for /api/pages/:page_path/* routes
       page?: import("$lib/server/types/db").PageRecord;
+      // G4. Set by orgResolveHandle when the request arrived on a hostname bound
+      // to a specific page, so the site root serves that page instead of the
+      // home page. Absent for every other request, including all API traffic:
+      // the hostname is not the discriminator there. See http/orgResolve.ts.
+      pageId?: number;
+      pagePath?: string;
       // The API key behind a bearer-authenticated /api/* request, with the
       // scopes it was granted. Set by hooks.server.ts once the key resolves,
       // and the thing route handlers should consult rather than re-reading the

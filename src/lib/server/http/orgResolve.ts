@@ -15,18 +15,30 @@ import { orgPrefixOf, orgSlugOf } from "$lib/orgPath";
  *
  * **Resolution order, and the invariant that matters:**
  *
- *   1. A hostname in `org_domains`. For public traffic the host *is* the tenant
- *      discriminator, and P9 will make this the normal case.
- *   2. An `/o/<slug>/` prefix, for self-hosted convenience where one hostname
+ *   1. A hostname in `page_domains` (G4). Selects a tenant *and* the page its
+ *      site root serves, which is what makes one instance able to answer for
+ *      several customers' own domains.
+ *   2. A hostname in `org_domains`. Selects a tenant and leaves the path alone.
+ *   3. An `/o/<slug>/` prefix, for self-hosted convenience where one hostname
  *      serves several orgs. I3e decides whether this stays.
- *   3. The default org. Every single-tenant install lands here, which is what
+ *   4. The default org. Every single-tenant install lands here, which is what
  *      makes this whole change invisible to them.
  *
- * **The API key wins over the host, and that ordering is security-critical.**
- * For public traffic the hostname discriminates the tenant; for API traffic the
- * key does. Inverting that precedence would let a request to one tenant's
- * hostname read another tenant's data with a valid key, so the key is checked
- * first and nothing below can override it.
+ * **THE INVARIANT. The API key wins over the host, and getting it backwards is a
+ * cross-tenant data leak.** For public traffic the hostname discriminates the
+ * tenant; for API traffic it does not - the key does. A request carrying a valid
+ * key for org A, arriving at org B's hostname, must read org A's data.
+ *
+ * Mechanically that is enforced by one line: the host header is only consulted
+ * `if (orgId === null)`, which is to say only when no key resolved. So a key
+ * short-circuits the host lookup entirely, and with it the G4 page binding -
+ * `locals.pagePath` is never set for API traffic, because on that path the
+ * hostname means nothing. Inverting these two blocks, or reading `host`
+ * unconditionally "to set the page", would silently reintroduce exactly the leak
+ * this ordering exists to prevent.
+ *
+ * `apiAuthHandle` runs after this handle and re-reads the key for scope checks;
+ * it never re-derives the org, so there is one decision and one place to audit.
  *
  * The key is looked up here rather than in `apiAuthHandle`, which costs one
  * extra indexed lookup per API request and buys two things worth more than it:
@@ -56,22 +68,56 @@ const BASE = (process.env.KENER_BASE_PATH || "").replace(/\/+$/, "");
  * lookup per request. Invalidated explicitly when `org_domains` is written.
  */
 const HOST_TTL_MS = 60_000;
-let hostCache: { at: number; byHost: Map<string, number> } | null = null;
+
+/**
+ * What a hostname resolves to.
+ *
+ * `pagePath` is present only for a G4 per-page domain: an `org_domains` host
+ * selects a tenant and leaves the path alone, while a `page_domains` host also
+ * says which page the site root serves.
+ */
+interface HostRoute {
+  orgId: number;
+  pageId?: number;
+  pagePath?: string;
+}
+
+let hostCache: { at: number; byHost: Map<string, HostRoute> } | null = null;
 
 export function invalidateOrgDomainCache(): void {
   hostCache = null;
 }
 
-async function orgForHost(host: string): Promise<number | null> {
+async function routeForHost(host: string): Promise<HostRoute | null> {
   const now = Date.now();
   if (!hostCache || now - hostCache.at > HOST_TTL_MS) {
-    // `org_domains` is how the org is *found*, so it cannot itself be scoped by
+    // Both tables are how the org is *found*, so neither can itself be scoped by
     // one. That is the definition of a system read.
-    const rows = await runAcrossOrgs(() => db.getActiveOrgDomains());
-    hostCache = {
-      at: now,
-      byHost: new Map(rows.map((r) => [r.hostname.toLowerCase(), r.org_id])),
-    };
+    const [orgDomains, pageDomains] = await Promise.all([
+      runAcrossOrgs(() => db.getActiveOrgDomains()),
+      db.getActivePageDomains(),
+    ]);
+
+    const byHost = new Map<string, HostRoute>();
+    // Org domains first, then page domains, so that **`page_domains` wins**.
+    // `hostname` is UNIQUE within each table but the constraint cannot span
+    // them, so a hostname in both is a configuration mistake. Resolving it the
+    // same way every time is what keeps that mistake boring: the more specific
+    // binding is the one an operator most recently meant.
+    for (const row of orgDomains) byHost.set(row.hostname.toLowerCase(), { orgId: row.org_id });
+    for (const row of pageDomains) {
+      byHost.set(row.hostname.toLowerCase(), {
+        orgId: row.org_id,
+        pageId: row.page_id,
+        pagePath: row.page_path,
+      });
+    }
+
+    // Cached whether or not anything was found, so an instance with no custom
+    // domains at all - every single-site install - does one query a minute
+    // rather than one per request. A host that matches nothing is a miss
+    // against a populated map, which is the negative cache.
+    hostCache = { at: now, byHost };
   }
   return hostCache.byHost.get(host.toLowerCase()) ?? null;
 }
@@ -93,11 +139,20 @@ export const orgResolveHandle: Handle = async ({ event, resolve }) => {
     }
   }
 
+  // G4. A hostname bound to a page also decides which page the site root
+  // serves. **Only for host-derived traffic**: see the invariant below.
   const host = orgId === null ? event.request.headers.get("host") : null;
   if (host) {
     // Port stripped: a host header is `example.com:3000` behind a proxy that
     // does not rewrite it, and the stored domain never carries a port.
-    orgId = await orgForHost(host.replace(/:\d+$/, ""));
+    const route = await routeForHost(host.replace(/:\d+$/, ""));
+    if (route) {
+      orgId = route.orgId;
+      if (route.pagePath !== undefined) {
+        event.locals.pageId = route.pageId;
+        event.locals.pagePath = route.pagePath;
+      }
+    }
   }
 
   // 3. An `/o/<slug>/` prefix. `reroute` has already stripped it for routing;

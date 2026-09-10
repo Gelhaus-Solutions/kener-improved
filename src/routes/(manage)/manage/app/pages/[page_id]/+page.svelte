@@ -74,6 +74,85 @@
     page_logo: ""
   });
 
+  // G4: custom domains
+  interface PageDomain {
+    id: number;
+    page_id: number;
+    hostname: string;
+    status: string;
+    is_primary: string;
+    verified_at: number | null;
+  }
+
+  let domains = $state<PageDomain[]>([]);
+  let newDomainHost = $state("");
+  let savingDomain = $state(false);
+
+  async function callAction(action: string, data: Record<string, unknown>) {
+    const response = await fetch(clientResolver(resolve, "/manage/api"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, data })
+    });
+    const result = await response.json();
+    if (result?.error) throw new Error(result.error);
+    return result;
+  }
+
+  async function loadDomains() {
+    if (isNew) return;
+    try {
+      domains = await callAction("getPageDomains", { page_id: Number(pageId) });
+    } catch {
+      // A page that simply has no domains is the common case; a failure here
+      // must not block the rest of the screen from rendering.
+      domains = [];
+    }
+  }
+
+  async function addDomain() {
+    const hostname = newDomainHost.trim();
+    if (!hostname) return;
+    savingDomain = true;
+    try {
+      await callAction("savePageDomain", { page_id: Number(pageId), hostname });
+      newDomainHost = "";
+      await loadDomains();
+      toast.success("Domain added. Point its DNS at this instance, then mark it active.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to add domain");
+    } finally {
+      savingDomain = false;
+    }
+  }
+
+  async function setDomainStatus(domain: PageDomain, status: string) {
+    try {
+      await callAction("savePageDomain", { id: domain.id, status });
+      await loadDomains();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to update domain");
+    }
+  }
+
+  async function makePrimary(domain: PageDomain) {
+    try {
+      await callAction("setPrimaryPageDomain", { id: domain.id });
+      await loadDomains();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to set primary domain");
+    }
+  }
+
+  async function removeDomain(domain: PageDomain) {
+    try {
+      await callAction("deletePageDomain", { id: domain.id });
+      await loadDomains();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to remove domain");
+    }
+  }
+
   // Monitor selection
   let selectedMonitorTag = $state("");
   let selectedMonitors = $state<string[]>([]);
@@ -550,6 +629,8 @@
   onMount(() => {
     void fetchPage();
     void fetchMonitors();
+    // G4. Skipped for a page that does not exist yet: a domain needs a page_id.
+    void loadDomains();
   });
 </script>
 
@@ -806,6 +887,99 @@
       </Card.Root>
 
       <!-- Page Settings Card -->
+      <Card.Root>
+        <Card.Header>
+          <Card.Title>Custom Domains</Card.Title>
+        </Card.Header>
+        <Card.Content class="space-y-4">
+          <p class="text-muted-foreground text-sm">
+            Serve this page on its own hostname. Point the domain&rsquo;s DNS at this instance, then mark it active.
+            Certificates are handled by your reverse proxy, not by Kener.
+          </p>
+
+          {#if isNew}
+            <p class="text-muted-foreground text-sm">Save the page first, then add a domain.</p>
+          {:else}
+            <div class="flex gap-2">
+              <Input
+                bind:value={newDomainHost}
+                placeholder="status.example.com"
+                aria-label="Hostname"
+                onkeydown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void addDomain();
+                  }
+                }}
+              />
+              <Button onclick={addDomain} disabled={savingDomain || !newDomainHost.trim()}>
+                {#if savingDomain}
+                  <Loader class="h-4 w-4 animate-spin" />
+                {:else}
+                  <PlusIcon class="h-4 w-4" />
+                {/if}
+                Add
+              </Button>
+            </div>
+
+            {#if domains.length === 0}
+              <p class="text-muted-foreground text-sm">
+                No custom domains. This page is served under the site address.
+              </p>
+            {:else}
+              <div class="divide-y rounded-md border">
+                {#each domains as domain (domain.id)}
+                  <div class="flex flex-wrap items-center gap-2 p-3">
+                    <span class="font-mono text-sm">{domain.hostname}</span>
+
+                    {#if domain.status === "ACTIVE"}
+                      <span class="text-up text-xs font-medium">Active</span>
+                    {:else}
+                      <span class="text-muted-foreground text-xs font-medium">Pending</span>
+                    {/if}
+
+                    {#if domain.is_primary === "YES"}
+                      <span class="bg-muted rounded px-1.5 py-0.5 text-xs">Primary</span>
+                    {/if}
+
+                    <div class="ml-auto flex items-center gap-2">
+                      {#if domain.status === "ACTIVE"}
+                        <Button variant="outline" size="sm" onclick={() => setDomainStatus(domain, "PENDING")}>
+                          Deactivate
+                        </Button>
+                      {:else}
+                        <Button variant="outline" size="sm" onclick={() => setDomainStatus(domain, "ACTIVE")}>
+                          Activate
+                        </Button>
+                      {/if}
+                      {#if domain.is_primary !== "YES" && domain.status === "ACTIVE"}
+                        <Button variant="outline" size="sm" onclick={() => makePrimary(domain)}>Make primary</Button>
+                      {/if}
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="Remove domain"
+                        onclick={() => removeDomain(domain)}
+                      >
+                        <TrashIcon class="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                {/each}
+              </div>
+
+              <p class="text-muted-foreground text-xs">
+                The <span class="font-medium">primary</span> domain is the one used to build this page&rsquo;s absolute
+                links: its RSS feed, its sitemap, its social preview tags, and the entry other pages&rsquo; switchers
+                link to. A domain stays <span class="font-medium">pending</span> until you activate it, so a hostname whose
+                DNS is not ready yet never starts serving.
+              </p>
+            {/if}
+          {/if}
+        </Card.Content>
+      </Card.Root>
+
+      <!-- Display Settings Card -->
       <Card.Root>
         <Card.Header>
           <Card.Title>Display Settings</Card.Title>

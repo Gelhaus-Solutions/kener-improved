@@ -14,6 +14,7 @@ import { GetAllSiteData } from "$lib/server/controllers/siteDataController.js";
 import type { IncidentForMonitorListWithComments, MaintenanceEventsMonitorList } from "$lib/server/types/db.js";
 import { GetPublishedPostmortemsFor } from "./incidents/postmortem.js";
 import type { Postmortem } from "./types/postmortem.js";
+import { publicBaseUrl } from "./http/publicUrl.js";
 
 export type RssFeedItemType = "incident" | "maintenance" | "postmortem";
 
@@ -128,11 +129,23 @@ export interface RenderRssFeedArgs {
   scope: RenderRssFeedScope;
   // Path of THIS feed under basePath, e.g. "/rss.xml" or "/monitors/foo/rss.xml".
   feedPath: string;
+  /**
+   * G4. The `Host` this feed was requested on, so its links point back at the
+   * domain the reader actually subscribed to rather than at the instance's
+   * configured `siteURL`. Optional: callers that have no request fall back to
+   * `siteURL`, which is what every feed did before custom domains.
+   */
+  requestHost?: string | null;
+  forwardedProto?: string | null;
 }
 
 export async function renderRssFeedResponse(args: RenderRssFeedArgs): Promise<Response> {
   const siteData = await GetAllSiteData();
-  const siteURL = siteData.siteURL;
+  const siteURL = publicBaseUrl({
+    requestHost: args.requestHost,
+    forwardedProto: args.forwardedProto,
+    siteURL: siteData.siteURL,
+  });
   if (!siteURL) {
     return new Response("Not found", { status: 404 });
   }

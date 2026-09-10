@@ -94,6 +94,14 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   deleteReportSchedule: "reports.write",
   runReportScheduleNow: "reports.write",
 
+  // G4. Custom domains are a property of a page, so they reuse the page
+  // permissions that already exist upstream rather than inventing a pair. That
+  // also keeps the upstream `allPerms.ts` untouched.
+  getPageDomains: "pages.read",
+  savePageDomain: "pages.write",
+  deletePageDomain: "pages.write",
+  setPrimaryPageDomain: "pages.write",
+
   // Incidents (C2c). A fork-invented action on an upstream resource, so it maps
   // to the upstream permission rather than inventing one: acknowledging is
   // acting on an incident, and anybody who may comment on one may take it.

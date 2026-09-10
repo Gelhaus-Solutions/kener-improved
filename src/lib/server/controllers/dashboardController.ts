@@ -176,6 +176,15 @@ export interface PageNavItem {
   page_path: string;
   page_header: string;
   page_logo: string | null;
+  /**
+   * G4. The page's primary custom domain, when it has one.
+   *
+   * The switcher links to it absolutely rather than to a path on the current
+   * host, which is G3's deferred constraint: once a page lives on its own
+   * domain, a relative link from a sibling page's domain would 404 or, worse,
+   * silently serve the wrong page. Null means "same host, use the path".
+   */
+  primary_hostname?: string | null;
 }
 
 export interface PageDashboardData {
