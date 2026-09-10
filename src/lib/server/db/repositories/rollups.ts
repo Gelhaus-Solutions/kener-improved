@@ -1,4 +1,5 @@
 import { BaseRepository } from "./base.js";
+import { hasFloorFunction } from "../capabilities.js";
 import { markRollupDirty, type DirtyRange } from "../rollupDirty.js";
 import { MERGED_REGION_ID } from "../regions.js";
 import { ROLLUP_TABLES, type MonitorRollup, type MonitorRollupInput, type RollupGrain } from "../../types/db.js";
@@ -27,6 +28,12 @@ export interface DirtyHour {
   monitor_tag: string;
   region_id: number;
   hour_start: number;
+}
+
+/** Refuses anything that has no business being interpolated into SQL. */
+function safeInt(value: number): number {
+  if (!Number.isSafeInteger(value)) throw new Error(`Refusing to build a rollup bucket expression from ${value}`);
+  return value;
 }
 
 export class RollupsRepository extends BaseRepository {
@@ -179,6 +186,98 @@ export class RollupsRepository extends BaseRepository {
       .where("bucket_start", "<", to)
       .orderBy("monitor_tag", "asc")
       .orderBy("bucket_start", "asc");
+  }
+
+  /**
+   * Sums rollup buckets into the caller's own buckets, **in SQL**.
+   *
+   * The obvious implementation of the read path fetches rollup rows and folds
+   * them in JavaScript, and for the daily grain that is fine: ninety rows per
+   * monitor. For the five-minute grain it is not. A Kolkata viewer needs 5m
+   * buckets (see `uptimeAggregator`), which is 25,920 rows per monitor for a
+   * 90-day bar, and each one is a 28-column row shipped over the wire only to be
+   * added up and thrown away. Measured against the raw SQL it replaces, that was
+   * **slower** - 179ms against 12ms on the fixture - because the query being
+   * replaced aggregates server-side and returns ninety rows.
+   *
+   * So the grouping happens in the database, exactly as it did before, and only
+   * the finished buckets travel. The percentile histogram is deliberately not
+   * selected here: it cannot be merged in SQL, and the bar does not need it.
+   * A percentile read (B4, F3) is a different query that fetches histograms for
+   * the far smaller number of buckets it actually spans.
+   *
+   * `start` and `interval` are interpolated rather than bound because they sit
+   * in the GROUP BY as well as the SELECT, and knex orders bindings by position
+   * in the compiled statement - so the same value has to be bound twice in the
+   * right order or the query silently groups by something else. They are
+   * integers from this process, and `safeInt` refuses anything that is not.
+   */
+  async getRollupBucketsAggregated(
+    grain: RollupGrain,
+    monitorTags: ReadonlyArray<string>,
+    regionId: number,
+    startTimestamp: number,
+    intervalSeconds: number,
+    endTimestamp: number,
+  ): Promise<
+    Array<{
+      monitor_tag: string;
+      bucket_index: number;
+      count_total: number;
+      count_up: number;
+      count_down: number;
+      count_degraded: number;
+      count_maintenance: number;
+      latency_count: number;
+      latency_sum: number;
+      latency_min: number | null;
+      latency_max: number | null;
+    }>
+  > {
+    if (monitorTags.length === 0) return [];
+    const start = safeInt(startTimestamp);
+    const interval = safeInt(intervalSeconds);
+
+    // SQLite has no FLOOR(); CAST(x AS INT) truncates the same way, and the
+    // operand is non-negative because the range is clamped to `>= start`.
+    const bucketExpr = hasFloorFunction(this.knexUnscoped)
+      ? `FLOOR((bucket_start - ${start}) / ${interval})`
+      : `CAST((bucket_start - ${start}) / ${interval} AS INT)`;
+
+    const rows = await this.table(ROLLUP_TABLES[grain])
+      .select(
+        "monitor_tag",
+        this.knexUnscoped.raw(`${bucketExpr} as bucket_index`),
+        this.knexUnscoped.raw("SUM(count_total) as count_total"),
+        this.knexUnscoped.raw("SUM(count_up) as count_up"),
+        this.knexUnscoped.raw("SUM(count_down) as count_down"),
+        this.knexUnscoped.raw("SUM(count_degraded) as count_degraded"),
+        this.knexUnscoped.raw("SUM(count_maintenance) as count_maintenance"),
+        this.knexUnscoped.raw("SUM(latency_count) as latency_count"),
+        this.knexUnscoped.raw("SUM(latency_sum) as latency_sum"),
+        this.knexUnscoped.raw("MIN(latency_min) as latency_min"),
+        this.knexUnscoped.raw("MAX(latency_max) as latency_max"),
+      )
+      .whereIn("monitor_tag", monitorTags as string[])
+      .where("region_id", regionId)
+      .where("bucket_start", ">=", start)
+      .where("bucket_start", "<", endTimestamp)
+      .groupBy("monitor_tag")
+      .groupByRaw(bucketExpr);
+
+    return rows.map((row: Record<string, unknown>) => ({
+      monitor_tag: String(row.monitor_tag),
+      bucket_index: Number(row.bucket_index),
+      count_total: Number(row.count_total ?? 0),
+      count_up: Number(row.count_up ?? 0),
+      count_down: Number(row.count_down ?? 0),
+      count_degraded: Number(row.count_degraded ?? 0),
+      count_maintenance: Number(row.count_maintenance ?? 0),
+      latency_count: Number(row.latency_count ?? 0),
+      latency_sum: Number(row.latency_sum ?? 0),
+      latency_min: row.latency_min === null || row.latency_min === undefined ? null : Number(row.latency_min),
+      latency_max: row.latency_max === null || row.latency_max === undefined ? null : Number(row.latency_max),
+    }));
   }
 
   /** Removes buckets in a window. Used when the samples behind them are deleted. */

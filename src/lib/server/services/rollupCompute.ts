@@ -174,7 +174,26 @@ export function aggregateSamples(
       accumulator = emptyAccumulator();
       buckets.set(bucketStart, accumulator);
     }
+    addSample(accumulator, sample, maintenanceWindows);
+  }
 
+  return buckets;
+}
+
+/**
+ * Folds one raw sample into an accumulator.
+ *
+ * Exported because the read path (I9) buckets by the *viewer's* day boundary
+ * rather than by a grain, so it cannot use `aggregateSamples` - but it must fold
+ * a sample exactly the same way, or a live tail read at request time would
+ * disagree with the sealed rollup beside it.
+ */
+export function addSample(
+  accumulator: RollupAccumulator,
+  sample: RollupSample,
+  maintenanceWindows: ReadonlyArray<MaintenanceWindow> = [],
+): void {
+  {
     accumulator.count_total += 1;
     accumulator.first_ts =
       accumulator.first_ts === null ? sample.timestamp : Math.min(accumulator.first_ts, sample.timestamp);
@@ -205,8 +224,6 @@ export function aggregateSamples(
       noteLatency(accumulator, sample.latency);
     }
   }
-
-  return buckets;
 }
 
 /**
@@ -235,7 +252,21 @@ export function foldRollups(
       accumulator = emptyAccumulator();
       buckets.set(bucketStart, accumulator);
     }
+    addRollup(accumulator, row);
+  }
 
+  return buckets;
+}
+
+/**
+ * Folds one rollup row into an accumulator.
+ *
+ * Exported for the same reason as `addSample`: the read path folds rollups into
+ * buckets aligned to a viewer's timezone, which is not a grain boundary, and it
+ * has to fold them identically to the way the scheduler does.
+ */
+export function addRollup(accumulator: RollupAccumulator, row: MonitorRollupInput): void {
+  {
     accumulator.count_total += row.count_total;
     accumulator.count_up += row.count_up;
     accumulator.count_down += row.count_down;
@@ -272,8 +303,6 @@ export function foldRollups(
       accumulator.last_ts = accumulator.last_ts === null ? row.last_ts : Math.max(accumulator.last_ts, row.last_ts);
     }
   }
-
-  return buckets;
 }
 
 /**

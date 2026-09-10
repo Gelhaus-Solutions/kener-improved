@@ -101,6 +101,7 @@ class DbImpl {
   clearDirtyHours!: RollupsRepository["clearDirtyHours"];
   upsertRollups!: RollupsRepository["upsertRollups"];
   getRollups!: RollupsRepository["getRollups"];
+  getRollupBucketsAggregated!: RollupsRepository["getRollupBucketsAggregated"];
   deleteRollups!: RollupsRepository["deleteRollups"];
   getRawSamplesForRollup!: RollupsRepository["getRawSamples"];
   getRawSampleBounds!: RollupsRepository["getRawSampleBounds"];
@@ -626,6 +627,7 @@ class DbImpl {
     this.clearDirtyHours = this.rollups.clearDirtyHours.bind(this.rollups);
     this.upsertRollups = this.rollups.upsertRollups.bind(this.rollups);
     this.getRollups = this.rollups.getRollups.bind(this.rollups);
+    this.getRollupBucketsAggregated = this.rollups.getRollupBucketsAggregated.bind(this.rollups);
     this.deleteRollups = this.rollups.deleteRollups.bind(this.rollups);
     this.getRawSamplesForRollup = this.rollups.getRawSamples.bind(this.rollups);
     this.getRawSampleBounds = this.rollups.getRawSampleBounds.bind(this.rollups);

@@ -3,6 +3,7 @@ import GC from "$lib/global-constants";
 import type { StatusType } from "$lib/types/status";
 import type { MonitorRecord, TimestampStatusCount } from "$lib/server/types/db";
 import { UptimeCalculator } from "$lib/server/tool";
+import { GetStatusCountsByInterval } from "$lib/server/controllers/monitorsController";
 import type { MonitorBarResponse } from "./get";
 import { toZonedTime, fromZonedTime } from "date-fns-tz";
 import { startOfDay, getUnixTime } from "date-fns";
@@ -75,8 +76,12 @@ export const buildMonitorBarResponse = async (
   latestStatus?: StatusType,
 ): Promise<MonitorBarResponse> => {
   const startTime = endOfDayTodayAtTz - days * 24 * 60 * 60;
+  // Through the controller rather than straight to the repository (I9): that is
+  // where the rollup read path, its cache and the raw-SQL fallback live, and a
+  // second call site reaching past it would quietly keep scanning 129,600 rows
+  // per monitor while the other one did not.
   const [rawUptimeData, latestData] = await Promise.all([
-    db.getStatusCountsByInterval(monitor.tag, startTime, 86400, days),
+    GetStatusCountsByInterval(monitor.tag, startTime, 86400, days),
     latestStatus ? Promise.resolve(null) : db.getLatestMonitoringData(monitor.tag),
   ]);
 

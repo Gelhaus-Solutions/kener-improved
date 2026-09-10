@@ -8,6 +8,9 @@ import {
   UptimeCalculator,
 } from "../tool.js";
 import { getCache, setCache } from "../cache/cache.js";
+import { getUptimeBucketsCached } from "../cache/rollupCache.js";
+import { pickGrain, rollupsUsable } from "../services/uptimeAggregator.js";
+import { MERGED_REGION_ID } from "../db/regions.js";
 import type {
   MonitorRecordInsert,
   MonitorAlertInsert,
@@ -508,6 +511,41 @@ export const InsertNewAlert = async (data: MonitorAlertInsert): Promise<MonitorA
   return await db.getActiveAlert(data.monitor_tag, data.monitor_status, data.alert_status);
 };
 
+/**
+ * Uptime buckets for a set of monitors (I9).
+ *
+ * **The single entry point for "how did these monitors do over this window".**
+ * Both bar endpoints go through here, so the rollup path, its cache and the
+ * fallback are decided once rather than in two places that could drift.
+ *
+ * Returns null when the rollups cannot serve the request: not backfilled yet
+ * (the kill switch), an alignment no grain divides, or anything thrown on the
+ * way. Every caller falls back to the raw query it has always used - a slow
+ * correct answer beats a fast wrong one, and this is the only path a customer's
+ * uptime percentage travels.
+ */
+const GetUptimeBucketsFromRollups = async (
+  monitorTags: string[],
+  start: number,
+  interval: number,
+  numIntervals: number,
+): Promise<Map<string, TimestampStatusCount[]> | null> => {
+  try {
+    const grain = pickGrain(start, interval);
+    if (!(await rollupsUsable(grain))) return null;
+    const state = await db.getRollupState(grain, MERGED_REGION_ID);
+    if (!state?.watermark_ts) return null;
+    return await getUptimeBucketsCached(
+      { monitorTags, startTimestamp: start, intervalSeconds: interval, points: numIntervals },
+      state.watermark_ts,
+    );
+  } catch (error) {
+    // Never let the fast path be the reason a status page fails to render.
+    console.error("Rollup read path failed; falling back to raw aggregation:", error);
+    return null;
+  }
+};
+
 //getStatusCountsByInterval
 export const GetStatusCountsByInterval = async (
   monitor_tag: string | string[],
@@ -515,8 +553,61 @@ export const GetStatusCountsByInterval = async (
   interval: number,
   numIntervals: number,
 ): Promise<TimestampStatusCount[]> => {
+  const tags = Array.isArray(monitor_tag) ? monitor_tag : [monitor_tag];
+  const fromRollups = await GetUptimeBucketsFromRollups(tags, start, interval, numIntervals);
+  if (fromRollups) {
+    // A multi-tag call asks for the *combined* series, which is what the raw SQL
+    // returns: one row per timestamp across every tag. Merging here keeps that
+    // contract rather than changing what an existing caller receives.
+    if (tags.length === 1) return fromRollups.get(tags[0]) ?? [];
+    return mergeSeriesAcrossMonitors(fromRollups);
+  }
   return await db.getStatusCountsByInterval(monitor_tag, start, interval, numIntervals);
 };
+
+/**
+ * Combines several monitors' series into one, timestamp by timestamp.
+ *
+ * Mirrors what `getStatusCountsByInterval` does in SQL for a tag array: it
+ * groups by timestamp alone, so every monitor's counts for a bucket land in one
+ * row. The latency figures are combined the same way `UptimeCalculator` would
+ * read them - a count-weighted mean, and true extremes.
+ */
+function mergeSeriesAcrossMonitors(byTag: Map<string, TimestampStatusCount[]>): TimestampStatusCount[] {
+  const byTs = new Map<number, TimestampStatusCount & { _latencyWeight: number }>();
+  for (const series of byTag.values()) {
+    for (const point of series) {
+      const existing = byTs.get(point.ts);
+      // The weight is the bucket's own sample count, not one per bucket: a
+      // monitor with ten samples in a bucket and one with a thousand must not
+      // contribute equally to the average.
+      const weight = point.countOfUp + point.countOfDown + point.countOfDegraded + point.countOfMaintenance;
+      if (!existing) {
+        byTs.set(point.ts, { ...point, _latencyWeight: point.avgLatency > 0 ? weight : 0 });
+        continue;
+      }
+      existing.countOfUp += point.countOfUp;
+      existing.countOfDown += point.countOfDown;
+      existing.countOfDegraded += point.countOfDegraded;
+      existing.countOfMaintenance += point.countOfMaintenance;
+      if (point.avgLatency > 0) {
+        const totalWeight = existing._latencyWeight + weight;
+        existing.avgLatency =
+          totalWeight > 0
+            ? (existing.avgLatency * existing._latencyWeight + point.avgLatency * weight) / totalWeight
+            : 0;
+        existing._latencyWeight = totalWeight;
+      }
+      if (point.maxLatency > existing.maxLatency) existing.maxLatency = point.maxLatency;
+      if (existing.minLatency === 0 || (point.minLatency > 0 && point.minLatency < existing.minLatency)) {
+        existing.minLatency = point.minLatency;
+      }
+    }
+  }
+  return [...byTs.values()]
+    .sort((a, b) => a.ts - b.ts)
+    .map(({ _latencyWeight, ...point }) => point as TimestampStatusCount);
+}
 
 //getMonitoringDataPaginated
 export const GetMonitoringDataPaginated = async (
@@ -779,6 +870,21 @@ export const GetStatusCountsByIntervalGroupedByMonitor = async (
   intervalInSeconds: number,
   numberOfPoints: number,
 ): Promise<Array<TimestampStatusCountByMonitor>> => {
+  const fromRollups = await GetUptimeBucketsFromRollups(monitorTags, startTimestamp, intervalInSeconds, numberOfPoints);
+  if (fromRollups) {
+    const out: Array<TimestampStatusCountByMonitor> = [];
+    for (const [monitor_tag, series] of fromRollups) {
+      for (const point of series) out.push({ monitor_tag, ...point });
+    }
+    return out;
+  }
+
+  // **The fallback keeps the old cache, and the old cache's problems.** It is
+  // reached only while the rollups are not usable - a fresh install whose
+  // backfill has not finished, or an operator who has pulled the kill switch -
+  // and replacing a cache nothing will use once this path is dead would be work
+  // spent on the wrong side of the switch. See `cache/rollupCache.ts` for what
+  // is wrong with it and what replaced it.
   const sortedTags = [...monitorTags].sort();
   const cacheKey = `status_counts_grouped:${sortedTags.join(",")}:${startTimestamp}:${intervalInSeconds}:${numberOfPoints}`;
   const cached = await getCache<Array<TimestampStatusCountByMonitor>>(cacheKey);
