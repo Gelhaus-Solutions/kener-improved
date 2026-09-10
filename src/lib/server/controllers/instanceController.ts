@@ -1,7 +1,6 @@
 import db from "../db/db.js";
 import { DEFAULT_ORG_ID, runAcrossOrgs, runWithOrg } from "../db/orgContext.js";
 import { invalidateOrgDomainCache } from "../http/orgResolve.js";
-import type { UserRecordPublic } from "../types/db.js";
 
 /**
  * The instance tier (KENER-31).
@@ -32,8 +31,14 @@ import type { UserRecordPublic } from "../types/db.js";
  * inheriting a context and hoping.
  */
 
-/** Whether this user runs the installation. The only definition, used everywhere. */
-export function IsInstanceSuperadmin(user: Pick<UserRecordPublic, "is_owner"> | null | undefined): boolean {
+/**
+ * Whether this user runs the installation. The only definition, used everywhere.
+ *
+ * Structurally typed rather than taking a `UserRecordPublic`, because the two
+ * shapes that carry `is_owner` disagree on whether it is optional and the
+ * callers hold both. Anything with the field can be asked.
+ */
+export function IsInstanceSuperadmin(user: { is_owner?: string | null } | null | undefined): boolean {
   return user?.is_owner === "YES";
 }
 

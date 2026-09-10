@@ -10,6 +10,7 @@ import sendEmail from "../notification/email_notification.js";
 import { GetGeneralEmailTemplateById } from "./generalTemplateController.js";
 import { currentOrgIdOrDefault, runAcrossOrgs } from "../db/orgContext.js";
 import { roleIdFor } from "../db/provisionOrg.js";
+import { IsInstanceSuperadmin } from "./instanceController.js";
 
 export interface UserUpdateInput {
   userID: number;
@@ -252,7 +253,11 @@ export const UpdatePassword = async (data: PasswordUpdateInput): Promise<number>
   });
 };
 
-export const ManualUpdateUserData = async (forUserId: number, data: ManualUserUpdateInput): Promise<number | void> => {
+export const ManualUpdateUserData = async (
+  forUserId: number,
+  data: ManualUserUpdateInput,
+  actingUser?: { is_owner?: string } | null,
+): Promise<number | void> => {
   let forUser = await db.getUserById(forUserId);
   if (!forUser) {
     throw new Error("User not found");
@@ -275,7 +280,17 @@ export const ManualUpdateUserData = async (forUserId: number, data: ManualUserUp
   // `org_members` is how an org is *found*, so a query against it cannot be
   // scoped by one. See OrgsRepository's header.
   const membership = await runAcrossOrgs(() => db.getOrgMembership(orgId, targetUserId));
-  const isOrgOwner = !!membership?.is_org_owner;
+  // The instance superadmin overrides both guards below.
+  //
+  // They are there to stop an organisation being left with nobody who can
+  // administer it, and the superadmin is the one account for whom that is
+  // recoverable: the instance console can see the state they would create, and
+  // suspending the org is available to them either way. Everyone else is
+  // refused, which is what the guards are for.
+  //
+  // `actingUser` is optional so the many existing callers - and the tests -
+  // keep working unchanged; absent, nobody overrides anything.
+  const isOrgOwner = !!membership?.is_org_owner && !IsInstanceSuperadmin(actingUser);
 
   if (data.updateType == "role") {
     if (!data.role_ids || data.role_ids.length === 0) throw new Error("At least one role is required");
