@@ -4,6 +4,7 @@ import db from "../db/db.js";
 import { runWithOrg } from "../db/orgContext.js";
 import { GetNowTimestampUTC } from "../tool.js";
 import { evaluateAllTargets } from "../services/slaEvaluator.js";
+import alertingQueue from "../queues/alertingQueue.js";
 
 /**
  * Recomputes every active SLO target's evaluation (F1a).
@@ -58,6 +59,15 @@ async function runEvaluatePass(): Promise<void> {
     const nowTs = GetNowTimestampUTC();
     const { evaluated } = await evaluateAllTargets(nowTs);
     if (evaluated > 0) console.log(`SLO: evaluated ${evaluated} target(s)`);
+
+    // F1b. Burn-rate alerting is pushed here, straight after the evaluations it
+    // reads, rather than from `push()` when a sample lands: an SLO's burn rate
+    // changes when it is recomputed, and a page- or category-scoped target has
+    // no single monitor whose sample could stand for it.
+    //
+    // Inside the same org scope, and after the write: the jobs read
+    // `sla_evaluations`, so pushing before would judge the previous tick.
+    await alertingQueue.pushSloBurnRate(nowTs);
   });
 }
 

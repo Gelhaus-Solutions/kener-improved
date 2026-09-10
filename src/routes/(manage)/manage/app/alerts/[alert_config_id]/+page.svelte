@@ -43,6 +43,7 @@
   let saving = $state(false);
   let triggers = $state<TriggerRecord[]>([]);
   let monitors = $state<{ tag: string; name: string }[]>([]);
+  let sloTargets = $state<{ id: number; name: string }[]>([]);
   let deleteDialogOpen = $state(false);
   let monitorPopoverOpen = $state(false);
 
@@ -57,7 +58,13 @@
     create_incident: "NO" as YesNoType,
     is_active: "YES" as YesNoType,
     severity: "WARNING" as AlertSeverityType,
-    trigger_ids: [] as number[]
+    trigger_ids: [] as number[],
+    // F1b. Only meaningful when alert_for is SLO_BURN_RATE.
+    sla_target_id: null as number | null,
+    burn_window_a: "1h",
+    burn_threshold_a: 14.4,
+    burn_window_b: "6h",
+    burn_threshold_b: 6
   };
 
   let form = $state({ ...defaultForm });
@@ -66,8 +73,24 @@
   const alertForOptions: { value: AlertForType; label: string }[] = [
     { value: GC.STATUS, label: GC.STATUS },
     { value: GC.LATENCY, label: GC.LATENCY },
-    { value: GC.UPTIME, label: GC.UPTIME }
+    { value: GC.UPTIME, label: GC.UPTIME },
+    { value: GC.SLO_BURN_RATE as AlertForType, label: "SLO BURN RATE" }
   ];
+
+  /** The windows `sla_evaluations` stores, so the pair below can only name real ones. */
+  const burnWindowOptions = [
+    { value: "1h", label: "1 hour" },
+    { value: "6h", label: "6 hours" },
+    { value: "24h", label: "24 hours" },
+    { value: "3d", label: "3 days" }
+  ];
+
+  /**
+   * A burn-rate alert watches an SLO target, so the monitor selector and the
+   * alert value are both meaningless for it and the two window rows take their
+   * place.
+   */
+  let isBurnRate = $derived(form.alert_for === GC.SLO_BURN_RATE);
 
   const statusValueOptions = [
     { value: GC.DOWN, label: GC.DOWN },
@@ -106,6 +129,14 @@
       form.alert_value = "1000";
     } else if (newValue === GC.UPTIME) {
       form.alert_value = "99";
+    } else if (newValue === GC.SLO_BURN_RATE) {
+      // The classic fast-burn rule, so the standard rule is what somebody gets
+      // without having to know the numbers.
+      form.alert_value = "";
+      form.burn_window_a = "1h";
+      form.burn_threshold_a = 14.4;
+      form.burn_window_b = "6h";
+      form.burn_threshold_b = 6;
     }
   }
 
@@ -161,6 +192,22 @@
     }
   }
 
+  async function loadSloTargets() {
+    try {
+      const response = await fetch(clientResolver(resolve, "/manage/api"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "getSlaTargets", data: {} })
+      });
+      const result = await response.json();
+      if (!result.error && Array.isArray(result.targets)) {
+        sloTargets = result.targets.map((t: { id: number; name: string }) => ({ id: t.id, name: t.name }));
+      }
+    } catch (error) {
+      console.error("Failed to load SLO targets", error);
+    }
+  }
+
   async function loadAlertConfig() {
     if (isNew) return;
 
@@ -189,7 +236,12 @@
           create_incident: config.create_incident,
           is_active: config.is_active,
           severity: config.severity,
-          trigger_ids: config.triggers.map((t) => t.id)
+          trigger_ids: config.triggers.map((t) => t.id),
+          sla_target_id: config.sla_target_id ?? null,
+          burn_window_a: config.burn_window_a ?? "1h",
+          burn_threshold_a: config.burn_threshold_a ?? 14.4,
+          burn_window_b: config.burn_window_b ?? "6h",
+          burn_threshold_b: config.burn_threshold_b ?? 6
         };
       }
     } catch (error) {
@@ -200,7 +252,13 @@
   }
 
   async function saveAlertConfig() {
-    if (form.monitor_tags.length === 0) {
+    // A burn-rate alert has no monitors; it names an SLO target instead.
+    if (isBurnRate) {
+      if (!form.sla_target_id) {
+        toast.error("Please choose an SLO target");
+        return;
+      }
+    } else if (form.monitor_tags.length === 0) {
       toast.error("Please select at least one monitor");
       return;
     }
@@ -219,6 +277,14 @@
         severity: form.severity,
         trigger_ids: form.trigger_ids
       };
+
+      if (isBurnRate) {
+        data.sla_target_id = form.sla_target_id;
+        data.burn_window_a = form.burn_window_a;
+        data.burn_threshold_a = Number(form.burn_threshold_a);
+        data.burn_window_b = form.burn_window_b;
+        data.burn_threshold_b = Number(form.burn_threshold_b);
+      }
 
       if (!isNew) {
         data.id = parseInt(alertConfigId);
@@ -274,7 +340,7 @@
 
   onMount(async () => {
     loading = true;
-    await Promise.all([loadTriggers(), loadMonitors(), loadAlertConfig()]);
+    await Promise.all([loadTriggers(), loadMonitors(), loadSloTargets(), loadAlertConfig()]);
     loading = false;
   });
 </script>
@@ -301,8 +367,9 @@
   {:else}
     <Card.Root>
       <Card.Content class="space-y-6 pt-6">
-        <!-- Monitor Selection (Searchable Multi-select) -->
-        <div class="flex flex-col gap-2">
+        <!-- Monitor Selection (Searchable Multi-select). Hidden for a burn-rate
+             alert, which watches an SLO target instead of monitors. -->
+        <div class="flex flex-col gap-2" class:hidden={isBurnRate}>
           <Label>Monitors</Label>
           <p class="text-muted-foreground text-xs">Select which monitors this alert applies to</p>
           <Popover.Root bind:open={monitorPopoverOpen}>
@@ -325,11 +392,10 @@
                   <Command.Empty>No monitors found.</Command.Empty>
                   <Command.Group>
                     {#each monitors as monitor (monitor.tag)}
-                      <Command.Item
-                        value={monitor.name}
-                        onSelect={() => toggleMonitor(monitor.tag)}
-                      >
-                        <CheckIcon class="size-4 {form.monitor_tags.includes(monitor.tag) ? 'opacity-100' : 'opacity-0'}" />
+                      <Command.Item value={monitor.name} onSelect={() => toggleMonitor(monitor.tag)}>
+                        <CheckIcon
+                          class="size-4 {form.monitor_tags.includes(monitor.tag) ? 'opacity-100' : 'opacity-0'}"
+                        />
                         {monitor.name}
                       </Command.Item>
                     {/each}
@@ -343,11 +409,7 @@
               {#each form.monitor_tags as tag (tag)}
                 <Badge variant="secondary" class="gap-1 pr-1">
                   {monitors.find((m) => m.tag === tag)?.name || tag}
-                  <button
-                    type="button"
-                    class="hover:bg-muted rounded-sm p-0.5"
-                    onclick={() => toggleMonitor(tag)}
-                  >
+                  <button type="button" class="hover:bg-muted rounded-sm p-0.5" onclick={() => toggleMonitor(tag)}>
                     <XIcon class="size-3" />
                   </button>
                 </Badge>
@@ -375,8 +437,80 @@
           </Select.Root>
         </div>
 
-        <!-- Alert Value -->
-        <div class="flex flex-col gap-2">
+        <!-- SLO target and the burn rule (F1b) -->
+        {#if isBurnRate}
+          <div class="flex flex-col gap-2">
+            <Label for="slo-target">SLO target</Label>
+            <p class="text-muted-foreground text-xs">
+              Which objective's error budget this alert watches. Burn rates come from the target's own evaluation,
+              recomputed every five minutes.
+            </p>
+            {#if sloTargets.length === 0}
+              <p class="text-muted-foreground text-sm">No SLO targets yet. Create one under SLOs first.</p>
+            {:else}
+              <Select.Root
+                type="single"
+                value={form.sla_target_id ? String(form.sla_target_id) : ""}
+                onValueChange={(v) => (form.sla_target_id = v ? Number(v) : null)}
+              >
+                <Select.Trigger id="slo-target" class="w-full">
+                  {sloTargets.find((t) => t.id === form.sla_target_id)?.name || "Select a target"}
+                </Select.Trigger>
+                <Select.Content>
+                  {#each sloTargets as target (target.id)}
+                    <Select.Item value={String(target.id)}>{target.name}</Select.Item>
+                  {/each}
+                </Select.Content>
+              </Select.Root>
+            {/if}
+          </div>
+
+          <div class="flex flex-col gap-2">
+            <Label>Burn rate rule</Label>
+            <p class="text-muted-foreground text-xs">
+              Fires only when <b>both</b> windows are at or above their thresholds, which is what stops one bad five minutes
+              paging somebody. The defaults are the classic fast-burn rule: 14.4x over an hour spends a 30-day budget in about
+              two days.
+            </p>
+            <div class="grid gap-3 sm:grid-cols-2">
+              {#each [{ w: "a", label: "First window" }, { w: "b", label: "Second window" }] as pair (pair.w)}
+                <div class="flex flex-col gap-2 rounded-md border p-3">
+                  <Label class="text-xs">{pair.label}</Label>
+                  <Select.Root
+                    type="single"
+                    value={pair.w === "a" ? form.burn_window_a : form.burn_window_b}
+                    onValueChange={(v) => {
+                      if (!v) return;
+                      if (pair.w === "a") form.burn_window_a = v;
+                      else form.burn_window_b = v;
+                    }}
+                  >
+                    <Select.Trigger class="w-full">
+                      {burnWindowOptions.find(
+                        (o) => o.value === (pair.w === "a" ? form.burn_window_a : form.burn_window_b)
+                      )?.label || "Window"}
+                    </Select.Trigger>
+                    <Select.Content>
+                      {#each burnWindowOptions as option (option.value)}
+                        <Select.Item value={option.value}>{option.label}</Select.Item>
+                      {/each}
+                    </Select.Content>
+                  </Select.Root>
+                  {#if pair.w === "a"}
+                    <Input type="number" step="0.1" min="0" bind:value={form.burn_threshold_a} />
+                  {:else}
+                    <Input type="number" step="0.1" min="0" bind:value={form.burn_threshold_b} />
+                  {/if}
+                  <p class="text-muted-foreground text-xs">Threshold, as a multiple of the sustainable rate.</p>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
+
+        <!-- Alert Value. A burn-rate alert has no single threshold value; its
+             rule is the two windows above. -->
+        <div class="flex flex-col gap-2" class:hidden={isBurnRate}>
           <Label for="alert-value">{alertValueLabel}</Label>
           {#if form.alert_for === "STATUS"}
             <Select.Root type="single" value={form.alert_value} onValueChange={(v) => v && (form.alert_value = v)}>

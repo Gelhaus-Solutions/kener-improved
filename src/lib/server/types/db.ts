@@ -846,7 +846,10 @@ export interface MaintenanceEventsMonitorList {
 }
 
 // ============ monitor_alerts_config table ============
-export type AlertForType = "STATUS" | "LATENCY" | "UPTIME";
+// SLO_BURN_RATE (F1b) watches an `sla_targets` row rather than monitors, so a
+// config carrying it uses `sla_target_id` and the burn_* columns instead of the
+// `monitor_alerts_config_monitors` junction and `alert_value`.
+export type AlertForType = "STATUS" | "LATENCY" | "UPTIME" | "SLO_BURN_RATE";
 export type AlertSeverityType = "CRITICAL" | "WARNING";
 export type YesNoType = "YES" | "NO";
 
@@ -861,6 +864,12 @@ export interface MonitorAlertConfigRecord {
   create_incident: YesNoType;
   is_active: YesNoType;
   severity: AlertSeverityType;
+  /** F1b. Set only when alert_for is SLO_BURN_RATE. */
+  sla_target_id: number | null;
+  burn_window_a: string | null;
+  burn_threshold_a: number | null;
+  burn_window_b: string | null;
+  burn_threshold_b: number | null;
   created_at: DbTimestamp;
   updated_at: DbTimestamp;
 }
@@ -875,6 +884,11 @@ export interface MonitorAlertConfigInsert {
   create_incident?: YesNoType;
   is_active?: YesNoType;
   severity?: AlertSeverityType;
+  sla_target_id?: number | null;
+  burn_window_a?: string | null;
+  burn_threshold_a?: number | null;
+  burn_window_b?: string | null;
+  burn_threshold_b?: number | null;
 }
 
 export interface MonitorAlertConfigUpdate {
@@ -886,6 +900,11 @@ export interface MonitorAlertConfigUpdate {
   create_incident?: YesNoType;
   is_active?: YesNoType;
   severity?: AlertSeverityType;
+  sla_target_id?: number | null;
+  burn_window_a?: string | null;
+  burn_threshold_a?: number | null;
+  burn_window_b?: string | null;
+  burn_threshold_b?: number | null;
 }
 
 export interface MonitorAlertConfigFilter {
@@ -928,7 +947,11 @@ export interface MonitorAlertConfigWithTriggers extends MonitorAlertConfigRecord
 }
 
 export interface MonitorAlertConfigCreateInput {
-  monitor_tags: string[];
+  /**
+   * Required for every alert_for except SLO_BURN_RATE, which watches an
+   * `sla_targets` row instead and carries `sla_target_id`.
+   */
+  monitor_tags?: string[];
   alert_for: AlertForType;
   alert_value: string;
   failure_threshold: number;
@@ -938,6 +961,12 @@ export interface MonitorAlertConfigCreateInput {
   is_active?: YesNoType;
   severity?: AlertSeverityType;
   trigger_ids?: number[];
+  /** F1b, SLO_BURN_RATE only. */
+  sla_target_id?: number | null;
+  burn_window_a?: string | null;
+  burn_threshold_a?: number | null;
+  burn_window_b?: string | null;
+  burn_threshold_b?: number | null;
 }
 
 export interface MonitorAlertConfigUpdateInput {
@@ -952,6 +981,12 @@ export interface MonitorAlertConfigUpdateInput {
   is_active?: YesNoType;
   severity?: AlertSeverityType;
   trigger_ids?: number[];
+  /** F1b, SLO_BURN_RATE only. */
+  sla_target_id?: number | null;
+  burn_window_a?: string | null;
+  burn_threshold_a?: number | null;
+  burn_window_b?: string | null;
+  burn_threshold_b?: number | null;
 }
 
 // ============ monitor_alerts_v2 table ============

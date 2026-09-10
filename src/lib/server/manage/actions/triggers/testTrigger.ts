@@ -48,6 +48,11 @@ export default {
       create_incident: "NO",
       is_active: "YES",
       severity: "WARNING",
+      sla_target_id: null,
+      burn_window_a: null,
+      burn_threshold_a: null,
+      burn_window_b: null,
+      burn_threshold_b: null,
       created_at: new Date(),
       updated_at: new Date(),
     };

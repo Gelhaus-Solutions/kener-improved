@@ -41,6 +41,8 @@ import { recordLegacyDelivery } from "../events/legacyDeliveries.js";
 import { ALERT_TRIGGER_CONSUMER } from "../events/consumers/alertTrigger.js";
 import { effectiveMode } from "../events/consumers.js";
 import triggersConsumer from "../events/consumers/triggers.js";
+import { evaluateBurnRule, describeBurnRule, ruleFromConfig } from "../services/sloBurnAlert.js";
+import { resolveScope } from "../services/slaEvaluator.js";
 let alertingQueue: Queue | null = null;
 
 let worker: Worker | null = null;
@@ -48,8 +50,18 @@ const queueName = "alertingQueue";
 const jobNamePrefix = "alertingJob";
 
 interface JobData {
+  /**
+   * The monitor's name, or - for an SLO_BURN_RATE job - the target's name. It is
+   * only ever used for display: incident titles, notification variables.
+   */
   monitor_name: string;
-  monitor_tag: string;
+  /**
+   * Null for an SLO_BURN_RATE job, which watches a target rather than a monitor.
+   * `monitor_alerts_v2.monitor_tag` is nullable for exactly this reason, and one
+   * such config watches exactly one target, so `config_id` alone identifies its
+   * alert row.
+   */
+  monitor_tag: string | null;
   monitor_settings: MonitorSettings;
   monitor_alerts_configured: MonitorAlertConfigRecord;
   monitor_type: string;
@@ -99,6 +111,62 @@ async function createNewIncident(
   );
 
   return incidentCreated;
+}
+
+/**
+ * Opens an incident for a fired burn-rate alert.
+ *
+ * **Attached to every monitor the target resolves to**, not to one of them. A
+ * page-scoped SLO is a promise about all of that page's components, so an
+ * incident announcing its budget is burning is about all of them; picking one
+ * arbitrarily would misreport which service is affected. A target that resolves
+ * to nothing still gets an incident - the burn is real - it simply has no
+ * component attached, which is what an operator would do by hand.
+ */
+/** The monitors an SLO burn alert's incident should be attached to. */
+async function sloIncidentMonitorTags(config: MonitorAlertConfigRecord): Promise<string[]> {
+  if (!config.sla_target_id) return [];
+  const target = await db.getSlaTargetById(config.sla_target_id);
+  return target ? await resolveScope(target) : [];
+}
+
+/** The measured burn rates, phrased for an incident body. */
+async function sloBurnDetail(config: MonitorAlertConfigRecord): Promise<string> {
+  const rule = ruleFromConfig(config);
+  if (!rule || !config.sla_target_id) return "burn-rate threshold exceeded";
+  const rows = await db.getSlaEvaluations([config.sla_target_id]);
+  return rows.length > 0 ? describeBurnRule(rule, rows[0]) : "burn-rate threshold exceeded";
+}
+
+async function createSloIncident(
+  alert: MonitorAlertV2Record,
+  config: MonitorAlertConfigRecord,
+  targetName: string,
+  monitorTags: string[],
+  detail: string,
+): Promise<{ incident_id: number }> {
+  const startDateTime = getUnixTime(parseDbTimestamp(alert.created_at));
+  const incidentInput: IncidentInput = {
+    title: `${targetName} error budget burning fast`,
+    start_date_time: startDateTime,
+    incident_source: "ALERT",
+    severity: incidentSeverityFromAlertSeverity(config.severity),
+    detected_at: startDateTime,
+  };
+
+  const body =
+    `${config.alert_description || "SLO burn-rate alert triggered"}\n\n` +
+    `| Setting | Value |\n| :--- | :--- |\n` +
+    `| **SLO target** | ${targetName} |\n` +
+    `| **Measured** | ${detail} |\n` +
+    `| **Severity** | ${config.severity} |\n`;
+
+  const created = await CreateIncident(incidentInput);
+  await AddIncidentComment(created.incident_id, body, GC.INVESTIGATING, startDateTime);
+  for (const tag of monitorTags) {
+    await AddIncidentMonitor(created.incident_id, tag, GC.DOWN);
+  }
+  return created;
 }
 
 async function closeIncident(
@@ -199,6 +267,24 @@ const getQueue = () => {
 };
 
 /**
+ * The burn-rate verdict for an SLO_BURN_RATE config, or null when it cannot be
+ * reached.
+ *
+ * Null for a config with no target, a malformed rule, or a target that has not
+ * been evaluated yet. Every one of those is "do nothing" rather than "fire":
+ * a config nobody finished writing must not page somebody, and a target whose
+ * first evaluation has not run yet has no burn rate to judge.
+ */
+async function sloBurnVerdict(config: MonitorAlertConfigRecord): Promise<"FIRING" | "RECOVERED" | "HOLD" | null> {
+  if (!config.sla_target_id) return null;
+  const rule = ruleFromConfig(config);
+  if (!rule) return null;
+  const rows = await db.getSlaEvaluations([config.sla_target_id]);
+  if (rows.length === 0) return null;
+  return evaluateBurnRule(rows[0], rule);
+}
+
+/**
  * Evaluates whether the monitor currently violates the alert condition.
  *
  * Returns null for a config whose alert_for this build does not handle, which
@@ -210,13 +296,30 @@ async function evaluateIsAffected(job: JobData, threshold: number): Promise<bool
 
   if (monitor_alerts_configured.alert_for === GC.STATUS) {
     //alertValue can be DOWN or DEGRADED
-    return await db.consecutivelyStatusFor(monitor_tag, alertValue, threshold);
+    return await db.consecutivelyStatusFor(monitor_tag as string, alertValue, threshold);
   }
   if (monitor_alerts_configured.alert_for === GC.LATENCY) {
-    return await db.consecutivelyLatencyGreaterThan(monitor_tag, parseFloat(alertValue), threshold);
+    return await db.consecutivelyLatencyGreaterThan(monitor_tag as string, parseFloat(alertValue), threshold);
   }
   if (monitor_alerts_configured.alert_for === GC.UPTIME) {
-    return await IsUptimeLessThanXPercent(monitor_tag, parseFloat(alertValue), threshold, numerator, denominator);
+    return await IsUptimeLessThanXPercent(
+      monitor_tag as string,
+      parseFloat(alertValue),
+      threshold,
+      numerator,
+      denominator,
+    );
+  }
+  if (monitor_alerts_configured.alert_for === GC.SLO_BURN_RATE) {
+    const verdict = await sloBurnVerdict(monitor_alerts_configured);
+    // null means the config or its target is not in a state to judge, which the
+    // caller already treats as "nothing to do".
+    if (verdict === null) return null;
+    // HOLD is deliberately *not* affected. Paired with `evaluateIsRecovered`
+    // also answering false, it leaves an open alert open and a closed one
+    // closed - the hysteresis that stops a burn rate hovering at the threshold
+    // notifying on alternating five-minute ticks.
+    return verdict === "FIRING";
   }
   return null;
 }
@@ -227,13 +330,26 @@ async function evaluateIsRecovered(job: JobData, threshold: number): Promise<boo
   const alertValue = monitor_alerts_configured.alert_value;
 
   if (monitor_alerts_configured.alert_for === GC.STATUS) {
-    return await db.consecutivelyStatusFor(monitor_tag, GC.UP, threshold);
+    return await db.consecutivelyStatusFor(monitor_tag as string, GC.UP, threshold);
   }
   if (monitor_alerts_configured.alert_for === GC.LATENCY) {
-    return await db.consecutivelyLatencyLessThan(monitor_tag, parseFloat(alertValue), threshold);
+    return await db.consecutivelyLatencyLessThan(monitor_tag as string, parseFloat(alertValue), threshold);
   }
   if (monitor_alerts_configured.alert_for === GC.UPTIME) {
-    return await IsUptimeGreaterThanXPercent(monitor_tag, parseFloat(alertValue), threshold, numerator, denominator);
+    return await IsUptimeGreaterThanXPercent(
+      monitor_tag as string,
+      parseFloat(alertValue),
+      threshold,
+      numerator,
+      denominator,
+    );
+  }
+  if (monitor_alerts_configured.alert_for === GC.SLO_BURN_RATE) {
+    // Only an explicit RECOVERED resolves. A null verdict - the target stopped
+    // being evaluated, or its rule became unreadable - must NOT resolve an open
+    // alert: "we can no longer tell" is not "it got better", and resolving there
+    // would close every burn alert the moment monitoring broke.
+    return (await sloBurnVerdict(monitor_alerts_configured)) === "RECOVERED";
   }
   return false;
 }
@@ -299,7 +415,11 @@ const addWorker = () => {
     // No try/catch by design. A throw fails the job and BullMQ retries it.
     const alertsExisting = await GetMonitorAlertsV2({
       config_id: monitor_alerts_configured.id,
-      monitor_tag: monitor_tag,
+      // `undefined`, not `null`: the repository only adds the clause when the
+      // field is defined, and knex would render an explicit null as `= NULL`,
+      // which matches no row. An SLO config watches exactly one target, so
+      // `config_id` alone already identifies its alert.
+      monitor_tag: monitor_tag ?? undefined,
       alert_status: GC.TRIGGERED,
     });
     let activeAlert: MonitorAlertV2Record | null = alertsExisting.length > 0 ? alertsExisting[0] : null;
@@ -339,19 +459,29 @@ const addWorker = () => {
       });
 
       if (monitor_alerts_configured.create_incident === GC.YES) {
-        const newIncidentNumber = await createNewIncident(
-          activeAlert,
-          monitor_alerts_configured,
-          monitor_name,
-          monitor_tag,
-        );
+        const newIncidentNumber =
+          monitor_alerts_configured.alert_for === GC.SLO_BURN_RATE
+            ? await createSloIncident(
+                activeAlert,
+                monitor_alerts_configured,
+                monitor_name,
+                await sloIncidentMonitorTags(monitor_alerts_configured),
+                await sloBurnDetail(monitor_alerts_configured),
+              )
+            : await createNewIncident(activeAlert, monitor_alerts_configured, monitor_name, monitor_tag as string);
         //update alert with incident number
         if (newIncidentNumber && newIncidentNumber.incident_id > 0) {
           activeAlert = await AddIncidentToAlert(activeAlert.id, newIncidentNumber.incident_id);
         }
       }
 
-      await notifyQuietly(activeAlert, monitor_alerts_configured, templateSiteVars, monitor_tag, triggeredEventId);
+      await notifyQuietly(
+        activeAlert,
+        monitor_alerts_configured,
+        templateSiteVars,
+        monitor_tag ?? "",
+        triggeredEventId,
+      );
       return;
     }
 
@@ -400,10 +530,10 @@ const addWorker = () => {
 
     // If alert has an incident, add closure comment
     if (activeAlert.incident_id) {
-      await closeIncident(activeAlert, monitor_alerts_configured, monitor_name, monitor_tag);
+      await closeIncident(activeAlert, monitor_alerts_configured, monitor_name, monitor_tag ?? "");
     }
 
-    await notifyQuietly(activeAlert, monitor_alerts_configured, templateSiteVars, monitor_tag, resolvedEventId);
+    await notifyQuietly(activeAlert, monitor_alerts_configured, templateSiteVars, monitor_tag ?? "", resolvedEventId);
   });
 
   worker.on("completed", (job: Job, returnvalue: any) => {
@@ -485,6 +615,66 @@ export const push = async (monitor_tag: string, ts: number, status: string, opti
   }
 };
 
+/**
+ * Enqueues a burn-rate evaluation for every active SLO_BURN_RATE config (F1b).
+ *
+ * **Driven by `slaScheduler`, not by a sample landing.** Every other alert here
+ * is pushed by `push()` when a monitor reports, because that is when a monitor's
+ * condition can have changed. An SLO's burn rate changes when its evaluation is
+ * recomputed, which is a different clock - and a page- or category-scoped target
+ * has no single monitor whose sample would stand for it anyway.
+ *
+ * Deduplicated on `(config, ts)` like the monitor path, so a scheduler tick
+ * delivered twice evaluates once.
+ */
+export const pushSloBurnRate = async (ts: number, options?: JobsOptions) => {
+  const configs = await GetMonitorAlertConfigs({
+    alert_for: GC.SLO_BURN_RATE as MonitorAlertConfigRecord["alert_for"],
+    is_active: GC.YES,
+  });
+  if (configs.length === 0) return;
+
+  const queue = getQueue();
+  addWorker();
+
+  const jobOptions: JobsOptions = {
+    ...(options ?? {}),
+    removeOnComplete: { age: 300, count: 100 },
+    removeOnFail: { age: 24 * 3600 },
+  };
+
+  let pushed = 0;
+  for (const config of configs) {
+    // A config whose target was deleted is skipped rather than evaluated: the
+    // worker would answer null and do nothing anyway, and this saves the job.
+    if (!config.sla_target_id) continue;
+    const target = await db.getSlaTargetById(config.sla_target_id);
+    if (!target) continue;
+
+    await queue.add(
+      jobNamePrefix + "_slo_" + config.id,
+      {
+        monitor_name: target.name,
+        // Null on purpose. See JobData.
+        monitor_tag: null,
+        monitor_settings: {} as MonitorSettings,
+        monitor_alerts_configured: config,
+        monitor_type: "SLO",
+        monitor_image: "",
+        monitor_id: 0,
+        monitor_description: "",
+        numerator: GC.defaultNumeratorStr,
+        denominator: GC.defaultDenominatorStr,
+        ts,
+        status: "",
+      },
+      { ...jobOptions, deduplication: { id: `slo-${config.id}-${ts}` } },
+    );
+    pushed++;
+  }
+  if (pushed > 0) console.log(`SLO: pushed ${pushed} burn-rate evaluation(s)`);
+};
+
 //graceful shutdown
 export const shutdown = async () => {
   if (worker) {
@@ -495,5 +685,6 @@ export const shutdown = async () => {
 
 export default {
   push,
+  pushSloBurnRate,
   shutdown,
 };

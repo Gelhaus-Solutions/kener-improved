@@ -40,6 +40,14 @@ export class MonitorAlertConfigRepository extends BaseRepository {
       create_incident: data.create_incident || "NO",
       is_active: data.is_active || "YES",
       severity: data.severity || "WARNING",
+      // F1b. Null for every alert_for except SLO_BURN_RATE. Listed explicitly
+      // because this object is a whitelist: a column missing here is silently
+      // dropped on insert, with nothing to notice.
+      sla_target_id: data.sla_target_id ?? null,
+      burn_window_a: data.burn_window_a ?? null,
+      burn_threshold_a: data.burn_threshold_a ?? null,
+      burn_window_b: data.burn_window_b ?? null,
+      burn_threshold_b: data.burn_threshold_b ?? null,
       created_at: this.knexUnscoped.fn.now(),
       updated_at: this.knexUnscoped.fn.now(),
     };
@@ -75,6 +83,12 @@ export class MonitorAlertConfigRepository extends BaseRepository {
     if (data.create_incident !== undefined) updateData.create_incident = data.create_incident;
     if (data.is_active !== undefined) updateData.is_active = data.is_active;
     if (data.severity !== undefined) updateData.severity = data.severity;
+    // F1b, same whitelist caveat as the insert above.
+    if (data.sla_target_id !== undefined) updateData.sla_target_id = data.sla_target_id;
+    if (data.burn_window_a !== undefined) updateData.burn_window_a = data.burn_window_a;
+    if (data.burn_threshold_a !== undefined) updateData.burn_threshold_a = data.burn_threshold_a;
+    if (data.burn_window_b !== undefined) updateData.burn_window_b = data.burn_window_b;
+    if (data.burn_threshold_b !== undefined) updateData.burn_threshold_b = data.burn_threshold_b;
 
     return await this.table("monitor_alerts_config").where({ id }).update(updateData);
   }

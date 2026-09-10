@@ -1,4 +1,5 @@
 import db from "../db/db.js";
+import { BURN_WINDOW_KEYS, ruleFromConfig } from "../services/sloBurnAlert.js";
 import { InvalidateAlertConfigTagIndex } from "../cache/alertConfigTags.js";
 import type {
   MonitorAlertConfigRecord,
@@ -35,7 +36,7 @@ export type {
 
 // ============ Validation ============
 
-const VALID_ALERT_FOR: AlertForType[] = ["STATUS", "LATENCY", "UPTIME"];
+const VALID_ALERT_FOR: AlertForType[] = ["STATUS", "LATENCY", "UPTIME", "SLO_BURN_RATE"];
 const VALID_SEVERITY: AlertSeverityType[] = ["CRITICAL", "WARNING"];
 const VALID_YES_NO: YesNoType[] = ["YES", "NO"];
 const VALID_STATUS_VALUES = ["DOWN", "DEGRADED", "UP"];
@@ -77,6 +78,40 @@ function validateAlertValue(alertFor: AlertForType, alertValue: string): void {
         `Invalid alert_value for UPTIME alert: ${alertValue}. Must be a number between 0 and 100 (percentage)`,
       );
     }
+  }
+}
+
+/**
+ * Checks an SLO_BURN_RATE config names a real target and a usable rule (F1b).
+ *
+ * Both windows and both thresholds, not just one: the rule is an AND across two
+ * windows, and a config with half of it filled in would evaluate to `null`
+ * forever - an alert that looks configured and can never fire.
+ */
+async function validateBurnRuleInput(data: {
+  sla_target_id?: number | null;
+  burn_window_a?: string | null;
+  burn_threshold_a?: number | null;
+  burn_window_b?: string | null;
+  burn_threshold_b?: number | null;
+}): Promise<void> {
+  if (!data.sla_target_id) {
+    throw new Error("An SLO target is required for a SLO_BURN_RATE alert");
+  }
+  if (!(await db.getSlaTargetById(data.sla_target_id))) {
+    throw new Error(`SLO target with id '${data.sla_target_id}' not found`);
+  }
+  if (
+    !ruleFromConfig({
+      burn_window_a: data.burn_window_a ?? null,
+      burn_threshold_a: data.burn_threshold_a ?? null,
+      burn_window_b: data.burn_window_b ?? null,
+      burn_threshold_b: data.burn_threshold_b ?? null,
+    })
+  ) {
+    throw new Error(
+      `A SLO_BURN_RATE alert needs two windows (one of ${BURN_WINDOW_KEYS.join(", ")}) and two positive thresholds`,
+    );
   }
 }
 
@@ -128,15 +163,23 @@ export async function CreateMonitorAlertConfig(
   // Validate input
   validateMonitorAlertConfigInput(data);
 
-  if (!data.monitor_tags || data.monitor_tags.length === 0) {
-    throw new Error("At least one monitor is required");
-  }
+  // F1b. A burn-rate alert watches an SLO target, so it has no monitors and the
+  // requirement below would reject every one of them.
+  const isBurnRate = data.alert_for === "SLO_BURN_RATE";
 
-  // Check if all monitors exist
-  for (const tag of data.monitor_tags) {
-    const monitor = await db.getMonitorByTag(tag);
-    if (!monitor) {
-      throw new Error(`Monitor with tag '${tag}' not found`);
+  if (isBurnRate) {
+    await validateBurnRuleInput(data);
+  } else {
+    if (!data.monitor_tags || data.monitor_tags.length === 0) {
+      throw new Error("At least one monitor is required");
+    }
+
+    // Check if all monitors exist
+    for (const tag of data.monitor_tags) {
+      const monitor = await db.getMonitorByTag(tag);
+      if (!monitor) {
+        throw new Error(`Monitor with tag '${tag}' not found`);
+      }
     }
   }
 
@@ -150,13 +193,20 @@ export async function CreateMonitorAlertConfig(
     create_incident: data.create_incident || "NO",
     is_active: data.is_active || "YES",
     severity: data.severity || "WARNING",
+    sla_target_id: isBurnRate ? data.sla_target_id : null,
+    burn_window_a: isBurnRate ? (data.burn_window_a ?? null) : null,
+    burn_threshold_a: isBurnRate ? (data.burn_threshold_a ?? null) : null,
+    burn_window_b: isBurnRate ? (data.burn_window_b ?? null) : null,
+    burn_threshold_b: isBurnRate ? (data.burn_threshold_b ?? null) : null,
   };
 
   // Insert alert config
   const id = await db.insertMonitorAlertConfig(insertData);
 
   // Add monitors to junction table
-  await db.addMonitorsToAlertConfig(id, data.monitor_tags);
+  if (!isBurnRate) {
+    await db.addMonitorsToAlertConfig(id, data.monitor_tags as string[]);
+  }
 
   // Add triggers if provided
   if (data.trigger_ids && data.trigger_ids.length > 0) {
@@ -203,8 +253,8 @@ export async function UpdateMonitorAlertConfig(
     validateAlertValue(alertFor, data.alert_value);
   }
 
-  // Validate monitor_tags if provided
-  if (data.monitor_tags !== undefined) {
+  // Validate monitor_tags if provided. A burn-rate config legitimately has none.
+  if (data.monitor_tags !== undefined && (data.alert_for ?? existingConfig.alert_for) !== "SLO_BURN_RATE") {
     if (data.monitor_tags.length === 0) {
       throw new Error("At least one monitor is required");
     }
@@ -216,9 +266,38 @@ export async function UpdateMonitorAlertConfig(
     }
   }
 
+  // F1b. Whether this config *is* a burn-rate alert after the update, which is
+  // what decides whether the burn columns are meaningful. Read from the incoming
+  // alert_for when it changes, and from the stored one when it does not.
+  const isBurnRate = (data.alert_for ?? existingConfig.alert_for) === "SLO_BURN_RATE";
+  if (isBurnRate) {
+    await validateBurnRuleInput({
+      sla_target_id: data.sla_target_id ?? existingConfig.sla_target_id,
+      burn_window_a: data.burn_window_a ?? existingConfig.burn_window_a,
+      burn_threshold_a: data.burn_threshold_a ?? existingConfig.burn_threshold_a,
+      burn_window_b: data.burn_window_b ?? existingConfig.burn_window_b,
+      burn_threshold_b: data.burn_threshold_b ?? existingConfig.burn_threshold_b,
+    });
+  }
+
   // Prepare update data
   const updateData: MonitorAlertConfigUpdate = {};
   if (data.alert_for !== undefined) updateData.alert_for = data.alert_for;
+  if (isBurnRate) {
+    if (data.sla_target_id !== undefined) updateData.sla_target_id = data.sla_target_id;
+    if (data.burn_window_a !== undefined) updateData.burn_window_a = data.burn_window_a;
+    if (data.burn_threshold_a !== undefined) updateData.burn_threshold_a = data.burn_threshold_a;
+    if (data.burn_window_b !== undefined) updateData.burn_window_b = data.burn_window_b;
+    if (data.burn_threshold_b !== undefined) updateData.burn_threshold_b = data.burn_threshold_b;
+  } else if (data.alert_for !== undefined) {
+    // Converted away from a burn-rate alert: clear the columns rather than leave
+    // them, so a config cannot carry a target it no longer watches.
+    updateData.sla_target_id = null;
+    updateData.burn_window_a = null;
+    updateData.burn_threshold_a = null;
+    updateData.burn_window_b = null;
+    updateData.burn_threshold_b = null;
+  }
   if (data.alert_value !== undefined) updateData.alert_value = data.alert_value;
   if (data.failure_threshold !== undefined) updateData.failure_threshold = data.failure_threshold;
   if (data.success_threshold !== undefined) updateData.success_threshold = data.success_threshold;

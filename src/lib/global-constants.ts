@@ -75,6 +75,8 @@ export default {
   STATUS: "STATUS",
   LATENCY: "LATENCY",
   UPTIME: "UPTIME",
+  // F1b. An alert on an SLO target's burn rate, not on a monitor.
+  SLO_BURN_RATE: "SLO_BURN_RATE",
   // Special path segment addressing the home page in the v4 API; its stored
   // page_path is an empty string. See docs/adr/0004-home-page-api-token.md.
   HOME_PAGE_TOKEN: "~home",
