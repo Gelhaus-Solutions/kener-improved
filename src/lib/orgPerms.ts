@@ -88,6 +88,7 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
 
   // Reporting (F2, F3, F4).
   getReportOptions: "reports.read",
+  getIncidentReport: "reports.read",
 
   // Incidents (C2c). A fork-invented action on an upstream resource, so it maps
   // to the upstream permission rather than inventing one: acknowledging is

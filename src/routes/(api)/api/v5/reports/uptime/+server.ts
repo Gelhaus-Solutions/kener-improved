@@ -13,7 +13,7 @@ import {
   type ReportRequest,
 } from "$lib/server/reports/reportData";
 import { csvUptimeReportStream } from "$lib/server/reports/csvUptimeReport";
-import { collectSloRows } from "$lib/server/reports/reportExtras";
+import { collectIncidentSections, collectSloRows } from "$lib/server/reports/reportExtras";
 import { pdfToWebStream, renderUptimePdf } from "$lib/server/reports/pdfUptimeReport";
 import type { RollupGrain } from "$lib/server/types/db";
 
@@ -122,7 +122,15 @@ export const GET: RequestHandler = async ({ url }) => {
 
     const model = await buildReportModel(request, now);
     const slos = await collectSloRows(model);
-    const doc = renderUptimePdf(model, { slos });
+    // F3's sections, over the report's own effective range rather than the
+    // requested one, so the incident log cannot mention an incident from a
+    // period the uptime table above it does not cover.
+    const incidentSections = await collectIncidentSections(scopeType, scopeRef, model.range.from, model.range.to);
+    const doc = renderUptimePdf(model, {
+      slos,
+      incidentMetrics: incidentSections.metrics,
+      incidents: incidentSections.incidents,
+    });
     return new Response(pdfToWebStream(doc), {
       headers: {
         "content-type": "application/pdf",

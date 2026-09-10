@@ -1,7 +1,8 @@
 import db from "../db/db.js";
-import { resolveScopeTags } from "../services/monitorScope.js";
+import { resolveScopeTags, type MonitorScopeType } from "../services/monitorScope.js";
 import { describeWindow, type SloCalendarPeriod, type SloWindowType } from "../services/slo.js";
-import type { PdfSloRow } from "./pdfUptimeReport.js";
+import { buildIncidentReport } from "./incidentReport.js";
+import type { PdfIncidentMetrics, PdfIncidentRow, PdfSloRow } from "./pdfUptimeReport.js";
 import type { ReportModel } from "./reportData.js";
 
 /**
@@ -63,4 +64,56 @@ export async function collectSloRows(model: ReportModel): Promise<PdfSloRow[]> {
       }),
     };
   });
+}
+
+/** Formats a trend bucket for the label the report prints beside every mean. */
+function windowLabelFor(from: number, to: number): string {
+  const day = (ts: number) => new Date(ts * 1000).toISOString().slice(0, 10);
+  return `${day(from)} to ${day(to)} (UTC)`;
+}
+
+/**
+ * The incident sections of the PDF (F3).
+ *
+ * F3's item asks for "inclusion in the F2 PDF so a monthly report carries both
+ * uptime and incident response quality", which is why this lives here and lands
+ * with F3 rather than with F2.
+ *
+ * **Only measures that actually have samples are printed.** A row reading
+ * "Time to acknowledge: n/a over 0 incidents" is noise on a document handed to a
+ * customer; a measure nobody recorded is better left off the page than printed
+ * as an absence. The incident count for the window is printed once, above the
+ * table, so the reader always knows the denominator even when a measure's own
+ * sample count is smaller.
+ */
+export async function collectIncidentSections(
+  scopeType: MonitorScopeType,
+  scopeRef: string,
+  from: number,
+  to: number,
+): Promise<{ metrics: PdfIncidentMetrics; incidents: PdfIncidentRow[] }> {
+  const report = await buildIncidentReport({ scopeType, scopeRef, from, to });
+
+  const metrics: PdfIncidentMetrics = {
+    windowLabel: windowLabelFor(from, to),
+    incidentCount: report.metrics.incidentCount,
+    rows: report.metrics.measures
+      .filter((measure) => measure.sampleCount > 0)
+      .map((measure) => ({
+        label: measure.label,
+        mean: measure.mean,
+        median: measure.median,
+        sampleCount: measure.sampleCount,
+      })),
+  };
+
+  const incidents: PdfIncidentRow[] = report.incidents.map((incident) => ({
+    title: incident.title,
+    severity: incident.severity,
+    startedAt: incident.startedAt,
+    durationSeconds: incident.durationSeconds,
+    components: incident.monitorNames.join(", "),
+  }));
+
+  return { metrics, incidents };
 }

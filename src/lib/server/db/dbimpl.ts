@@ -275,6 +275,8 @@ class DbImpl {
   getRecentUpdatedIncidents!: IncidentsRepository["getRecentUpdatedIncidents"];
   getPreviousIncidentId!: IncidentsRepository["getPreviousIncidentId"];
   getIncidentsBetween!: IncidentsRepository["getIncidentsBetween"];
+  getIncidentsForMetrics!: IncidentsRepository["getIncidentsForMetrics"];
+  getMonitorTagsForIncidents!: IncidentsRepository["getMonitorTagsForIncidents"];
   getIncidentsCount!: IncidentsRepository["getIncidentsCount"];
   getIncidentsCountByTypeAndDateRange!: IncidentsRepository["getIncidentsCountByTypeAndDateRange"];
   updateIncident!: IncidentsRepository["updateIncident"];
@@ -844,6 +846,8 @@ class DbImpl {
     this.getRecentUpdatedIncidents = this.incidents.getRecentUpdatedIncidents.bind(this.incidents);
     this.getPreviousIncidentId = this.incidents.getPreviousIncidentId.bind(this.incidents);
     this.getIncidentsBetween = this.incidents.getIncidentsBetween.bind(this.incidents);
+    this.getIncidentsForMetrics = this.incidents.getIncidentsForMetrics.bind(this.incidents);
+    this.getMonitorTagsForIncidents = this.incidents.getMonitorTagsForIncidents.bind(this.incidents);
     this.getIncidentsCount = this.incidents.getIncidentsCount.bind(this.incidents);
     this.getIncidentsCountByTypeAndDateRange = this.incidents.getIncidentsCountByTypeAndDateRange.bind(this.incidents);
     this.updateIncident = this.incidents.updateIncident.bind(this.incidents);

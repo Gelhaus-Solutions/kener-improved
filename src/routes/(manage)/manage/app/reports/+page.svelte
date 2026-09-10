@@ -3,12 +3,14 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
   import { Spinner } from "$lib/components/ui/spinner/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import FileSpreadsheetIcon from "@lucide/svelte/icons/file-spreadsheet";
   import FileTextIcon from "@lucide/svelte/icons/file-text";
   import TriangleAlertIcon from "@lucide/svelte/icons/triangle-alert";
+  import ActivityIcon from "@lucide/svelte/icons/activity";
   import { toast } from "svelte-sonner";
   import { resolve } from "$app/paths";
   import clientResolver from "$lib/client/resolver.js";
@@ -28,6 +30,24 @@
     value: string;
     usable: boolean;
     latest_ts: number | null;
+  }
+  interface Measure {
+    key: string;
+    label: string;
+    mean: number | null;
+    median: number | null;
+    max: number | null;
+    sampleCount: number;
+  }
+  interface IncidentReport {
+    window: { from: number; to: number; bucket: string; timezone: string };
+    incident_count: number;
+    basis: { alert: number; reported: number };
+    measures: Measure[];
+    by_severity: Array<{ severity: string; count: number }>;
+    by_component: Array<{ monitorTag: string; count: number }>;
+    trend: Array<{ bucketStart: number; incidentCount: number; mttrMedian: number | null }>;
+    truncated: boolean;
   }
 
   const SCOPE_TYPES = [
@@ -49,6 +69,10 @@
   let grains = $state<GrainOption[]>([]);
   let loading = $state(true);
   let error = $state<string | null>(null);
+
+  let incidentReport = $state<IncidentReport | null>(null);
+  let incidentLoading = $state(false);
+  let incidentError = $state<string | null>(null);
 
   /** Dates are held as `YYYY-MM-DD` strings, which is what a date input speaks. */
   let form = $state({
@@ -158,6 +182,46 @@
   }
 
   onMount(load);
+
+  /** Seconds as a compact human duration. Mirrors the PDF's own formatting. */
+  function durationText(seconds: number | null): string {
+    if (seconds === null) return "n/a";
+    if (seconds < 60) return `${Math.round(seconds)}s`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ${minutes % 60}m`;
+    return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+  }
+
+  /**
+   * Loads the incident metrics for the chosen range.
+   *
+   * Explicit rather than reactive: this can scan a day of samples per incident
+   * to find each one's true outage start, so it runs when asked rather than on
+   * every keystroke in the date field.
+   */
+  async function loadIncidentMetrics() {
+    if (rangeProblem) {
+      toast.error(rangeProblem);
+      return;
+    }
+    incidentLoading = true;
+    incidentError = null;
+    try {
+      incidentReport = await call("getIncidentReport", {
+        scope_type: form.scope_type,
+        scope_ref: form.scope_type === "ALL" ? "" : form.scope_ref,
+        from: dayToUtcSeconds(form.from),
+        to: dayToUtcSeconds(form.to)
+      });
+    } catch (e) {
+      incidentError = e instanceof Error ? e.message : "Could not load incident metrics";
+      incidentReport = null;
+    } finally {
+      incidentLoading = false;
+    }
+  }
 
   /**
    * Starts the download as a plain navigation.
@@ -345,6 +409,103 @@
         <Button variant="outline" onclick={() => download("pdf")} disabled={rangeProblem !== null || grainUnusable}>
           <FileTextIcon class="size-4" />
           Download PDF
+        </Button>
+      </Card.Footer>
+    </Card.Root>
+
+    <Card.Root class="mt-6">
+      <Card.Header>
+        <Card.Title>Incident response</Card.Title>
+        <Card.Description>
+          How quickly incidents in this range were detected, acknowledged and resolved. The median is shown beside the
+          mean because a single long incident moves one and not the other.
+        </Card.Description>
+      </Card.Header>
+      <Card.Content>
+        {#if incidentLoading}
+          <div class="flex items-center gap-2 py-6">
+            <Spinner class="size-4" />
+            <span class="text-muted-foreground text-sm">Measuring incidents</span>
+          </div>
+        {:else if incidentError}
+          <p class="text-destructive text-sm">{incidentError}</p>
+        {:else if !incidentReport}
+          <p class="text-muted-foreground text-sm">
+            Choose a range above, then load the metrics. This reads raw samples to find when each incident really
+            started, so it is not run automatically.
+          </p>
+        {:else if incidentReport.incident_count === 0}
+          <p class="text-muted-foreground text-sm">No incidents started in this range.</p>
+        {:else}
+          <div class="space-y-4">
+            <div class="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs">
+              <span
+                ><span class="text-foreground font-medium">{incidentReport.incident_count}</span>
+                incident{incidentReport.incident_count === 1 ? "" : "s"}</span
+              >
+              <span>{incidentReport.basis.alert} detected by a monitor</span>
+              <span>{incidentReport.basis.reported} opened by hand</span>
+              <span>bucketed by {incidentReport.window.bucket} (UTC)</span>
+            </div>
+
+            {#if incidentReport.truncated}
+              <div class="border-destructive/40 bg-destructive/10 flex gap-2 rounded-md border p-3">
+                <TriangleAlertIcon class="text-destructive mt-0.5 size-4 shrink-0" />
+                <p class="text-destructive text-xs">
+                  There were more incidents in this range than one report examines, so these figures cover only the
+                  earliest of them. Narrow the range for a complete answer.
+                </p>
+              </div>
+            {/if}
+
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead>
+                  <tr class="text-muted-foreground border-b text-left text-xs">
+                    <th class="py-2 pr-4 font-medium">MEASURE</th>
+                    <th class="py-2 pr-4 text-right font-medium">MEAN</th>
+                    <th class="py-2 pr-4 text-right font-medium">MEDIAN</th>
+                    <th class="py-2 pr-4 text-right font-medium">SLOWEST</th>
+                    <th class="py-2 text-right font-medium">INCIDENTS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each incidentReport.measures as measure (measure.key)}
+                    <tr class="border-b last:border-0">
+                      <td class="py-2 pr-4">{measure.label}</td>
+                      <td class="py-2 pr-4 text-right tabular-nums">{durationText(measure.mean)}</td>
+                      <td class="py-2 pr-4 text-right font-medium tabular-nums">{durationText(measure.median)}</td>
+                      <td class="text-muted-foreground py-2 pr-4 text-right tabular-nums">
+                        {durationText(measure.max)}
+                      </td>
+                      <!-- Printed per measure, not once: an incident nobody
+                           acknowledged is excluded from acknowledgement rather
+                           than counted as instant, so this column is often
+                           smaller than the incident count above. -->
+                      <td
+                        class="py-2 text-right tabular-nums {measure.sampleCount === 0 ? 'text-muted-foreground' : ''}"
+                        >{measure.sampleCount}</td
+                      >
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+
+            {#if incidentReport.by_severity.length > 0}
+              <div class="flex flex-wrap gap-2">
+                {#each incidentReport.by_severity as row (row.severity)}
+                  <Badge variant="secondary">{row.severity}: {row.count}</Badge>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/if}
+      </Card.Content>
+      <Card.Footer>
+        <Button variant="outline" onclick={loadIncidentMetrics} disabled={incidentLoading || rangeProblem !== null}>
+          <ActivityIcon class="size-4" />
+          {incidentReport ? "Refresh" : "Load"} incident metrics
         </Button>
       </Card.Footer>
     </Card.Root>

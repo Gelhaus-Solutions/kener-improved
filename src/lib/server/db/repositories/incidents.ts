@@ -237,6 +237,58 @@ export class IncidentsRepository extends BaseRepository {
       .orderBy("start_date_time", "asc");
   }
 
+  /**
+   * Incidents in a range, for the response metrics (F3).
+   *
+   * **`incident_type = 'INCIDENT'` is the load-bearing clause.** The `incidents`
+   * table also stores maintenances, which carry the same lifecycle columns and
+   * would otherwise be averaged into MTTR - reporting that the team "resolved" a
+   * planned four-hour window in four hours. A maintenance is not an incident and
+   * has no response time.
+   *
+   * Unlike `getIncidentsBetween` this does **not** filter to `status = 'OPEN'`:
+   * a report is mostly about incidents that are over, and restricting to open
+   * ones would leave MTTR computable for almost nothing.
+   *
+   * Selected by `start_date_time` rather than by resolution, so an incident
+   * belongs to the window it began in. That is the convention a monthly report
+   * is read with, and it keeps an incident from moving between two months'
+   * reports depending on when it happened to close.
+   */
+  async getIncidentsForMetrics(start: number, end: number, limit: number): Promise<IncidentRecord[]> {
+    return await this.table("incidents")
+      .where("incident_type", "INCIDENT")
+      .andWhere("start_date_time", ">=", start)
+      .andWhere("start_date_time", "<", end)
+      .orderBy("start_date_time", "asc")
+      .limit(limit);
+  }
+
+  /**
+   * The component tags for many incidents at once (F3).
+   *
+   * One query for a page of incidents rather than one per incident. The metrics
+   * path already pays for a sample scan per incident to find the true outage
+   * start; adding a round trip each to learn which monitors were attached would
+   * be the avoidable half of that cost.
+   */
+  async getMonitorTagsForIncidents(incidentIds: ReadonlyArray<number>): Promise<Map<number, string[]>> {
+    const byIncident = new Map<number, string[]>();
+    if (incidentIds.length === 0) return byIncident;
+
+    const rows = await this.table("incident_monitors")
+      .select("incident_id", "monitor_tag")
+      .whereIn("incident_id", incidentIds as number[]);
+
+    for (const row of rows as Array<{ incident_id: number; monitor_tag: string }>) {
+      const id = Number(row.incident_id);
+      const list = byIncident.get(id);
+      if (list) list.push(String(row.monitor_tag));
+      else byIncident.set(id, [String(row.monitor_tag)]);
+    }
+    return byIncident;
+  }
+
   async getIncidentsCount(filter: { status?: string } | null): Promise<CountResult | undefined> {
     let query = this.table("incidents").count("* as count");
     if (filter && filter.status) {
