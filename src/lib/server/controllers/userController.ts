@@ -8,6 +8,8 @@ import { GetAllSiteData } from "./controller.js";
 import { siteDataToVariables } from "../notification/notification_utils.js";
 import sendEmail from "../notification/email_notification.js";
 import { GetGeneralEmailTemplateById } from "./generalTemplateController.js";
+import { currentOrgIdOrDefault, runAcrossOrgs } from "../db/orgContext.js";
+import { roleIdFor } from "../db/provisionOrg.js";
 
 export interface UserUpdateInput {
   userID: number;
@@ -255,17 +257,38 @@ export const ManualUpdateUserData = async (forUserId: number, data: ManualUserUp
   if (!forUser) {
     throw new Error("User not found");
   }
+
+  // KENER-31. The two guards below used to key off `users.is_owner`, with a
+  // comment promising they would become org-aware "in I3d". I3d shipped and they
+  // did not, so on a multi-org instance both were simply wrong: a tenant's owner
+  // could be stripped of their admin role by anyone holding `users.write` there,
+  // and the guard that was supposed to prevent it only ever protected the one
+  // account that happens to carry the instance flag.
+  //
+  // Which org? The one this request is acting in. `requireOrg` established it
+  // before this controller was reached, having checked the caller's membership
+  // first, so it is a validated answer rather than whatever the session claimed.
+  const orgId = currentOrgIdOrDefault();
+  // Captured as a const: `forUser` is a `let`, and TypeScript will not carry its
+  // non-null narrowing into the closure below.
+  const targetUserId = forUser.id;
+  // `org_members` is how an org is *found*, so a query against it cannot be
+  // scoped by one. See OrgsRepository's header.
+  const membership = await runAcrossOrgs(() => db.getOrgMembership(orgId, targetUserId));
+  const isOrgOwner = !!membership?.is_org_owner;
+
   if (data.updateType == "role") {
     if (!data.role_ids || data.role_ids.length === 0) throw new Error("At least one role is required");
-    // Owner must always retain the admin role.
+    // An organisation's owner must always retain the admin role **in that
+    // organisation**.
     //
-    // `users.is_owner` is the *instance* superadmin from P4 onwards, and
-    // `org_members.is_org_owner` is the per-org owner. While there is exactly
-    // one org the two coincide and this guard is correct as written. It becomes
-    // org-aware in I3d, which is what establishes the org context this would
-    // need to know *which* org's admin role to insist on.
-    if (forUser.is_owner === "YES" && !data.role_ids.includes("admin")) {
-      throw new Error("Owner must retain the admin role");
+    // Roles are per-org and their ids are prefixed accordingly, so the literal
+    // string "admin" is only the right answer in the default org. `roleIdFor` is
+    // the same helper `provisionOrg` names the role with, which is what keeps
+    // this from drifting away from the role that actually exists.
+    const adminRoleId = roleIdFor(orgId, "admin");
+    if (isOrgOwner && !data.role_ids.includes(adminRoleId)) {
+      throw new Error("An organisation owner must retain the admin role");
     }
     // Validate all role_ids exist and are active
     for (const roleId of data.role_ids) {
@@ -285,9 +308,23 @@ export const ManualUpdateUserData = async (forUserId: number, data: ManualUserUp
     return result;
   } else if (data.updateType == "is_active") {
     if (data.is_active === undefined) throw new Error("is_active is required");
-    // Owner cannot be deactivated
+    // Two guards, because `users.is_active` is an **instance-wide** column while
+    // ownership is now two different facts.
+    //
+    // The instance owner is the account that can always reach the instance
+    // console, so deactivating it is how an operator locks themselves out of
+    // their own installation for good.
     if (forUser.is_owner === "YES" && data.is_active === 0) {
-      throw new Error("Owner account cannot be deactivated");
+      throw new Error("The instance owner's account cannot be deactivated");
+    }
+    // An org owner is the account that can always administer that tenant.
+    // Deactivating one is instance-wide, so it does not merely remove them from
+    // this org - it ends their access everywhere, and can leave an org with no
+    // reachable owner at all. Demoting them first is the deliberate act that
+    // makes this allowed, and `SetOrgMemberOwner` already refuses to demote the
+    // last one.
+    if (isOrgOwner && data.is_active === 0) {
+      throw new Error("An organisation owner cannot be deactivated. Remove their ownership first.");
     }
     const result = await db.updateUserIsActive(forUser.id, data.is_active);
     if (data.is_active === 0) {
