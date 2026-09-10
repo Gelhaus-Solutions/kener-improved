@@ -11,6 +11,7 @@
   import type { PageSettingsType } from "$lib/server/types/db";
   import type { StatusType } from "$lib/types/status";
   import { t } from "$lib/stores/i18n";
+  import { liveStatus } from "$lib/client/liveStatus.svelte";
   import {
     ALL_FILTER,
     applyStatusFilter,
@@ -33,6 +34,8 @@
   // makes each page's diff against upstream *smaller* rather than larger.
 
   interface Props {
+    /** The page whose stream to open, so live events carry only this page. */
+    pagePath: string;
     monitorTags: string[];
     monitorCategoriesByTag: Record<string, string | null>;
     monitorGroupMembersByTag: Record<string, string[]>;
@@ -42,6 +45,7 @@
   }
 
   let {
+    pagePath,
     monitorTags,
     monitorCategoriesByTag,
     monitorGroupMembersByTag,
@@ -137,6 +141,40 @@
     });
   });
 
+  // ---- G5: live updates -----------------------------------------------------
+  //
+  // Opened here because this component owns the bar data the stream patches, and
+  // it renders exactly once per page.
+  $effect(() => {
+    const path = pagePath;
+    if (!browser) return;
+    liveStatus.reset();
+    liveStatus.connect(path);
+    return () => liveStatus.disconnect();
+  });
+
+  /**
+   * The fetched bars with any live status laid over them.
+   *
+   * Derived rather than written back into `monitorBarDataByTag`, because that
+   * record is *replaced* by the fetch effect above. A live update written into it
+   * would be silently discarded the next time the timezone or the day count
+   * changed, which is a bug that only appears minutes later and only sometimes.
+   */
+  const barDataByTag = $derived.by(() => {
+    const overrides = liveStatus.monitorStatusByTag;
+    if (Object.keys(overrides).length === 0) return monitorBarDataByTag;
+
+    const patched: Record<string, MonitorBarResponse> = { ...monitorBarDataByTag };
+    for (const [tag, status] of Object.entries(overrides)) {
+      const existing = patched[tag];
+      // Only monitors this page actually shows, and only once their bar has
+      // loaded: there is nothing to patch a status onto otherwise.
+      if (existing) patched[tag] = { ...existing, currentStatus: status };
+    }
+    return patched;
+  });
+
   // ---- G1: status filtering -------------------------------------------------
   //
   // Free: every status read here was already fetched above for the bars, so
@@ -146,7 +184,7 @@
   /** Current status per tag; absent while a monitor's bar data is still loading. */
   const statusByTag = $derived.by(() => {
     const out: Record<string, StatusType | undefined> = {};
-    for (const tag of monitorTags || []) out[tag] = monitorBarDataByTag[tag]?.currentStatus;
+    for (const tag of monitorTags || []) out[tag] = barDataByTag[tag]?.currentStatus;
     return out;
   });
 
@@ -210,7 +248,7 @@
       >
         <MonitorBar
           {tag}
-          prefetchedData={monitorBarDataByTag[tag]}
+          prefetchedData={barDataByTag[tag]}
           prefetchedError={monitorBarErrorByTag[tag]}
           days={barCount}
           {endOfDayTodayAtTz}

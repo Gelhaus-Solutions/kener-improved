@@ -1,6 +1,7 @@
 import db from "../../db/db.js";
 import { emit } from "../emit.js";
 import { redisConnection } from "../../redisConnector.js";
+import { publishPageStatus } from "../../live/publish.js";
 import { getPageStatus } from "../../incidents/pageStatus.js";
 import { GetMinuteStartNowTimestampUTC } from "../../tool.js";
 import type { EventConsumer, OutboxEvent, DeliveryTarget, DeliveryResult } from "../types.js";
@@ -199,6 +200,21 @@ export const pageStatusConsumer: EventConsumer = {
       // silently swallow a page that went down, recovered and went down again.
       idempotency_key: `page.status_changed:${pageId}:${event.event_id}`,
       causation_id: event.event_id,
+    });
+
+    // G5. The same transition, to anyone with the page open. After the `emit`
+    // so the durable record is written first: the bus is the source of truth and
+    // this is a courtesy on top of it.
+    //
+    // The compare-and-set above already guarantees exactly one delivery observes
+    // a given transition, so this publishes once per transition too rather than
+    // once per delivery attempt.
+    await publishPageStatus(event.org_id, {
+      page_id: pageId,
+      page_path: page.page_path,
+      status: status.status,
+      component_impact: status.component_impact,
+      status_summary: status.statusSummary,
     });
 
     return { ok: true, response_body: `${remembered.status} -> ${status.status}` };

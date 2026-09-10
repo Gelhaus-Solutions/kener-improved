@@ -246,6 +246,10 @@
                       "content": "v4/pages"
                     },
                     {
+                      "title": "Live Updates",
+                      "content": "v4/live-updates"
+                    },
+                    {
                       "title": "Internationalization",
                       "content": "v4/internationalization"
                     },

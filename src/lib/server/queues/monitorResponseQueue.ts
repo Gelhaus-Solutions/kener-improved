@@ -8,6 +8,7 @@ import type { MonitoringData } from "../types/db.js";
 import db from "../db/db.js";
 import { emit } from "../events/emit.js";
 import { currentOrgId } from "../events/eventContext.js";
+import { publishMonitorStatus } from "../live/publish.js";
 import { MERGED_REGION_ID } from "../db/regions.js";
 let monitorResponseQueue: Queue | null = null;
 let worker: Worker | null = null;
@@ -91,6 +92,24 @@ const addWorker = () => {
     if (!dbRes) {
       console.error("Failed to insert monitoring data for monitorTag:", monitorTag, "timestamp:", ts);
       throw new Error("Failed to insert monitoring data");
+    }
+
+    // G5. Live fan-out, on transitions only and for the same reason the outbox
+    // emit above is: almost every sample says "still UP", and publishing them all
+    // would push hundreds of thousands of messages a day at every open page to
+    // report that nothing happened. `previous` is already in hand, so the diff
+    // costs nothing extra.
+    //
+    // After the transaction, deliberately. A published event that a rolled-back
+    // transaction then un-happened would tell every viewer about a status change
+    // the database does not have.
+    if (previous && previous.status !== status) {
+      await publishMonitorStatus(currentOrgId(), {
+        monitor_tag: monitorTag,
+        status,
+        previous_status: previous.status,
+        timestamp: ts,
+      });
     }
 
     await SetLastMonitoringValue(monitorTag, {

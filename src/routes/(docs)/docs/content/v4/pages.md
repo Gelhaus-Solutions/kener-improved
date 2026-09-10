@@ -62,6 +62,36 @@ Choose one layout:
 - `compact-list`
 - `compact-grid`
 
+### Status filter {#status-filter}
+
+Turn on **Status Filter** to show filter chips above the components, so visitors can narrow the page to everything that is `DOWN`, `DEGRADED`, and so on.
+
+- Off by default. Existing pages are unchanged until you turn it on.
+- Filtering happens in the browser and issues no extra requests.
+- The chosen status is kept in the URL (`?status=DOWN`), so a filtered view can be shared during an incident.
+- Chips appear only when the page has more than one status, so a healthy page shows no control at all.
+
+### Component grouping {#component-grouping}
+
+Set **Component Grouping** to `Group by category` to collect components into collapsible sections using each monitor's category.
+
+- Sections appear in the order their monitors appear on the page, not alphabetically, so your monitor ordering is preserved.
+- Components with no category are collected into a final **Other** section.
+- **Start collapsed**: sections are closed on first load.
+- **Show section status**: each section header shows the worst status among its components.
+
+> [!NOTE]
+> A category section is a visual grouping only. It is not the same as a [Group monitor](/docs/v4/monitors), which is a component with a status of its own. A Group monitor appears as a normal component inside whichever category it belongs to.
+
+### Show in page switcher {#show-in-page-switcher}
+
+Controls whether this page is listed in the switcher shown on public pages. On by default.
+
+> [!IMPORTANT]
+> This affects navigation only. Turning it off does not make the page private: it stays reachable at its own address and anyone with the link can open it.
+
+Enable the switcher itself site-wide with `showSwitcher` in [Site Configuration](/docs/v4/setup/site-configuration), and order its entries with `pageOrderingSettings`.
+
 Click **Save Preferences** after changes.
 
 ## Social preview and SEO {#social-preview-and-seo}
@@ -107,3 +137,4 @@ Pages support full CRUD through the v4 REST API (`/api/v4/pages`), including ass
 - Create pages by audience (for example: public services vs internal systems).
 - Add only relevant monitors per page to keep status pages readable.
 - Use [Sharing Monitors](/docs/v4/sharing) to control badge/embed visibility per monitor.
+- Public pages update themselves as monitors change status. See [Live Updates](/docs/v4/live-updates).

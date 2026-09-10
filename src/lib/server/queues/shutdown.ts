@@ -8,6 +8,7 @@ import eventDispatchQueue from "./eventDispatchQueue";
 import backfillQueue from "./backfillQueue";
 import rollupScheduler from "../schedulers/rollupScheduler";
 import { flushAuditLog } from "../audit/writer";
+import { shutdownLiveHub } from "../live/hub";
 
 export default async () => {
   await monitorExecuteQueue.shutdown();
@@ -26,6 +27,9 @@ export default async () => {
   // leaves the hours it had not reached still marked dirty, and the next boot
   // recomputes them. Nothing to drain.
   await rollupScheduler.shutdown();
+  // G5. Closes the one subscriber this process holds. Nothing is buffered that
+  // matters: an SSE stream is a courtesy and a dropped one reconnects.
+  await shutdownLiveHub();
   // Last: the audit writer buffers for up to half a second, so anything the
   // shutdowns above recorded is still in memory at this point.
   await flushAuditLog();

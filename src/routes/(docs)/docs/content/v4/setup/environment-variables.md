@@ -237,6 +237,44 @@ NO_PROXY=localhost,127.0.0.1,prometheus.lan,.internal
 - An API or Prometheus monitor can set its own **Proxy URL** (for example `http://user:$PROXY_PASS@proxy.internal:3128`, with `$SECRET` substitution), which overrides these variables for that monitor.
 - A monitor error of `Failed to establish tunnel to host:443 via …` means the proxy refused the connection: check the proxy credentials, or add the host to `NO_PROXY`.
 
+### KENER_SSE_MAX_CONNECTIONS {#kener-sse-max-connections}
+
+**Purpose**: Cap the number of simultaneous [live update](/docs/v4/live-updates) connections a web process will hold. Public status pages keep one open connection per viewer, so this bounds what that can cost.
+
+**Default**: `1000`
+
+**Examples**:
+
+```bash
+# Raise it, alongside the container's file-descriptor limit
+KENER_SSE_MAX_CONNECTIONS=5000
+
+# Turn live updates off entirely
+KENER_SSE_MAX_CONNECTIONS=0
+```
+
+**Important**:
+
+- Beyond the cap, new viewers are told to retry later and their page simply stops updating on its own. It still renders and is accurate at load.
+- Requires Redis. With Redis unreachable the stream opens and delivers nothing, which is indistinguishable from a page where nothing has changed.
+
+### KENER_REPORT_DIR {#kener-report-dir}
+
+**Purpose**: Where generated uptime reports are written before they are delivered.
+
+**Default**: `./data/reports`
+
+**Examples**:
+
+```bash
+KENER_REPORT_DIR=/data/reports
+# How long a report download link stays valid, in seconds (default 7 days)
+KENER_REPORT_LINK_TTL_SECONDS=604800
+```
+
+> [!IMPORTANT]
+> In Docker this path must be on a mounted volume. Without one, generated reports are lost on every redeploy and their download links stop working.
+
 ## Integration Variables {#integration-variables}
 
 For detailed configuration of these integrations, see their dedicated documentation pages.

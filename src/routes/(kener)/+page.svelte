@@ -1,6 +1,6 @@
 <script lang="ts">
   import * as Item from "$lib/components/ui/item/index.js";
-  import EventsCard from "$lib/components/EventsCard.svelte";
+  import LivePageStatusCard from "$lib/components/LivePageStatusCard.svelte";
   import ThemePlus from "$lib/components/ThemePlus.svelte";
   import MonitorList from "$lib/components/MonitorList.svelte";
   import IncidentItem from "$lib/components/IncidentItem.svelte";
@@ -86,7 +86,7 @@
   <div class="grid grid-cols-1 gap-4 sm:grid-cols-16">
     <div class="col-span-1 flex flex-col gap-3 sm:gap-4 {!showInlineEvents ? 'sm:col-span-16' : 'sm:col-span-11'}">
       {#if !!data.monitorTags.length}
-        <EventsCard statusClass={data.pageStatus.statusClass} statusText={data.pageStatus.statusSummary} />
+        <LivePageStatusCard statusClass={data.pageStatus.statusClass} statusText={data.pageStatus.statusSummary} />
         {#if showInlineEvents && data.ongoingIncidents && data.ongoingIncidents.length > 0}
           <div class="flex flex-col gap-3">
             {#each data.ongoingIncidents as incident, i (incident.id ?? i)}
@@ -115,6 +115,7 @@
           </div>
         {/if}
         <MonitorList
+          pagePath={""}
           monitorTags={data.monitorTags}
           monitorCategoriesByTag={data.monitorCategoriesByTag}
           monitorGroupMembersByTag={data.monitorGroupMembersByTag}
