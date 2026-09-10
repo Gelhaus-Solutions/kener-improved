@@ -16,6 +16,7 @@ import { SiteDataRepository } from "./repositories/site-data.js";
 import { IncidentsRepository } from "./repositories/incidents.js";
 import { DependenciesRepository } from "./repositories/dependencies.js";
 import { RollupsRepository } from "./repositories/rollups.js";
+import { SlaRepository } from "./repositories/sla.js";
 import { PostmortemsRepository } from "./repositories/postmortems.js";
 import { IncidentTemplatesRepository } from "./repositories/incidentTemplates.js";
 import { ImagesRepository } from "./repositories/images.js";
@@ -58,6 +59,7 @@ class DbImpl {
   private incidents!: IncidentsRepository;
   private dependencies!: DependenciesRepository;
   private rollups!: RollupsRepository;
+  private sla!: SlaRepository;
   private postmortems!: PostmortemsRepository;
   private incidentTemplates!: IncidentTemplatesRepository;
 
@@ -110,6 +112,17 @@ class DbImpl {
   getRawSampleBounds!: RollupsRepository["getRawSampleBounds"];
   getTagsWithSamples!: RollupsRepository["getTagsWithSamples"];
   getMaintenanceWindowsForRollup!: RollupsRepository["getMaintenanceWindows"];
+
+  // ============ SLO targets and evaluations (F1a) ============
+  getSlaTargets!: SlaRepository["getSlaTargets"];
+  getSlaTargetById!: SlaRepository["getSlaTargetById"];
+  getSlaTargetsForMonitor!: SlaRepository["getSlaTargetsForMonitor"];
+  createSlaTarget!: SlaRepository["createSlaTarget"];
+  updateSlaTarget!: SlaRepository["updateSlaTarget"];
+  deleteSlaTarget!: SlaRepository["deleteSlaTarget"];
+  getSlaEvaluations!: SlaRepository["getSlaEvaluations"];
+  upsertSlaEvaluation!: SlaRepository["upsertSlaEvaluation"];
+  getSloCounts!: SlaRepository["getSloCounts"];
   private images!: ImagesRepository;
   private pages!: PagesRepository;
   private maintenances!: MaintenancesRepository;
@@ -642,6 +655,17 @@ class DbImpl {
     this.getRawSampleBounds = this.rollups.getRawSampleBounds.bind(this.rollups);
     this.getTagsWithSamples = this.rollups.getTagsWithSamples.bind(this.rollups);
     this.getMaintenanceWindowsForRollup = this.rollups.getMaintenanceWindows.bind(this.rollups);
+
+    this.sla = new SlaRepository(this.knex);
+    this.getSlaTargets = this.sla.getSlaTargets.bind(this.sla);
+    this.getSlaTargetById = this.sla.getSlaTargetById.bind(this.sla);
+    this.getSlaTargetsForMonitor = this.sla.getSlaTargetsForMonitor.bind(this.sla);
+    this.createSlaTarget = this.sla.createSlaTarget.bind(this.sla);
+    this.updateSlaTarget = this.sla.updateSlaTarget.bind(this.sla);
+    this.deleteSlaTarget = this.sla.deleteSlaTarget.bind(this.sla);
+    this.getSlaEvaluations = this.sla.getSlaEvaluations.bind(this.sla);
+    this.upsertSlaEvaluation = this.sla.upsertSlaEvaluation.bind(this.sla);
+    this.getSloCounts = this.sla.getSloCounts.bind(this.sla);
 
     this.images = new ImagesRepository(this.knex);
     this.pages = new PagesRepository(this.knex);

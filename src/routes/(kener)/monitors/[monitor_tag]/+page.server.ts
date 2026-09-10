@@ -17,6 +17,25 @@ import { GetMonitorsParsed } from "$lib/server/controllers/monitorsController";
 import { ResolvePublicMonitorTag } from "$lib/server/controllers/publicMonitorResolver";
 import type { GroupMonitorTypeData } from "$lib/server/types/monitor";
 
+/**
+ * The window a published SLO figure covers, as a token that needs no translating.
+ *
+ * Derived from the evaluation's own `window_start` rather than from the clock,
+ * so a figure computed just before midnight on 30 September still says
+ * `2026-09` when it is read a minute later.
+ */
+function publicWindowLabel(
+  target: { window_type: string; window_days: number | null; calendar_period: string | null },
+  windowStart: number,
+): string {
+  if (target.window_type !== "CALENDAR") return `${target.window_days ?? 30}d (UTC)`;
+  const start = new Date(windowStart * 1000);
+  const year = start.getUTCFullYear();
+  if (target.calendar_period === "YEAR") return `${year} (UTC)`;
+  if (target.calendar_period === "QUARTER") return `${year}-Q${Math.floor(start.getUTCMonth() / 3) + 1} (UTC)`;
+  return `${year}-${String(start.getUTCMonth() + 1).padStart(2, "0")} (UTC)`;
+}
+
 export const load: PageServerLoad = async ({ params, parent }) => {
   const { monitor_tag } = params;
   const parentData = await parent();
@@ -111,6 +130,46 @@ export const load: PageServerLoad = async ({ params, parent }) => {
     }
   }
 
+  // F1a: the published SLO panel.
+  //
+  // **Only targets that name this component directly**, and only the ones an
+  // operator opted into publishing. A page- or category-scoped target measures
+  // something wider than this page is about, and showing it here would attach a
+  // figure to a component that is not the figure for that component.
+  //
+  // **Only four fields leave the server.** Every value a loader returns is
+  // serialised into the HTML whether or not the template renders it, so the
+  // filtering has to happen here. Burn rates in particular stay behind: they are
+  // an operational signal about how fast a budget is being spent, and publishing
+  // them tells a reader more about the provider's internal alerting than about
+  // the service they are checking on.
+  const publishedSloTargets = (await db.getSlaTargetsForMonitor(monitor.tag)).filter(
+    (target) => target.show_on_public === "YES",
+  );
+  const sloEvaluationsByTarget = new Map(
+    (await db.getSlaEvaluations(publishedSloTargets.map((target) => target.id))).map((row) => [row.sla_target_id, row]),
+  );
+  const publishedSlos = publishedSloTargets
+    .map((target) => {
+      const evaluation = sloEvaluationsByTarget.get(target.id);
+      // A target created minutes ago has no evaluation yet. Publishing it with
+      // nulls would render an empty row that looks like an outage.
+      if (!evaluation || evaluation.uptime_percent === null) return null;
+      return {
+        name: target.name,
+        objectivePercent: target.objective_percent,
+        uptimePercent: evaluation.uptime_percent,
+        budgetRemainingPercent: evaluation.budget_remaining_percent,
+        // A locale-neutral token rather than an English sentence. This string
+        // is rendered on a page that is translated into 24 languages, and
+        // "Rolling 30 days" would be the one part of the panel stuck in
+        // English. "30d (UTC)" and "2026-09 (UTC)" read the same everywhere and
+        // need no locale key of their own.
+        window: publicWindowLabel(target, evaluation.window_start),
+      };
+    })
+    .filter((slo) => slo !== null);
+
   let maxDays: number = parentData.isMobile
     ? GC.DEFAULT_STATUS_HISTORY_DAYS_MOBILE
     : GC.DEFAULT_STATUS_HISTORY_DAYS_DESKTOP;
@@ -142,6 +201,7 @@ export const load: PageServerLoad = async ({ params, parent }) => {
       externalUrl: monitor.external_url,
       extendedTags,
       monitorGroupMembersByTag,
+      publishedSlos,
       maxDays,
       monitorSharingOptions: {
         showShareBadgeMonitor: monitor.monitor_settings_json?.sharing_options?.showShareBadgeMonitor ?? true,

@@ -1,6 +1,7 @@
 <script lang="ts">
   import * as Item from "$lib/components/ui/item/index.js";
   import { t } from "$lib/stores/i18n";
+  import MonitorSloPanel from "$lib/components/MonitorSloPanel.svelte";
   import { formatDate } from "$lib/stores/datetime";
   import { Button } from "$lib/components/ui/button/index.js";
   import ThemePlus from "$lib/components/ThemePlus.svelte";
@@ -172,6 +173,11 @@
       {/each}
     </div>
   {/if}
+
+  <!-- F1a: published SLO attainment. Above the bar, because it is the summary
+       figure the bar is the detail of. Renders nothing when no target on this
+       component has been published. -->
+  <MonitorSloPanel slos={data.publishedSlos || []} />
 
   <!-- Calendar View (self-contained component with its own API call) -->
   <MonitorOverview

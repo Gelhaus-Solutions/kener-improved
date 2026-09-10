@@ -40,6 +40,14 @@ export const orgPermissions: Array<{ id: string; permission_name: string }> = [
   { id: "eventbus.read", permission_name: "View event bus consumers and the shadow diff" },
   { id: "eventbus.write", permission_name: "Change what event bus consumers are allowed to do" },
 
+  // SLO targets and error budgets (F1a). Their own pair rather than folding
+  // into `settings.*`: an SLO is a commitment about a service, and the people
+  // who may edit site settings are not automatically the people who may restate
+  // what the business promised. Reading is separate because the attainment
+  // dashboard is something a wider group wants to watch.
+  { id: "slo.read", permission_name: "View SLO targets, attainment and error budgets" },
+  { id: "slo.write", permission_name: "Create, update, and delete SLO targets" },
+
   // Organisations (P4)
   { id: "orgs.read", permission_name: "View organisation settings" },
   { id: "orgs.write", permission_name: "Create and update organisations" },
@@ -63,6 +71,12 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   // It writes nothing - the policy itself is still saved through `storeSiteData`,
   // which already requires `settings.write`.
   getRetentionStatus: "settings.read",
+
+  // SLO targets (F1a).
+  getSlaTargets: "slo.read",
+  getSlaOverview: "slo.read",
+  saveSlaTarget: "slo.write",
+  deleteSlaTarget: "slo.write",
 
   // Incidents (C2c). A fork-invented action on an upstream resource, so it maps
   // to the upstream permission rather than inventing one: acknowledging is
@@ -215,6 +229,11 @@ export const ORG_ROUTE_PERMISSION_MAP: Record<string, string | null> = {
   // `/monitors/`, where a static segment would shadow a monitor whose tag
   // happened to be "dependencies".
   "/(manage)/manage/app/dependencies": "monitors.read",
+
+  // SLO targets and their attainment (F1a). `slo.read` opens the screen; every
+  // button on it is separately gated on `slo.write` by its own action, the same
+  // shape the webhooks screen uses.
+  "/(manage)/manage/app/slo": "slo.read",
 
   // The postmortem editor (C1). Nested under the incident it belongs to, which
   // is safe here in a way it would not be under `/monitors/`: the segment before

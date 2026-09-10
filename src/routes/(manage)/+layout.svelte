@@ -7,6 +7,7 @@
   import { page } from "$app/state";
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
   import BlendIcon from "@lucide/svelte/icons/blend";
+  import TargetIcon from "@lucide/svelte/icons/target";
   import MailboxIcon from "@lucide/svelte/icons/mailbox";
   import AppSidebar from "./manage/app-sidebar.svelte";
   import Settings2Icon from "@lucide/svelte/icons/settings-2";
@@ -61,7 +62,10 @@
         { title: "Incident Templates", url: "/manage/app/incident-templates", icon: FileTextIcon },
         { title: "Maintenances", url: "/manage/app/maintenances", icon: ClockAlertIcon },
         { title: "Alerts", url: "/manage/app/alerts", icon: SirenIcon },
-        { title: "Monitoring Data", url: "/manage/app/monitoring-data", icon: DatabaseIcon }
+        { title: "Monitoring Data", url: "/manage/app/monitoring-data", icon: DatabaseIcon },
+        // F1a. In Operate rather than Settings: an error budget is something an
+        // operator watches during a bad week, not a preference set once.
+        { title: "SLOs", url: "/manage/app/slo", icon: TargetIcon }
       ]
     },
     {
