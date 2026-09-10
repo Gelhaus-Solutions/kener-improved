@@ -26,7 +26,7 @@ import type {
 import type { MonitorFilter } from "../db/repositories/base.js";
 import db from "../db/db.js";
 import type { PaginationInput } from "../../types/common.js";
-import GC, { getBadgeStyle, type BadgeStyle } from "../../global-constants.js";
+import GC, { getBadgeStyle, isMonitoringStatus, MONITORING_STATUSES, type BadgeStyle } from "../../global-constants.js";
 import type { MonitoringStatus } from "../../types/status.js";
 import { makeBadge } from "badge-maker";
 import { ErrorSvg } from "../../anywhere.js";
@@ -124,17 +124,117 @@ export const InsertMonitoringData = async (data: MonitoringDataInput): Promise<M
   });
 };
 
+/**
+ * The longest window one manual rewrite may cover.
+ *
+ * Ninety days, the same number and the same reasoning as C7's
+ * `MAX_BACKFILL_WINDOW_SECONDS`: at one row per minute that is ~130k rows for a
+ * single monitor, which is already more than anyone should write in one call,
+ * and a window this long almost always means somebody typed the wrong year
+ * rather than that a service was down for a quarter.
+ */
+export const MAX_MANUAL_UPDATE_WINDOW_SECONDS = 90 * 24 * 60 * 60;
+
+/**
+ * Rewrites a monitor's history over a window.
+ *
+ * **Everything below is validation this function used to do none of, and the
+ * gap was not theoretical.** It read `newStatus` and passed it straight to the
+ * database, so a caller who sent `status` instead - a reasonable guess, since
+ * every other monitoring-data shape in this codebase calls the column `status` -
+ * wrote one row per minute of the window with a **null status**, over real
+ * history, and got a 200 back. An hour of it is 61 destroyed rows.
+ *
+ * The checks live here rather than in the action, because there are two callers
+ * and only one of them was ever right. `/api/v4/monitors/<tag>/data` validates
+ * its own body thoroughly and would never reach these throws; the manage action
+ * `updateMonitoringData` passes the payload through untouched and is the path
+ * the hole was found on. One chokepoint covers both, and the API keeps its own
+ * checks so its error messages stay in its own shape.
+ *
+ * The status set is `UP`, `DOWN`, `DEGRADED`: exactly what the v4 endpoint
+ * accepts and exactly what `ModifyDataCard` offers. `MAINTENANCE` and `NO_DATA`
+ * are deliberately not writable here - a maintenance overlay is written by the
+ * maintenance system, and writing NO_DATA over real samples is a delete wearing
+ * a write's clothes, which is precisely the corruption this guard exists to
+ * stop.
+ */
+/** A validated, minute-floored manual update. What `db.updateMonitoringData` is given. */
+export interface NormalisedMonitoringDataUpdate {
+  monitor_tag: string;
+  start: number;
+  end: number;
+  newStatus: string;
+  latency: number;
+  deviation: number;
+}
+
+/**
+ * Validates and normalises a manual history rewrite, or throws saying why.
+ *
+ * Separate from `UpdateMonitoringData` so the manage action can run it as its
+ * `schema` and turn a rejection into a 400. Called from inside
+ * `UpdateMonitoringData` as well, so a caller that skips the action still cannot
+ * write a malformed row: the check is the chokepoint, and the action only
+ * decides what status code a rejection wears.
+ */
+export function normaliseMonitoringDataUpdate(data: UpdateMonitoringDataInput): NormalisedMonitoringDataUpdate {
+  const queryData = { ...data };
+
+  if (!queryData.monitor_tag || typeof queryData.monitor_tag !== "string") {
+    throw new Error("monitor_tag is required");
+  }
+
+  if (!Number.isFinite(queryData.start) || !Number.isFinite(queryData.end)) {
+    throw new Error("start and end are required and must be UTC timestamps in seconds");
+  }
+
+  const start = GetMinuteStartTimestampUTC(queryData.start);
+  const end = GetMinuteStartTimestampUTC(queryData.end);
+
+  // `end < start`, not `end <= start`. Both bounds are floored to a minute and
+  // the write is inclusive of the end, so an equal pair is a legitimate
+  // single-minute correction - which is what `ModifyDataCard` sends when
+  // somebody picks one minute, and refusing it would break the screen this fix
+  // is not allowed to break.
+  if (end < start) {
+    throw new Error("end must not be before start");
+  }
+
+  if (end - start > MAX_MANUAL_UPDATE_WINDOW_SECONDS) {
+    const days = Math.round((end - start) / 86400);
+    throw new Error(
+      `A manual update may cover at most ${MAX_MANUAL_UPDATE_WINDOW_SECONDS / 86400} days; this one covers ${days}`,
+    );
+  }
+
+  if (!isMonitoringStatus(queryData.newStatus)) {
+    throw new Error(`newStatus is required and must be one of: ${MONITORING_STATUSES.join(", ")}`);
+  }
+
+  const latency = queryData.latency ?? 0;
+  const deviation = queryData.deviation ?? 0;
+  if (!Number.isFinite(latency) || latency < 0) {
+    throw new Error("latency must be a non-negative number");
+  }
+  if (!Number.isFinite(deviation) || deviation < 0) {
+    throw new Error("deviation must be a non-negative number");
+  }
+
+  return { monitor_tag: queryData.monitor_tag, start, end, newStatus: queryData.newStatus, latency, deviation };
+}
+
 export const UpdateMonitoringData = async (data: UpdateMonitoringDataInput): Promise<unknown[]> => {
-  let queryData = { ...data };
+  const valid = normaliseMonitoringDataUpdate(data);
 
   return await db.updateMonitoringData(
-    queryData.monitor_tag,
-    GetMinuteStartTimestampUTC(queryData.start),
-    GetMinuteStartTimestampUTC(queryData.end),
-    queryData.newStatus,
-    queryData.type,
-    queryData.latency ?? 0,
-    queryData.deviation ?? 0,
+    valid.monitor_tag,
+    valid.start,
+    valid.end,
+    valid.newStatus,
+    data.type,
+    valid.latency,
+    valid.deviation,
   );
 };
 

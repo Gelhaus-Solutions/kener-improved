@@ -8,7 +8,7 @@ import type {
   BadRequestResponse,
 } from "$lib/types/api";
 import GC from "$lib/global-constants";
-import { UpdateMonitoringData } from "$lib/server/controllers/monitorsController";
+import { MAX_MANUAL_UPDATE_WINDOW_SECONDS, UpdateMonitoringData } from "$lib/server/controllers/monitorsController";
 import { GetMinuteStartTimestampUTC } from "$lib/server/tool";
 import { SetLastMonitoringValue } from "$lib/server/cache/setGet";
 import alertingQueue from "$lib/server/queues/alertingQueue";
@@ -117,6 +117,21 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
       error: {
         code: "BAD_REQUEST",
         message: "start_ts must be less than end_ts",
+      },
+    };
+    return json(errorResponse, { status: 400 });
+  }
+
+  // KENER-121 capped the window in the controller, which every caller now shares.
+  // Checked here as well so this endpoint answers with its own 400 shape rather
+  // than letting the controller's throw surface as a 500: the rest of this
+  // handler validates the body itself, and one field silently behaving
+  // differently would be the surprising part.
+  if (body.end_ts - body.start_ts > MAX_MANUAL_UPDATE_WINDOW_SECONDS) {
+    const errorResponse: BadRequestResponse = {
+      error: {
+        code: "BAD_REQUEST",
+        message: `The window may cover at most ${MAX_MANUAL_UPDATE_WINDOW_SECONDS / 86400} days`,
       },
     };
     return json(errorResponse, { status: 400 });
