@@ -29,10 +29,32 @@ const addWorker = () => {
   if (worker) return worker;
 
   worker = q.createWorker(getQueue(), async (job: Job) => {
-    const activeMonitors = (await GetMonitorsParsed({ status: "ACTIVE" })).map((monitor) => ({
-      ...monitor,
-      hash: monitor.tag + "::" + HashString(JSON.stringify(monitor)),
-    }));
+    // KENER-132: per active org, not one unscoped read.
+    //
+    // This job's payload carries no `org_id`, so `q.ts` runs it under
+    // `runAcrossOrgs` and `BaseRepository.table()` comes back unscoped. A single
+    // `GetMonitorsParsed({ status: "ACTIVE" })` therefore returned *every* org's
+    // monitors, suspended orgs included, and gave each one a scheduler - so the
+    // one lever that is meant to stop a tenant costing money stopped nothing.
+    //
+    // `getActiveOrgIds()` filters `status = 'ACTIVE'`, which is the same call the
+    // maintenance sweep below already makes. The two halves of this scheduler
+    // used to disagree about whether a suspended org exists; now they do not.
+    //
+    // Tearing the schedulers down needs no extra code: a suspended org's monitors
+    // simply stop appearing in `activeMonitors`, and the reconciliation below
+    // already removes any scheduler with no matching monitor. Re-activating the
+    // org puts them back on the next pass, for the same reason.
+    const activeMonitors: Array<MonitorRecordTyped & { hash: string }> = [];
+    for (const orgId of await db.getActiveOrgIds()) {
+      const monitors = await runWithOrg(orgId, () => GetMonitorsParsed({ status: "ACTIVE" }));
+      for (const monitor of monitors) {
+        activeMonitors.push({
+          ...monitor,
+          hash: monitor.tag + "::" + HashString(JSON.stringify(monitor)),
+        });
+      }
+    }
 
     const minNumOfWorkers = Math.max(activeMonitors.length, 1);
     //get all schedulers
@@ -77,8 +99,14 @@ const addWorker = () => {
     //
     // This transitions maintenance events between states, which emits onto the
     // bus, and an event with no owning org is not something any consumer can
-    // route. The monitor sweep above needs no such loop: each monitor record
-    // carries its own `org_id`, so the job it enqueues is already scoped.
+    // route.
+    //
+    // This loop used to be the only one here, on the reasoning that the monitor
+    // sweep above needed none because each monitor record carries its own
+    // `org_id` and so the job it enqueues is already scoped. That was true and
+    // beside the point: it answers "which org does this job run as", not "should
+    // this org's monitors run at all". KENER-132 is the second question, and the
+    // sweep above now asks it the same way this loop does.
     for (const orgId of await db.getActiveOrgIds()) {
       try {
         await runWithOrg(orgId, () => UpdateMaintenanceEventStatuses());

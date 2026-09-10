@@ -132,21 +132,37 @@ export class ReportsRepository extends BaseRepository {
   }
 
   /**
-   * Due schedules across every org.
+   * Due schedules across every org, excluding orgs that are not ACTIVE.
    *
    * Unscoped on purpose, like the rollup scheduler's org sweep: the hourly tick
    * has no org context of its own and needs to find work in all of them. The
    * *rendering* then runs inside `runWithOrg` for the row's own org, so nothing
    * downstream reads across a tenant boundary.
+   *
+   * **KENER-132: the join to `orgs` is the point of this query, not decoration.**
+   * Unscoped across orgs means unscoped across *suspended* orgs too, so without
+   * it a suspended tenant kept rendering year-long reports and emailing them to
+   * its recipients - the same failure as the monitor sweep in `appScheduler`, in
+   * a channel that reaches people outside the account.
+   *
+   * Filtered in SQL rather than after the fact, and that is what makes `limit`
+   * mean anything: a suspended org with a hundred overdue schedules would
+   * otherwise fill the batch every tick and starve every active org out of it,
+   * turning one tenant's suspension into everyone's outage.
+   *
+   * Note the two unrelated `status` columns. `rs.status` is whether the operator
+   * paused this schedule; `o.status` is whether the tenant is switched on at all.
    */
   async getDueReportSchedules(nowTs: number, limit = 100): Promise<ReportScheduleRow[]> {
     return await runAcrossOrgs(() =>
-      this.knexUnscoped(SCHEDULES)
-        .select("*")
-        .where("status", "ACTIVE")
-        .whereNotNull("next_run_at")
-        .andWhere("next_run_at", "<=", nowTs)
-        .orderBy("next_run_at", "asc")
+      this.knexUnscoped(`${SCHEDULES} as rs`)
+        .select("rs.*")
+        .join("orgs as o", "o.id", "rs.org_id")
+        .where("o.status", "ACTIVE")
+        .andWhere("rs.status", "ACTIVE")
+        .whereNotNull("rs.next_run_at")
+        .andWhere("rs.next_run_at", "<=", nowTs)
+        .orderBy("rs.next_run_at", "asc")
         .limit(limit),
     );
   }
