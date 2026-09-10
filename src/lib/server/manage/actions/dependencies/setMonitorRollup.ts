@@ -1,5 +1,6 @@
 import db from "$lib/server/db/db.js";
 import { isComponentImpact } from "$lib/server/incidents/impact.js";
+import GC from "$lib/global-constants.js";
 import { ActionError } from "../../types.js";
 import type { ActionDefinition } from "../../types.js";
 
@@ -10,6 +11,12 @@ interface Payload {
   manual_override_reason?: string | null;
   /** Hours from now until the pin lapses. Null or absent means it does not. */
   manual_override_hours?: number | null;
+  /**
+   * Whether the public page names this monitor's neighbours. Absent leaves it
+   * as it was, so a caller that only means to change the rollup mode does not
+   * have to know this field exists.
+   */
+  show_dependencies?: boolean;
 }
 
 const MODES = ["NONE", "WORST", "WEIGHTED"];
@@ -56,6 +63,7 @@ export default {
       // A reason only means anything while there is a pin to explain.
       manual_override_reason: override === null ? null : (data.manual_override_reason ?? null),
       manual_override_expires_at: expiresAt,
+      show_dependencies: data.show_dependencies === undefined ? undefined : data.show_dependencies ? GC.YES : GC.NO,
     });
     return { success: true };
   },

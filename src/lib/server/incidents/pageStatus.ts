@@ -66,6 +66,51 @@ export function statusBgClass(status: string): string {
   }
 }
 
+/**
+ * One component's status in the page's own wording, and its text colour.
+ *
+ * A *single* component, not a page, which is why these are separate from
+ * `summarise` above: that function reads proportions across several components
+ * to choose between "Major" and "Partial", and a proportion over one component
+ * is always 100%. The strings are the same ones the page header already uses, so
+ * a monitor's own page and the status page say the same words about it.
+ *
+ * `silent` is carried separately because a component that has never reported has
+ * no impact to map: `derivePageStatus` gives it OPERATIONAL so the rollup can
+ * still move it, and reporting that as healthy is exactly what ADR 0007 forbids.
+ */
+export function componentImpactSummary(impact: ComponentImpact, silent: boolean): string {
+  if (silent) return PAGE_STATUS_MESSAGES.NO_DATA;
+  switch (impact) {
+    case "MAJOR_OUTAGE":
+      return PAGE_STATUS_MESSAGES.MAJOR_OUTAGE;
+    case "PARTIAL_OUTAGE":
+      return PAGE_STATUS_MESSAGES.PARTIAL_OUTAGE;
+    case "DEGRADED_PERFORMANCE":
+      return PAGE_STATUS_MESSAGES.DEGRADED_PERFORMANCE;
+    case "UNDER_MAINTENANCE":
+      return PAGE_STATUS_MESSAGES.UNDER_MAINTENANCE;
+    default:
+      return PAGE_STATUS_MESSAGES.ALL_OPERATIONAL;
+  }
+}
+
+/** The Tailwind text class for one component, matching `clientTools.GetStatusColor`. */
+export function componentImpactTextClass(impact: ComponentImpact, silent: boolean): string {
+  if (silent) return "text-muted-foreground";
+  switch (impact) {
+    case "MAJOR_OUTAGE":
+      return "text-down";
+    case "PARTIAL_OUTAGE":
+    case "DEGRADED_PERFORMANCE":
+      return "text-degraded";
+    case "UNDER_MAINTENANCE":
+      return "text-maintenance";
+    default:
+      return "text-up";
+  }
+}
+
 export interface PageStatus {
   /** The worst component impact on the page. Exact, for the API and webhooks. */
   component_impact: ComponentImpact;

@@ -4,6 +4,7 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import { resolve } from "$app/paths";
   import clientResolver from "$lib/client/resolver.js";
   import { toast } from "svelte-sonner";
@@ -21,6 +22,7 @@
     manual_override: string | null;
     manual_override_reason: string | null;
     manual_override_expires_at: number | null;
+    show_dependencies: string;
   }
 
   interface Props {
@@ -63,6 +65,9 @@
   let overrideValue = $state("");
   let overrideReason = $state("");
   let overrideHours = $state("");
+  // A monitor with edges but no settings row is the common case, and it should
+  // show its graph. Absent therefore means yes, exactly as the column default says.
+  let showPublicly = $state(true);
 
   async function call(action: string, data: Record<string, unknown>) {
     const res = await fetch(clientResolver(resolve, "/manage/api"), {
@@ -84,6 +89,7 @@
       setting = result.setting ?? null;
       overrideValue = setting?.manual_override ?? "";
       overrideReason = setting?.manual_override_reason ?? "";
+      showPublicly = (setting?.show_dependencies ?? "YES") !== "NO";
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not load dependencies");
     } finally {
@@ -142,7 +148,8 @@
         rollup_mode: mode,
         manual_override: overrideValue || null,
         manual_override_reason: overrideReason || null,
-        manual_override_hours: overrideHours ? Number(overrideHours) : null
+        manual_override_hours: overrideHours ? Number(overrideHours) : null,
+        show_dependencies: showPublicly
       });
       await load();
       toast.success("Rollup settings saved");
@@ -189,6 +196,28 @@
             <option value={mode.value}>{mode.label}</option>
           {/each}
         </select>
+      </div>
+
+      <!-- What the public page is allowed to say about the graph -->
+      <div class="flex items-start justify-between gap-4 rounded-md border p-3">
+        <div class="flex flex-col gap-1">
+          <Label for="show-dependencies">Show these on the public page</Label>
+          <p class="text-muted-foreground text-xs">
+            Names this component's dependencies on its status page, and says which one a rolled-up status came from.
+            Turning it off hides the names only: the rollup still moves the status, because that is what the status page
+            already reports. Dependencies that are hidden or inactive monitors are never named either way.
+          </p>
+        </div>
+        <Switch
+          id="show-dependencies"
+          checked={showPublicly}
+          disabled={saving}
+          aria-label="Show dependencies on the public page"
+          onCheckedChange={(checked) => {
+            showPublicly = checked;
+            saveRollup(setting?.rollup_mode ?? "NONE");
+          }}
+        />
       </div>
 
       <!-- Children -->

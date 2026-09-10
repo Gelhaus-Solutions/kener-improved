@@ -13,9 +13,16 @@
     days: number;
     endOfDayTodayAtTz: number;
     children: Snippet;
+    /**
+     * The drawer's heading. Defaults to the group wording this component was
+     * written for, so the dependency lists can borrow the drawer without
+     * calling a monitor's dependencies its members.
+     */
+    title?: string;
   }
 
-  let { tags, days, endOfDayTodayAtTz, children }: Props = $props();
+  let { tags, days, endOfDayTodayAtTz, children, title }: Props = $props();
+  let heading = $derived(title ?? $t("Included Monitors (%count)", { count: String(tags.length) }));
   let isOpen = $state(false);
   let monitorBarPromiseByTag = $derived.by(() => {
     if (!browser || !isOpen || tags.length === 0) {
@@ -41,7 +48,7 @@
     </Drawer.Trigger>
     <Drawer.Content class="max-h-[80vh]">
       <Drawer.Header>
-        <Drawer.Title>{$t("Included Monitors (%count)", { count: String(tags.length) })}</Drawer.Title>
+        <Drawer.Title>{heading}</Drawer.Title>
       </Drawer.Header>
       <div class="scrollbar-hidden flex flex-col overflow-y-auto px-4 pb-4">
         {#if tags.length === 0}

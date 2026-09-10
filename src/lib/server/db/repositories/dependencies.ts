@@ -2,6 +2,20 @@ import { BaseRepository } from "./base.js";
 import type { DependencyEdge, RollupSetting } from "../../incidents/rollup.js";
 
 /**
+ * A whole `monitor_rollup_settings` row.
+ *
+ * Wider than `RollupSetting`, which is only what the rollup walk itself reads.
+ * The two are separate so that `getAllRollupSettings` can keep selecting four
+ * columns for a page render while the single-row read returns everything the
+ * admin screen and the public dependency view need.
+ */
+export interface RollupSettingRow extends RollupSetting {
+  manual_override_reason: string | null;
+  /** YES | NO. Whether the public page names this monitor's neighbours. */
+  show_dependencies: string;
+}
+
+/**
  * The component dependency graph and per-monitor rollup settings (C3).
  *
  * Its own repository because it is a distinct concern from monitors: these are
@@ -78,8 +92,10 @@ export class DependenciesRepository extends BaseRepository {
       .del();
   }
 
-  async getRollupSetting(tag: string): Promise<RollupSetting | undefined> {
-    return (await this.table("monitor_rollup_settings").where("monitor_tag", tag).first()) as RollupSetting | undefined;
+  async getRollupSetting(tag: string): Promise<RollupSettingRow | undefined> {
+    return (await this.table("monitor_rollup_settings").where("monitor_tag", tag).first()) as
+      | RollupSettingRow
+      | undefined;
   }
 
   async upsertRollupSetting(data: {
@@ -88,15 +104,27 @@ export class DependenciesRepository extends BaseRepository {
     manual_override: string | null;
     manual_override_reason: string | null;
     manual_override_expires_at: number | null;
+    /** Whether the public page names this monitor's neighbours. Absent leaves it alone. */
+    show_dependencies?: string;
   }): Promise<void> {
+    const { show_dependencies, ...rest } = data;
     await this.table("monitor_rollup_settings")
-      .insert({ ...data, created_at: this.knexUnscoped.fn.now(), updated_at: this.knexUnscoped.fn.now() })
+      .insert({
+        ...rest,
+        show_dependencies: show_dependencies ?? "YES",
+        created_at: this.knexUnscoped.fn.now(),
+        updated_at: this.knexUnscoped.fn.now(),
+      })
       .onConflict(["monitor_tag"])
+      // Built conditionally rather than always written, so a caller that only
+      // means to change the rollup mode cannot silently reset a monitor whose
+      // graph an operator deliberately hid.
       .merge({
         rollup_mode: data.rollup_mode,
         manual_override: data.manual_override,
         manual_override_reason: data.manual_override_reason,
         manual_override_expires_at: data.manual_override_expires_at,
+        ...(show_dependencies === undefined ? {} : { show_dependencies }),
         updated_at: this.knexUnscoped.fn.now(),
       });
   }

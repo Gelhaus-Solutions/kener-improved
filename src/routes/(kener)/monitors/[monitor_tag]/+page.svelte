@@ -119,6 +119,21 @@
           {$t(data.monitorLastStatus)}
         </p>
         <p class="text-muted-foreground text-xs">{$t("Latest Status")}</p>
+        <!--
+          Only rendered when C3's dependency rollup is what set the status above.
+          Without it the headline can differ from the monitor's own check with
+          nothing on the page to say why, which is the confusion this answers.
+        -->
+        {#if data.inheritedFrom && data.inheritedFrom.length > 0}
+          <p class="text-muted-foreground text-xs">
+            {$t("Inherited from %monitors", { monitors: data.inheritedFrom.join(", ") })}
+          </p>
+        {/if}
+        {#if data.monitorOwnStatus}
+          <p class="text-muted-foreground text-xs">
+            {$t("Own check")}: {$t(data.monitorOwnStatus)}
+          </p>
+        {/if}
       </div>
       {#if !!data.monitorLastLatency}
         <div class="flex flex-col items-end gap-1">
@@ -163,6 +178,8 @@
     monitorTag={data.monitorTag}
     maxDays={data.maxDays}
     groupTags={data.extendedTags || []}
+    dependsOnTags={data.dependsOnTags || []}
+    partOfTags={data.partOfTags || []}
     class="mb-4"
   />
 </div>

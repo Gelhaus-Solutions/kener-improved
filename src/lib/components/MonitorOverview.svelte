@@ -24,9 +24,20 @@
     class?: string;
     maxDays?: number;
     groupTags?: string[];
+    /** C3: what this monitor is built from, or needs. Already filtered to what is public. */
+    dependsOnTags?: string[];
+    /** C3: what is built from this monitor, or needs it. Already filtered to what is public. */
+    partOfTags?: string[];
   }
 
-  let { monitorTag, class: className = "", maxDays = 90, groupTags = [] }: Props = $props();
+  let {
+    monitorTag,
+    class: className = "",
+    maxDays = 90,
+    groupTags = [],
+    dependsOnTags = [],
+    partOfTags = []
+  }: Props = $props();
 
   // State
   let loading = $state(true);
@@ -270,6 +281,39 @@
         </div>
 
         <LatencyTrendChart data={latencyChartData} label={latencyChartLabel} height={128} />
+      </div>
+    {/if}
+
+    <!--
+      The dependency graph, in the same drawer the group members use. Each
+      neighbour gets a real bar rather than a status dot, because "what does
+      this depend on" and "was it healthy while this was not" are the same
+      question asked half a second apart.
+    -->
+    {#if dependsOnTags.length > 0}
+      <div class="flex justify-center">
+        <GroupMonitorPopover
+          tags={dependsOnTags}
+          days={selectedDays}
+          {endOfDayTodayAtTz}
+          title={$t("Depends on (%count)", { count: String(dependsOnTags.length) })}
+        >
+          {$t("Depends on (%count)", { count: String(dependsOnTags.length) })}
+          <ArrowUp class="size-3" />
+        </GroupMonitorPopover>
+      </div>
+    {/if}
+    {#if partOfTags.length > 0}
+      <div class="flex justify-center">
+        <GroupMonitorPopover
+          tags={partOfTags}
+          days={selectedDays}
+          {endOfDayTodayAtTz}
+          title={$t("Part of (%count)", { count: String(partOfTags.length) })}
+        >
+          {$t("Part of (%count)", { count: String(partOfTags.length) })}
+          <ArrowUp class="size-3" />
+        </GroupMonitorPopover>
       </div>
     {/if}
   </Card.Content>

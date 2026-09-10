@@ -8,10 +8,11 @@ import {
   GetPastMaintenanceEventsForMonitorList,
   GetUpcomingMaintenanceEventsForMonitorList,
 } from "$lib/server/controllers/dashboardController.js";
-import type { TimestampStatusCount } from "$lib/server/types/db";
 import { GetNowTimestampUTC, UptimeCalculator } from "$lib/server/tool";
 import GC from "$lib/global-constants.js";
-import { GetStatusColor, GetStatusSummary, ParseLatency } from "$lib/clientTools";
+import { ParseLatency } from "$lib/clientTools";
+import { componentImpactSummary, componentImpactTextClass } from "$lib/server/incidents/pageStatus";
+import { getMonitorDependencyView } from "$lib/server/incidents/dependencyView";
 import { GetMonitorsParsed } from "$lib/server/controllers/monitorsController";
 import { ResolvePublicMonitorTag } from "$lib/server/controllers/publicMonitorResolver";
 import type { GroupMonitorTypeData } from "$lib/server/types/monitor";
@@ -57,19 +58,21 @@ export const load: PageServerLoad = async ({ params, parent }) => {
       : Promise.resolve([]),
   ]);
 
-  //last known status
+  const nowSeconds = GetNowTimestampUTC();
+
+  // The timestamp and the latency still come from the monitor's own last sample:
+  // both are facts about a check that ran, and neither is something a declared
+  // incident or a dependency could sensibly supply.
   const lastStatus = await db.getLatestMonitoringData(monitor.tag);
-  //use uptime calculator tool to parse
-  let item: TimestampStatusCount = {
-    ts: lastStatus ? lastStatus.timestamp : GetNowTimestampUTC(),
-    countOfUp: lastStatus && lastStatus.status === GC.UP ? 1 : 0,
-    countOfDown: lastStatus && lastStatus.status === GC.DOWN ? 1 : 0,
-    countOfDegraded: lastStatus && lastStatus.status === GC.DEGRADED ? 1 : 0,
-    countOfMaintenance: lastStatus && lastStatus.status === GC.MAINTENANCE ? 1 : 0,
-    avgLatency: lastStatus && lastStatus.latency ? lastStatus.latency : 0,
-    maxLatency: lastStatus && lastStatus.latency ? lastStatus.latency : 0,
-    minLatency: lastStatus && lastStatus.latency ? lastStatus.latency : 0,
-  };
+  const lastSampleTimestamp = lastStatus ? lastStatus.timestamp : nowSeconds;
+  const lastSampleLatency = lastStatus?.latency ?? 0;
+
+  // The status, however, is derived exactly as the status page derives it:
+  // declared incidents and maintenances first, then C3's dependency rollup.
+  // Until now this page collapsed its own latest sample instead, so a component
+  // the graph had moved read one way on the status page and another on its own -
+  // and there was no way for a visitor to find out which was true.
+  const dependencyView = await getMonitorDependencyView(monitor.tag, nowSeconds);
 
   //get status summary
   let extendedTags: string[] = [];
@@ -107,10 +110,16 @@ export const load: PageServerLoad = async ({ params, parent }) => {
       monitorImage: monitor.image,
       monitorDescription: monitor.description,
       monitorId: monitor.id,
-      monitorLastStatus: GetStatusSummary(item),
-      textClass: GetStatusColor(item),
-      monitorLastStatusTimestamp: item.ts,
-      monitorLastLatency: ParseLatency(item.avgLatency),
+      monitorLastStatus: componentImpactSummary(dependencyView.impact, dependencyView.silent),
+      textClass: componentImpactTextClass(dependencyView.impact, dependencyView.silent),
+      // Only when the graph is what moved the headline. Any other time the two
+      // agree, and a second status line saying the same thing is noise.
+      monitorOwnStatus: dependencyView.source === "rollup" ? dependencyView.ownStatus : null,
+      inheritedFrom: dependencyView.inheritedFrom,
+      dependsOnTags: dependencyView.dependsOn.map((node) => node.monitor_tag),
+      partOfTags: dependencyView.partOf.map((node) => node.monitor_tag),
+      monitorLastStatusTimestamp: lastSampleTimestamp,
+      monitorLastLatency: ParseLatency(lastSampleLatency),
       ongoingIncidents,
       ongoingMaintenances,
       upcomingMaintenances,
