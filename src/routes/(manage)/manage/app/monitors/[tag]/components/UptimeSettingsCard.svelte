@@ -79,10 +79,24 @@
 
     savingUptimeSettings = true;
     try {
+      // Merge with the existing monitor_settings_json rather than replacing it.
+      // This card used to serialise only its own two fields, so saving an uptime
+      // formula silently wiped status-history days, sharing options and the
+      // latency threshold. `StatusHistoryDaysCard` has always merged; this one
+      // was simply never given the same treatment.
+      let existingSettings: Record<string, unknown> = {};
+      if (monitor.monitor_settings_json) {
+        try {
+          existingSettings = JSON.parse(monitor.monitor_settings_json);
+        } catch {
+          existingSettings = {};
+        }
+      }
+
       const payload = {
         ...monitor,
         type_data: JSON.stringify(typeData),
-        monitor_settings_json: JSON.stringify(uptimeSettings)
+        monitor_settings_json: JSON.stringify({ ...existingSettings, ...uptimeSettings })
       };
 
       const response = await fetch(clientResolver(resolve, "/manage/api"), {

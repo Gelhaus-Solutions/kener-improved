@@ -24,6 +24,7 @@
   import GeneralSettingsCard from "./components/GeneralSettingsCard.svelte";
   import MonitorTypeCard from "./components/MonitorTypeCard.svelte";
   import UptimeSettingsCard from "./components/UptimeSettingsCard.svelte";
+  import LatencyThresholdCard from "./components/LatencyThresholdCard.svelte";
   import PageVisibilityCard from "./components/PageVisibilityCard.svelte";
   import MonitorDependenciesCard from "$lib/components/MonitorDependenciesCard.svelte";
   import ModifyDataCard from "./components/ModifyDataCard.svelte";
@@ -363,6 +364,7 @@
           <Accordion.Content class="flex flex-col gap-4 text-balance">
             <!-- Uptime Calculation Card -->
             <UptimeSettingsCard {monitor} {typeData} bind:uptimeSettings />
+            <LatencyThresholdCard bind:monitor {typeData} />
           </Accordion.Content>
         </Accordion.Item>
       {/if}

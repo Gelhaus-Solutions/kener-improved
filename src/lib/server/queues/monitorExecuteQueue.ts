@@ -1,6 +1,7 @@
 import type { MonitoringResult, MonitoringResultTS } from "../types/monitor.js";
 import { Queue, Worker, Job, type JobsOptions } from "bullmq";
 import q from "./q.js";
+import { applyLatencyEscalation } from "../services/latencyThreshold.js";
 import type { MonitorRecordTyped } from "../types/db.js";
 import Service, { type MonitorWithType } from "../services/service.js";
 import { GetMinuteStartNowTimestampUTC } from "../tool.js";
@@ -125,6 +126,14 @@ const addWorker = () => {
     const serviceClient = new Service(monitor as MonitorWithType);
 
     const exeResult = await serviceClient.execute(ts);
+
+    // B5. Before `raw_status` is assigned below, deliberately: escalating the
+    // *observed* status is what lets the confirmation threshold damp a latency
+    // flip like any other, leaves the overlay merge untouched, and keeps the
+    // freeze gate working. See services/latencyThreshold.ts.
+    if (exeResult) {
+      await applyLatencyEscalation(monitor.tag, monitor.monitor_settings_json, exeResult, ts);
+    }
 
     // Fetch overlays AFTER the check runs so a maintenance/incident that starts mid-check is still
     // detected, and key them by the job's `ts` so the freeze gate (incidentData[ts]) is

@@ -196,6 +196,22 @@ export interface MonitorSharingOptions {
 export interface MonitorSettings {
   uptime_formula_numerator?: string;
   uptime_formula_denominator?: string;
+  /**
+   * B5. Latency-based DEGRADED. `mode` decides how this relates to the
+   * instance-wide default in `site_data.latencyThresholdDefault`: CUSTOM uses
+   * the values here, OFF disables escalation for this monitor whatever the
+   * default says, and INHERIT (also what an absent setting means) uses it.
+   * See services/latencyThreshold.ts.
+   */
+  latency_threshold?: {
+    mode?: "INHERIT" | "OFF" | "CUSTOM";
+    enabled?: boolean;
+    metric?: "p50" | "p90" | "p95" | "p99" | "avg";
+    window_minutes?: number;
+    min_samples?: number;
+    degraded_ms?: number;
+    down_ms?: number | null;
+  };
   monitor_status_history_days?: {
     desktop: number;
     mobile: number;

@@ -92,6 +92,22 @@
   let dataRetentionPolicy = $state<DataRetentionPolicy>(page.data.seedSiteData.dataRetentionPolicy);
 
   /**
+   * B5. The instance-wide latency rule. A monitor uses it unless its own setting
+   * says CUSTOM or OFF, so this is the value most monitors actually run under.
+   * Ships disabled: turning latency into status changes what the public page
+   * says, and an upgrade must not start doing that on its own.
+   */
+  let latencyThresholdDefault = $state({
+    enabled: false,
+    metric: "p95",
+    window_minutes: 5,
+    min_samples: 3,
+    degraded_ms: 1000,
+    down_ms: "" as string
+  });
+  let savingLatencyThresholdDefault = $state(false);
+
+  /**
    * What retention would delete tonight, and how long a bar can still be served.
    *
    * Loaded separately from the policy because it is not configuration - it is the
@@ -235,6 +251,17 @@
           globalPageVisibilitySettings = structuredClone(defaultGlobalPageVisibilitySettings);
         }
 
+        if (data.latencyThresholdDefault) {
+          const d = data.latencyThresholdDefault as Record<string, unknown>;
+          latencyThresholdDefault = {
+            enabled: d.enabled === true,
+            metric: typeof d.metric === "string" ? d.metric : "p95",
+            window_minutes: Number(d.window_minutes ?? 5),
+            min_samples: Number(d.min_samples ?? 3),
+            degraded_ms: Number(d.degraded_ms ?? 1000),
+            down_ms: d.down_ms == null ? "" : String(d.down_ms)
+          };
+        }
         dataRetentionPolicy = {
           enabled: data.dataRetentionPolicy?.enabled ?? true,
           retentionDays: data.dataRetentionPolicy?.retentionDays ?? 90,
@@ -513,6 +540,54 @@
   const formatDays = (days: number) => (days === 0 ? "forever" : `${days} days`);
   const formatCutoff = (cutoff: number | null) =>
     cutoff === null ? "never" : new Date(cutoff * 1000).toISOString().slice(0, 10);
+
+  async function saveLatencyThresholdDefault() {
+    if (latencyThresholdDefault.enabled) {
+      if (!(Number(latencyThresholdDefault.degraded_ms) > 0)) {
+        toast.error("The degraded threshold must be greater than 0ms");
+        return;
+      }
+      if (
+        latencyThresholdDefault.down_ms !== "" &&
+        Number(latencyThresholdDefault.down_ms) <= Number(latencyThresholdDefault.degraded_ms)
+      ) {
+        toast.error("The down threshold must be higher than the degraded threshold");
+        return;
+      }
+    }
+
+    savingLatencyThresholdDefault = true;
+    try {
+      const payload = {
+        enabled: latencyThresholdDefault.enabled,
+        metric: latencyThresholdDefault.metric,
+        window_minutes: Math.max(1, Number(latencyThresholdDefault.window_minutes) || 5),
+        min_samples: Math.max(1, Number(latencyThresholdDefault.min_samples) || 3),
+        degraded_ms: Math.max(1, Number(latencyThresholdDefault.degraded_ms) || 1000),
+        // Empty means "latency can never make a monitor down", which is a real
+        // choice and not the same as zero.
+        down_ms: latencyThresholdDefault.down_ms === "" ? null : Number(latencyThresholdDefault.down_ms)
+      };
+      const response = await fetch(clientResolver(resolve, "/manage/api"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "storeSiteData",
+          data: { latencyThresholdDefault: JSON.stringify(payload) }
+        })
+      });
+      const result = await response.json();
+      if (result.error) toast.error(result.error);
+      // The check path caches this for ten seconds per process, so a change takes
+      // effect within that rather than instantly. Said here so nobody watches a
+      // monitor for thirty seconds wondering whether the save worked.
+      else toast.success("Latency threshold default saved. It applies within ten seconds.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save the latency threshold default");
+    } finally {
+      savingLatencyThresholdDefault = false;
+    }
+  }
 
   async function saveDataRetentionPolicy() {
     savingDataRetentionPolicy = true;
@@ -1307,6 +1382,103 @@
             Saving...
           {:else}
             <SaveIcon class="h-4 w-4" />
+            Save
+          {/if}
+        </Button>
+      </Card.Footer>
+    </Card.Root>
+
+    <!-- Latency Threshold Default Card (B5) -->
+    <Card.Root>
+      <Card.Header>
+        <Card.Title>Latency Threshold Default</Card.Title>
+        <Card.Description>
+          Report a monitor as degraded when it is slow, even while it is still answering. This is the default for every
+          monitor; a monitor can override it or opt out on its own page.
+        </Card.Description>
+      </Card.Header>
+      <Card.Content class="space-y-6">
+        <div class="flex items-center justify-between">
+          <div class="space-y-0.5">
+            <Label>Enable by default</Label>
+            <p class="text-muted-foreground text-xs">
+              Applies to every monitor set to "Use the site default", which is the default for monitors that have never
+              been configured.
+            </p>
+          </div>
+          <Switch bind:checked={latencyThresholdDefault.enabled} />
+        </div>
+
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div class="space-y-2">
+            <Label for="ltd-metric">Metric</Label>
+            <select
+              id="ltd-metric"
+              class="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
+              bind:value={latencyThresholdDefault.metric}
+              disabled={!latencyThresholdDefault.enabled}
+            >
+              {#each ["p50", "p90", "p95", "p99", "avg"] as metric (metric)}
+                <option value={metric}>{metric}</option>
+              {/each}
+            </select>
+          </div>
+          <div class="space-y-2">
+            <Label for="ltd-window">Window (minutes)</Label>
+            <Input
+              id="ltd-window"
+              type="number"
+              min="1"
+              bind:value={latencyThresholdDefault.window_minutes}
+              disabled={!latencyThresholdDefault.enabled}
+            />
+          </div>
+          <div class="space-y-2">
+            <Label for="ltd-min">Minimum samples</Label>
+            <Input
+              id="ltd-min"
+              type="number"
+              min="1"
+              bind:value={latencyThresholdDefault.min_samples}
+              disabled={!latencyThresholdDefault.enabled}
+            />
+            <p class="text-muted-foreground text-xs">
+              Below this many usable measurements in the window, no verdict is reached at all.
+            </p>
+          </div>
+          <div class="space-y-2">
+            <Label for="ltd-degraded">Degraded above (ms)</Label>
+            <Input
+              id="ltd-degraded"
+              type="number"
+              min="1"
+              bind:value={latencyThresholdDefault.degraded_ms}
+              disabled={!latencyThresholdDefault.enabled}
+            />
+          </div>
+          <div class="space-y-2 sm:col-span-2">
+            <Label for="ltd-down">Down above (ms)</Label>
+            <Input
+              id="ltd-down"
+              type="number"
+              min="1"
+              placeholder="Leave empty"
+              bind:value={latencyThresholdDefault.down_ms}
+              disabled={!latencyThresholdDefault.enabled}
+            />
+            <p class="text-muted-foreground text-xs">
+              Optional. Leave empty and latency can never make a monitor down, only degraded. Timed-out and errored
+              checks are never measured either way.
+            </p>
+          </div>
+        </div>
+      </Card.Content>
+      <Card.Footer class="flex justify-end">
+        <Button onclick={saveLatencyThresholdDefault} disabled={savingLatencyThresholdDefault} class="cursor-pointer">
+          {#if savingLatencyThresholdDefault}
+            <Loader class="h-4 w-4 animate-spin" />
+            Saving...
+          {:else}
             Save
           {/if}
         </Button>
