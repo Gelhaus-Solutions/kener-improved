@@ -3,6 +3,7 @@
   "code": "ru",
   "mappings": {
     "%latency %metric latency": "%latency %metric latency",
+    "Add": "Добавить",
     "Affected Monitors (%count)": "Затронутые мониторы (%count)",
     "All Systems Operational": "Все системы работают",
     "Average Latency": "Средняя задержка",
@@ -10,7 +11,9 @@
     "Back": "Назад",
     "Badges": "Значки",
     "CANCELLED": "ОТМЕНЕНО",
+    "Choose a component": "Выберите компонент",
     "COMPLETED": "ЗАВЕРШЕНО",
+    "Component": "Компонент",
     "Continue": "Продолжить",
     "Copied": "Скопировано",
     "Current": "Текущие",
@@ -32,6 +35,8 @@
     "End Time": "Время окончания",
     "Enter the verification code sent to your email.": "Введите код подтверждения, отправленный на вашу почту.",
     "Events": "События",
+    "Everything": "Всё",
+    "Everything on %page": "Всё на %page",
     "Failed to load data": "Не удалось загрузить данные",
     "Failed to load latency data": "Не удалось загрузить данные о задержке",
     "Failed to load status data for this day": "Не удалось загрузить данные о статусе за этот день",
@@ -90,8 +95,10 @@
     "Notifications": "Уведомления",
     "One-time": "Одноразовое",
     "Ongoing": "Текущие",
+    "Only what I choose": "Только выбранное мной",
     "Operational": "Работает",
     "Own check": "Собственная проверка",
+    "Page": "Страница",
     "Part of (%count)": "Часть (%count)",
     "Partial Degraded Performance": "Частичное снижение производительности",
     "Partial System Outage": "Частичный сбой системы",
@@ -104,6 +111,7 @@
     "Read more": "Читать далее",
     "READY": "ГОТОВО",
     "Recurring": "Повторяющийся",
+    "Remove": "Удалить",
     "RESOLVED": "RESOLVED",
     "RSS feed": "RSS feed",
     "SCHEDULED": "ЗАПЛАНИРОВАНО",
@@ -121,6 +129,7 @@
     "Status history and latency trend": "История статусов и тренд задержки",
     "Subscribe": "Подписаться",
     "Subscribe to Updates": "Подписаться на обновления",
+    "Switching to everything discards the list above.": "Переход на «Всё» удалит список выше.",
     "There are no incidents or maintenances scheduled for this month.": "На этот месяц не запланировано инцидентов или обслуживания.",
     "There are no ongoing incidents or maintenance events.": "Нет текущих инцидентов или работ по обслуживанию.",
     "Total Incidents": "Total Incidents",
@@ -138,6 +147,8 @@
     "Verification failed": "Проверка не удалась",
     "Verify": "Verify",
     "Verifying": "Verifying",
-    "We sent a 6-digit code to": "Мы отправили 6-значный код на"
+    "We sent a 6-digit code to": "Мы отправили 6-значный код на",
+    "What to send": "Что отправлять",
+    "You will only hear about these.": "Вы будете получать уведомления только о них."
   }
 }

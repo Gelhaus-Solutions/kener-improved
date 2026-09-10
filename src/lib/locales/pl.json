@@ -2,6 +2,7 @@
   "name": "Polski",
   "mappings": {
     "%latency %metric latency": "%latency %metric opóźnienie",
+    "Add": "Dodaj",
     "Affected Monitors (%count)": "Monitory, których dotyczy problem (%count)",
     "All Systems Operational": "Wszystkie systemy działają",
     "Average Latency": "Średnie opóźnienie",
@@ -9,7 +10,9 @@
     "Back": "Z powrotem",
     "Badges": "Odznaki",
     "CANCELLED": "ANULOWANE",
+    "Choose a component": "Wybierz komponent",
     "COMPLETED": "ZAKOŃCZONE",
+    "Component": "Komponent",
     "Continue": "Kontynuować",
     "Copied": "Skopiowano",
     "Current": "Bieżące",
@@ -31,6 +34,8 @@
     "End Time": "Czas zakończenia",
     "Enter the verification code sent to your email.": "Wpisz kod weryfikacyjny przesłany na Twój adres e-mail.",
     "Events": "Wydarzenia",
+    "Everything": "Wszystko",
+    "Everything on %page": "Wszystko na %page",
     "Failed to load data": "Nie udało się załadować danych",
     "Failed to load latency data": "Nie udało się wczytać danych o opóźnieniu",
     "Failed to load status data for this day": "Nie udało się załadować danych o stanie na ten dzień",
@@ -89,8 +94,10 @@
     "Notifications": "Powiadomienia",
     "One-time": "Jednorazowy",
     "Ongoing": "Bieżący",
+    "Only what I choose": "Tylko to, co wybiorę",
     "Operational": "Operacyjny",
     "Own check": "Własne sprawdzenie",
+    "Page": "Strona",
     "Part of (%count)": "Część (%count)",
     "Partial Degraded Performance": "Częściowo obniżona wydajność",
     "Partial System Outage": "Częściowa awaria systemu",
@@ -103,6 +110,7 @@
     "Read more": "Przeczytaj więcej",
     "READY": "GOTOWE",
     "Recurring": "Cykliczne",
+    "Remove": "Usuń",
     "RESOLVED": "RESOLVED",
     "RSS feed": "RSS feed",
     "SCHEDULED": "ZAPLANOWANE",
@@ -120,6 +128,7 @@
     "Status history and latency trend": "Historia stanu i trend opóźnień",
     "Subscribe": "Subskrybować",
     "Subscribe to Updates": "Subskrybuj aktualizacje",
+    "Switching to everything discards the list above.": "Przełączenie na wszystko usuwa powyższą listę.",
     "There are no incidents or maintenances scheduled for this month.": "Na ten miesiąc nie zaplanowano żadnych incydentów ani konserwacji.",
     "There are no ongoing incidents or maintenance events.": "Brak trwających incydentów ani prac konserwacyjnych.",
     "Total Incidents": "Całkowita liczba incydentów",
@@ -137,6 +146,8 @@
     "Verification failed": "Weryfikacja nie powiodła się",
     "Verify": "Zweryfikować",
     "Verifying": "Weryfikacja",
-    "We sent a 6-digit code to": "Wysłaliśmy 6-cyfrowy kod na adres"
+    "We sent a 6-digit code to": "Wysłaliśmy 6-cyfrowy kod na adres",
+    "What to send": "Co wysyłać",
+    "You will only hear about these.": "Otrzymasz powiadomienia tylko o tych."
   }
 }

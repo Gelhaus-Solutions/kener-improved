@@ -560,6 +560,8 @@ class DbImpl {
   getPageIdsForMonitorTags!: SubscriptionSystemRepository["getPageIdsForMonitorTags"];
   upsertScopedSubscription!: SubscriptionSystemRepository["upsertScopedSubscription"];
   getScopedSubscriptionsForMethod!: SubscriptionSystemRepository["getScopedSubscriptionsForMethod"];
+  deleteScopedSubscription!: SubscriptionSystemRepository["deleteScopedSubscription"];
+  deleteNarrowScopedSubscriptions!: SubscriptionSystemRepository["deleteNarrowScopedSubscriptions"];
   getSubscribersSummary!: SubscriptionSystemRepository["getSubscribersSummary"];
   getMethodsCountByType!: SubscriptionSystemRepository["getMethodsCountByType"];
   getSubscribersByMethodTypeV2!: SubscriptionSystemRepository["getSubscribersByMethodTypeV2"];
@@ -1113,6 +1115,10 @@ class DbImpl {
     this.getPageIdsForMonitorTags = this.subscriptionSystem.getPageIdsForMonitorTags.bind(this.subscriptionSystem);
     this.upsertScopedSubscription = this.subscriptionSystem.upsertScopedSubscription.bind(this.subscriptionSystem);
     this.getScopedSubscriptionsForMethod = this.subscriptionSystem.getScopedSubscriptionsForMethod.bind(
+      this.subscriptionSystem,
+    );
+    this.deleteScopedSubscription = this.subscriptionSystem.deleteScopedSubscription.bind(this.subscriptionSystem);
+    this.deleteNarrowScopedSubscriptions = this.subscriptionSystem.deleteNarrowScopedSubscriptions.bind(
       this.subscriptionSystem,
     );
     this.getSubscribersSummary = this.subscriptionSystem.getSubscribersSummary.bind(this.subscriptionSystem);

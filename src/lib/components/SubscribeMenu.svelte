@@ -16,6 +16,9 @@
   import Bell from "@lucide/svelte/icons/bell";
   import AlertTriangle from "@lucide/svelte/icons/alert-triangle";
   import Wrench from "@lucide/svelte/icons/wrench";
+  import Plus from "@lucide/svelte/icons/plus";
+  import X from "@lucide/svelte/icons/x";
+  import { page } from "$app/state";
   import { t } from "$lib/stores/i18n";
   import trackEvent from "$lib/beacon";
   import ICONS from "$lib/icons";
@@ -62,6 +65,65 @@
     maintenances: false
   });
 
+  // --- scoping (E1b) -------------------------------------------------------
+  //
+  // Scopes are OR'd together by the delivery query and every subscriber holds an
+  // ALL row, so a component subscription means nothing while that row is live.
+  // "Everything" versus "Only what I choose" is therefore not a display choice:
+  // it is whether the ALL row is active, and it is what makes the pickers do
+  // anything at all.
+  interface Scope {
+    event_class: string;
+    scope_type: string;
+    scope_id: string;
+    label: string;
+  }
+  interface ScopeOptions {
+    page: { id: number; title: string } | null;
+    components: Array<{ tag: string; name: string }>;
+  }
+
+  let scopes = $state<Scope[]>([]);
+  let scopeMode = $state<{ incidents: "ALL" | "NARROW"; maintenances: "ALL" | "NARROW" }>({
+    incidents: "ALL",
+    maintenances: "ALL"
+  });
+  let scopeOptions = $state<ScopeOptions>({ page: null, components: [] });
+  let scopeBusy = $state(false);
+  let componentToAdd = $state("");
+
+  /**
+   * The page path the dialog is standing on.
+   *
+   * Read from the router rather than threaded down as a prop, which is what let
+   * this ship without touching every call site: the dialog already knows its own
+   * URL. `undefined` for a route that is not a status page - an events or
+   * maintenance page - and the server answers that with no pickers rather than an
+   * error, so those screens keep working exactly as before. The home page is
+   * stored with an empty path, hence the empty string rather than undefined.
+   */
+  const currentPagePath = $derived.by(() => {
+    const params = page.params;
+    if (typeof params.page_path === "string") return params.page_path;
+    if (params.monitor_tag !== undefined) return undefined;
+    // The status page root. `page.route.id` distinguishes it from every other
+    // route that renders this menu without a page of its own.
+    return page.route.id === "/(kener)" ? "" : undefined;
+  });
+
+  const incidentScopes = $derived(scopes.filter((s) => s.event_class === "incidents"));
+
+  /** Components on this page the subscriber has not already picked. */
+  const addableComponents = $derived(
+    scopeOptions.components.filter(
+      (c) => !incidentScopes.some((s) => s.scope_type === "COMPONENT" && s.scope_id === c.tag)
+    )
+  );
+  const pageAlreadyScoped = $derived(
+    scopeOptions.page !== null &&
+      incidentScopes.some((s) => s.scope_type === "PAGE" && s.scope_id === String(scopeOptions.page?.id))
+  );
+
   // Check token on mount
   onMount(() => {
     checkExistingToken();
@@ -86,7 +148,7 @@
       const response = await fetch(clientResolver(resolve, "/dashboard-apis/subscription"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "getPreferences", token })
+        body: JSON.stringify({ action: "getPreferences", token, page_path: currentPagePath })
       });
 
       if (!response.ok) {
@@ -102,6 +164,10 @@
       minSeverity = data.minSeverity || "ANY";
       maintenancesEnabled = data.subscriptions?.maintenances || false;
       availableSubscriptions = data.availableSubscriptions || { incidents: false, maintenances: false };
+      scopes = data.scopes ?? [];
+      scopeMode = data.scopeMode ?? { incidents: "ALL", maintenances: "ALL" };
+      scopeOptions = data.scopeOptions ?? { page: null, components: [] };
+      componentToAdd = "";
       currentView = "preferences";
     } catch (err) {
       localStorage.removeItem(STORAGE_KEY);
@@ -240,6 +306,72 @@
         maintenancesEnabled = !value;
       }
     }
+  }
+
+  /** One call, one reload: the server owns the invariants, the dialog re-reads them. */
+  async function scopeCall(payload: Record<string, unknown>): Promise<boolean> {
+    const token = localStorage.getItem(STORAGE_KEY);
+    if (!token) {
+      currentView = "login";
+      return false;
+    }
+    scopeBusy = true;
+    errorMessage = "";
+    try {
+      const response = await fetch(clientResolver(resolve, "/dashboard-apis/subscription"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...payload, token })
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        errorMessage = data?.message || $t("Failed to update preference");
+        return false;
+      }
+      // Re-read rather than patch local state. Several of these operations move
+      // more than they name - removing the last scope widens back to everything -
+      // and guessing which would be a second implementation of the server's rules.
+      await checkExistingToken();
+      return true;
+    } catch (err) {
+      errorMessage = $t("Network error. Please try again.");
+      return false;
+    } finally {
+      scopeBusy = false;
+    }
+  }
+
+  /** Adds a scope. The first one added also narrows, so the pick takes effect. */
+  async function addScope(scopeType: "PAGE" | "COMPONENT", scopeId: string) {
+    const wasEverything = scopeMode.incidents === "ALL";
+    const added = await scopeCall({
+      action: "updateScope",
+      event_class: "incidents",
+      scope_type: scopeType,
+      scope_id: scopeId
+    });
+    if (!added) return;
+    // Adding a scope while still on "everything" would change nothing at all,
+    // because the two are OR'd. Narrowing is the point of having added it.
+    if (wasEverything) {
+      await scopeCall({ action: "setScopeMode", event_class: "incidents", mode: "NARROW" });
+    }
+    trackEvent("subscribe_scope_added", { source: "subscribe_menu", scope_type: scopeType });
+  }
+
+  async function removeScope(scope: Scope) {
+    await scopeCall({
+      action: "removeScope",
+      event_class: scope.event_class,
+      scope_type: scope.scope_type,
+      scope_id: scope.scope_id
+    });
+    trackEvent("subscribe_scope_removed", { source: "subscribe_menu", scope_type: scope.scope_type });
+  }
+
+  async function setScopeMode(mode: "ALL" | "NARROW") {
+    if (mode === scopeMode.incidents) return;
+    await scopeCall({ action: "setScopeMode", event_class: "incidents", mode });
   }
 
   /** Narrows incident mail to a severity floor. */
@@ -499,6 +631,98 @@
                     {$t("Scheduled maintenance is not affected by this setting.")}
                   </p>
                 </div>
+
+                <!--
+                  Scoping (E1b). Only offered where there is something to scope
+                  to: on an events or maintenance page the server sends no
+                  options and this whole block stays out of the way, leaving the
+                  dialog exactly as it was.
+                -->
+                {#if scopeOptions.page || incidentScopes.length > 0}
+                  <div class="flex flex-col gap-2 pl-8">
+                    <Label class="text-xs font-medium">{$t("What to send")}</Label>
+                    <select
+                      class="border-input bg-background h-9 rounded-md border px-2 text-sm"
+                      value={scopeMode.incidents}
+                      disabled={scopeBusy}
+                      onchange={(e) => setScopeMode(e.currentTarget.value as "ALL" | "NARROW")}
+                    >
+                      <option value="ALL">{$t("Everything")}</option>
+                      <option value="NARROW" disabled={incidentScopes.length === 0}>
+                        {$t("Only what I choose")}
+                      </option>
+                    </select>
+
+                    {#if incidentScopes.length > 0}
+                      <ul class="flex flex-col gap-1">
+                        {#each incidentScopes as scope (scope.scope_type + scope.scope_id)}
+                          <li class="flex items-center justify-between rounded-md border px-2 py-1">
+                            <span class="text-sm">
+                              {scope.label}
+                              <span class="text-muted-foreground text-xs">
+                                {scope.scope_type === "PAGE" ? $t("Page") : $t("Component")}
+                              </span>
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              class="rounded-btn"
+                              disabled={scopeBusy}
+                              aria-label={$t("Remove")}
+                              onclick={() => removeScope(scope)}
+                            >
+                              <X class="size-4" />
+                            </Button>
+                          </li>
+                        {/each}
+                      </ul>
+                    {/if}
+
+                    {#if scopeOptions.page && !pageAlreadyScoped}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        class="rounded-btn justify-start"
+                        disabled={scopeBusy}
+                        onclick={() => addScope("PAGE", String(scopeOptions.page?.id))}
+                      >
+                        <Plus class="size-4" />
+                        {$t("Everything on %page", { page: scopeOptions.page.title })}
+                      </Button>
+                    {/if}
+
+                    {#if addableComponents.length > 0}
+                      <div class="flex items-end gap-2">
+                        <select
+                          class="border-input bg-background h-9 flex-1 rounded-md border px-2 text-sm"
+                          bind:value={componentToAdd}
+                          disabled={scopeBusy}
+                        >
+                          <option value="">{$t("Choose a component")}</option>
+                          {#each addableComponents as component (component.tag)}
+                            <option value={component.tag}>{component.name}</option>
+                          {/each}
+                        </select>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          class="rounded-btn"
+                          disabled={scopeBusy || !componentToAdd}
+                          onclick={() => addScope("COMPONENT", componentToAdd)}
+                        >
+                          <Plus class="size-4" />
+                          {$t("Add")}
+                        </Button>
+                      </div>
+                    {/if}
+
+                    <p class="text-muted-foreground text-xs">
+                      {scopeMode.incidents === "ALL"
+                        ? $t("Switching to everything discards the list above.")
+                        : $t("You will only hear about these.")}
+                    </p>
+                  </div>
+                {/if}
               {/if}
             {/if}
 

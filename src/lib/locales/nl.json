@@ -2,6 +2,7 @@
   "name": "Nederlands",
   "mappings": {
     "%latency %metric latency": "%latency %metric latentie",
+    "Add": "Toevoegen",
     "Affected Monitors (%count)": "Betrokken monitoren (%count)",
     "All Systems Operational": "Alle systemen operationeel",
     "Average Latency": "Gemiddelde latentie",
@@ -9,7 +10,9 @@
     "Back": "Rug",
     "Badges": "Insignes",
     "CANCELLED": "GEANNULEERD",
+    "Choose a component": "Kies een component",
     "COMPLETED": "VOLTOOID",
+    "Component": "Component",
     "Continue": "Doorgaan",
     "Copied": "Gekopieerd",
     "Current": "Huidig",
@@ -31,6 +34,8 @@
     "End Time": "Eindtijd",
     "Enter the verification code sent to your email.": "Voer de verificatiecode in die naar uw e-mail is verzonden.",
     "Events": "Evenementen",
+    "Everything": "Alles",
+    "Everything on %page": "Alles op %page",
     "Failed to load data": "Kan gegevens niet laden",
     "Failed to load latency data": "Kan latentiegegevens niet laden",
     "Failed to load status data for this day": "Kan statusgegevens voor deze dag niet laden",
@@ -89,8 +94,10 @@
     "Notifications": "Meldingen",
     "One-time": "Eenmalig",
     "Ongoing": "Lopend",
+    "Only what I choose": "Alleen wat ik kies",
     "Operational": "Operationeel",
     "Own check": "Eigen controle",
+    "Page": "Pagina",
     "Part of (%count)": "Onderdeel van (%count)",
     "Partial Degraded Performance": "Gedeeltelijk verminderde prestaties",
     "Partial System Outage": "Gedeeltelijke systeemstoring",
@@ -103,6 +110,7 @@
     "Read more": "Lees meer",
     "READY": "GEREED",
     "Recurring": "Terugkerend",
+    "Remove": "Verwijderen",
     "RESOLVED": "RESOLVED",
     "RSS feed": "RSS feed",
     "SCHEDULED": "GEPLAND",
@@ -120,6 +128,7 @@
     "Status history and latency trend": "Statusgeschiedenis en latentietrend",
     "Subscribe": "Abonneren",
     "Subscribe to Updates": "Abonneer u op updates",
+    "Switching to everything discards the list above.": "Overschakelen naar alles verwijdert de lijst hierboven.",
     "There are no incidents or maintenances scheduled for this month.": "Er staan ​​deze maand geen incidenten of onderhoud gepland.",
     "There are no ongoing incidents or maintenance events.": "Er zijn geen lopende incidenten of onderhoudsgebeurtenissen.",
     "Total Incidents": "Totaal aantal incidenten",
@@ -137,6 +146,8 @@
     "Verification failed": "Verificatie mislukt",
     "Verify": "Verifiëren",
     "Verifying": "Verifiëren",
-    "We sent a 6-digit code to": "We hebben een 6-cijferige code gestuurd naar"
+    "We sent a 6-digit code to": "We hebben een 6-cijferige code gestuurd naar",
+    "What to send": "Wat te sturen",
+    "You will only hear about these.": "Je hoort alleen over deze."
   }
 }

@@ -2,6 +2,7 @@
   "name": "Italiano",
   "mappings": {
     "%latency %metric latency": "%latency %metric latenza",
+    "Add": "Aggiungi",
     "Affected Monitors (%count)": "Monitor interessati (%count)",
     "All Systems Operational": "Tutti i sistemi sono operativi",
     "Average Latency": "Latenza media",
@@ -9,7 +10,9 @@
     "Back": "Indietro",
     "Badges": "Distintivi",
     "CANCELLED": "ANNULLATO",
+    "Choose a component": "Scegli un componente",
     "COMPLETED": "COMPLETATO",
+    "Component": "Componente",
     "Continue": "Continuare",
     "Copied": "Copiato",
     "Current": "Corrente",
@@ -31,6 +34,8 @@
     "End Time": "Ora di fine",
     "Enter the verification code sent to your email.": "Inserisci il codice di verifica inviato alla tua email.",
     "Events": "Eventi",
+    "Everything": "Tutto",
+    "Everything on %page": "Tutto su %page",
     "Failed to load data": "Impossibile caricare i dati",
     "Failed to load latency data": "Impossibile caricare i dati di latenza",
     "Failed to load status data for this day": "Impossibile caricare i dati sullo stato per questo giorno",
@@ -89,8 +94,10 @@
     "Notifications": "Notifiche",
     "One-time": "Una volta",
     "Ongoing": "In corso",
+    "Only what I choose": "Solo ciò che scelgo",
     "Operational": "Operativo",
     "Own check": "Controllo proprio",
+    "Page": "Pagina",
     "Part of (%count)": "Parte di (%count)",
     "Partial Degraded Performance": "Prestazioni parzialmente degradate",
     "Partial System Outage": "Interruzione parziale del sistema",
@@ -103,6 +110,7 @@
     "Read more": "Per saperne di più",
     "READY": "PRONTO",
     "Recurring": "Ricorrente",
+    "Remove": "Rimuovi",
     "RESOLVED": "RESOLVED",
     "RSS feed": "RSS feed",
     "SCHEDULED": "PROGRAMMATO",
@@ -120,6 +128,7 @@
     "Status history and latency trend": "Cronologia dello stato e andamento della latenza",
     "Subscribe": "Iscriviti",
     "Subscribe to Updates": "Iscriviti agli aggiornamenti",
+    "Switching to everything discards the list above.": "Tornare a tutto elimina l'elenco sopra.",
     "There are no incidents or maintenances scheduled for this month.": "Non ci sono incidenti o manutenzioni programmate per questo mese.",
     "There are no ongoing incidents or maintenance events.": "Non ci sono incidenti o manutenzioni in corso.",
     "Total Incidents": "Incidenti totali",
@@ -137,6 +146,8 @@
     "Verification failed": "Verifica non riuscita",
     "Verify": "Verificare",
     "Verifying": "Verifica",
-    "We sent a 6-digit code to": "Abbiamo inviato un codice di 6 cifre a"
+    "We sent a 6-digit code to": "Abbiamo inviato un codice di 6 cifre a",
+    "What to send": "Cosa inviare",
+    "You will only hear about these.": "Riceverai avvisi solo per questi."
   }
 }

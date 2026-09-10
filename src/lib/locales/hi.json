@@ -2,6 +2,7 @@
   "name": "हिन्दी",
   "mappings": {
     "%latency %metric latency": "%latency %metric latency",
+    "Add": "जोड़ें",
     "Affected Monitors (%count)": "प्रभावित मॉनिटर (%count)",
     "All Systems Operational": "सभी सिस्टम सुचारू रूप से चल रहे हैं",
     "Average Latency": "औसत लेटेंसी",
@@ -9,7 +10,9 @@
     "Back": "वापस",
     "Badges": "बैज",
     "CANCELLED": "रद्द",
+    "Choose a component": "एक घटक चुनें",
     "COMPLETED": "पूर्ण",
+    "Component": "घटक",
     "Continue": "जारी रखें",
     "Copied": "कॉपी किया गया",
     "Current": "वर्तमान",
@@ -31,6 +34,8 @@
     "End Time": "समाप्ति समय",
     "Enter the verification code sent to your email.": "अपने ईमेल पर भेजा गया सत्यापन कोड दर्ज करें।",
     "Events": "घटनाएँ",
+    "Everything": "सब कुछ",
+    "Everything on %page": "%page पर सब कुछ",
     "Failed to load data": "डेटा लोड करने में विफल",
     "Failed to load latency data": "लेटेंसी डेटा लोड करने में विफल",
     "Failed to load status data for this day": "इस दिन के लिए स्थिति डेटा लोड करने में विफल",
@@ -89,8 +94,10 @@
     "Notifications": "सूचनाएँ",
     "One-time": "एक बार",
     "Ongoing": "चल रहा है",
+    "Only what I choose": "केवल मेरी पसंद",
     "Operational": "चालू",
     "Own check": "स्वयं की जाँच",
+    "Page": "पृष्ठ",
     "Part of (%count)": "का हिस्सा (%count)",
     "Partial Degraded Performance": "आंशिक प्रदर्शन गिरावट",
     "Partial System Outage": "सिस्टम का आंशिक आउटेज.",
@@ -103,6 +110,7 @@
     "Read more": "और पढ़ें",
     "READY": "तैयार",
     "Recurring": "आवर्ती",
+    "Remove": "हटाएँ",
     "RESOLVED": "सुलझा हुआ",
     "RSS feed": "RSS feed",
     "SCHEDULED": "अनुसूचित",
@@ -120,6 +128,7 @@
     "Status history and latency trend": "स्थिति इतिहास और लेटेंसी प्रवृत्ति",
     "Subscribe": "सब्सक्राइब करें",
     "Subscribe to Updates": "अपडेट के लिए सब्सक्राइब करें",
+    "Switching to everything discards the list above.": "सब कुछ पर जाने से ऊपर की सूची हट जाएगी।",
     "There are no incidents or maintenances scheduled for this month.": "इस महीने के लिए कोई घटना या रखरखाव निर्धारित नहीं है।",
     "There are no ongoing incidents or maintenance events.": "कोई चल रही घटना या रखरखाव इवेंट नहीं है।",
     "Total Incidents": "कुल घटनाएँ",
@@ -137,6 +146,8 @@
     "Verification failed": "सत्यापन विफल रहा",
     "Verify": "सत्यापित करें",
     "Verifying": "सत्यापित हो रहा है",
-    "We sent a 6-digit code to": "हमने 6 अंकों का कोड भेजा है"
+    "We sent a 6-digit code to": "हमने 6 अंकों का कोड भेजा है",
+    "What to send": "क्या भेजना है",
+    "You will only hear about these.": "आपको केवल इन्हीं की सूचना मिलेगी।"
   }
 }

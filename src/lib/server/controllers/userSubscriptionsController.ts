@@ -679,7 +679,17 @@ export async function UpdateSubscriberScope(
     return { success: false, error: "A page or component scope needs an id" };
   }
 
-  const minSeverity = scope.min_severity ?? "ANY";
+  // Absent means "leave it alone", not "reset it to ANY". The dialog switches
+  // between everything and a narrowed set without mentioning severity, and an
+  // unconditional default there would silently discard a floor the subscriber
+  // had set - the kind of loss nothing on the screen would report.
+  let minSeverity = scope.min_severity;
+  if (minSeverity === undefined) {
+    const existing = await db.getScopedSubscriptionsForMethod(verifyResult.method.id);
+    minSeverity =
+      existing.find((r) => r.event_class === scope.event_class && r.scope_type === scopeType && r.scope_id === scopeId)
+        ?.min_severity ?? "ANY";
+  }
   if (minSeverity !== "ANY" && !isIncidentSeverity(minSeverity)) {
     return { success: false, error: `min_severity must be ANY or one of ${INCIDENT_SEVERITIES.join(", ")}` };
   }
@@ -695,6 +705,145 @@ export async function UpdateSubscriberScope(
   });
 
   return { success: true };
+}
+
+/** One narrow scope, with the name a subscriber will recognise. */
+export interface LabelledScope {
+  event_class: string;
+  scope_type: string;
+  scope_id: string;
+  min_severity: string;
+  /** The monitor or page name, falling back to the raw id when it is gone. */
+  label: string;
+}
+
+/**
+ * A subscriber's narrow scopes, named.
+ *
+ * Labelled here rather than in the dialog because the dialog only knows the page
+ * it is standing on, and a subscriber can hold scopes for components that are not
+ * on it. Sending back raw ids would make the list unreadable for exactly the
+ * subscriptions hardest to find again.
+ *
+ * A scope whose target has since been deleted keeps its raw id as the label
+ * rather than being dropped: it is still a live row that still filters mail, and
+ * hiding it would leave a subscriber unable to remove it.
+ *
+ * ALL rows are excluded. They are the mode, not an entry in a list, and
+ * `scopeModeOf` reads them separately.
+ */
+export async function GetLabelledScopes(methodId: number): Promise<LabelledScope[]> {
+  const rows = await db.getScopedSubscriptionsForMethod(methodId);
+  const narrow = rows.filter((r) => r.scope_type !== "ALL" && r.status === "ACTIVE");
+  if (narrow.length === 0) return [];
+
+  const componentTags = narrow.filter((r) => r.scope_type === "COMPONENT").map((r) => r.scope_id);
+  const monitors = componentTags.length > 0 ? await db.getMonitorsByTags(componentTags) : [];
+  const nameByTag = new Map(monitors.map((m) => [m.tag, m.name]));
+
+  const pageIds = [...new Set(narrow.filter((r) => r.scope_type === "PAGE").map((r) => r.scope_id))];
+  const titleById = new Map<string, string>();
+  for (const id of pageIds) {
+    const page = await db.getPageById(Number(id));
+    if (page) titleById.set(id, page.page_title);
+  }
+
+  return narrow.map((r) => ({
+    event_class: r.event_class,
+    scope_type: r.scope_type,
+    scope_id: r.scope_id,
+    min_severity: r.min_severity,
+    label:
+      r.scope_type === "COMPONENT"
+        ? (nameByTag.get(r.scope_id) ?? r.scope_id)
+        : (titleById.get(r.scope_id) ?? r.scope_id),
+  }));
+}
+
+/**
+ * Whether an event class is currently "everything" or "only what I chose".
+ *
+ * Read off the ALL row, because that row *is* the mode: narrow scopes are OR'd
+ * with it, so while it is live nothing else narrows anything. A subscriber with
+ * no rows at all counts as everything, which is what a bare subscribe means.
+ */
+export async function GetScopeMode(methodId: number, eventClass: string): Promise<"ALL" | "NARROW"> {
+  const rows = await db.getScopedSubscriptionsForMethod(methodId);
+  const all = rows.find((r) => r.event_class === eventClass && r.scope_type === "ALL");
+  const hasNarrow = rows.some((r) => r.event_class === eventClass && r.scope_type !== "ALL");
+  if (!all) return hasNarrow ? "NARROW" : "ALL";
+  return all.status === "ACTIVE" ? "ALL" : "NARROW";
+}
+
+/**
+ * Removes one narrow scope, and widens back to everything when it was the last.
+ *
+ * The widening is part of the same operation rather than a second call the UI
+ * has to remember, because the two together are one invariant: a subscriber with
+ * no narrow scopes is not subscribed to nothing, they are subscribed to
+ * everything. Leaving them with an empty set and a retired ALL row would be a
+ * silent, total unsubscribe performed by a remove button.
+ */
+export async function RemoveSubscriberScope(
+  token: string,
+  scope: { event_class: SubscriptionEventType; scope_type: string; scope_id: string },
+): Promise<{ success: boolean; error?: string; widened?: boolean }> {
+  const verifyResult = await VerifySubscriberToken(token);
+  if (!verifyResult.success || !verifyResult.user || !verifyResult.method) {
+    return { success: false, error: verifyResult.error || "Invalid token" };
+  }
+  if (scope.scope_type === "ALL") {
+    return { success: false, error: "Use the everything switch rather than removing the ALL scope" };
+  }
+
+  await db.deleteScopedSubscription(verifyResult.method.id, scope.event_class, scope.scope_type, scope.scope_id);
+
+  const remaining = (await db.getScopedSubscriptionsForMethod(verifyResult.method.id)).filter(
+    (r) => r.event_class === scope.event_class && r.scope_type !== "ALL",
+  );
+  if (remaining.length > 0) return { success: true, widened: false };
+
+  await SetSubscriberScopeMode(token, scope.event_class, "ALL");
+  return { success: true, widened: true };
+}
+
+/**
+ * Switches an event class between "everything" and "only what I chose".
+ *
+ * ALL and narrow scopes are OR'd by `getRecipientsForScopedEvent`, so a
+ * component scope means nothing at all while the ALL row is live. Narrowing is
+ * therefore *retiring the ALL row*, and that is the whole mechanism.
+ *
+ * Widening **deletes** the narrow rows rather than retiring them, so that
+ * INACTIVE keeps its single meaning of "switched off by the inherited toggle".
+ * That is what lets switching the class off and on again restore the subscriber
+ * to the mode they were in. The cost is that the picks are gone rather than
+ * parked, which the dialog says before it happens.
+ */
+export async function SetSubscriberScopeMode(
+  token: string,
+  eventClass: SubscriptionEventType,
+  mode: "ALL" | "NARROW",
+): Promise<{ success: boolean; error?: string }> {
+  const verifyResult = await VerifySubscriberToken(token);
+  if (!verifyResult.success || !verifyResult.user || !verifyResult.method) {
+    return { success: false, error: verifyResult.error || "Invalid token" };
+  }
+
+  if (mode === "ALL") {
+    await db.deleteNarrowScopedSubscriptions(verifyResult.method.id, eventClass);
+    return await UpdateSubscriberScope(token, { event_class: eventClass, scope_type: "ALL", enabled: true });
+  }
+
+  // Narrowing with nothing chosen yet would be a total unsubscribe, so the
+  // caller has to have added at least one scope first.
+  const narrow = (await db.getScopedSubscriptionsForMethod(verifyResult.method.id)).filter(
+    (r) => r.event_class === eventClass && r.scope_type !== "ALL",
+  );
+  if (narrow.length === 0) {
+    return { success: false, error: "Choose at least one page or component before narrowing" };
+  }
+  return await UpdateSubscriberScope(token, { event_class: eventClass, scope_type: "ALL", enabled: false });
 }
 
 export async function UpdateSubscriberPreferences(

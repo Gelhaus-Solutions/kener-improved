@@ -2,6 +2,7 @@
   "name": "繁體中文（台灣）",
   "mappings": {
     "%latency %metric latency": "%latency %metric 延遲",
+    "Add": "新增",
     "Affected Monitors (%count)": "受影響的監控項 (%count)",
     "All Systems Operational": "所有系統運行正常",
     "Average Latency": "平均延遲",
@@ -9,7 +10,9 @@
     "Back": "返回",
     "Badges": "徽章",
     "CANCELLED": "已取消",
+    "Choose a component": "選擇一個組件",
     "COMPLETED": "已完成",
+    "Component": "組件",
     "Continue": "繼續",
     "Copied": "已複製",
     "Current": "當前",
@@ -31,6 +34,8 @@
     "End Time": "結束時間",
     "Enter the verification code sent to your email.": "輸入發送到您的電子郵件的驗證碼。",
     "Events": "動態",
+    "Everything": "全部",
+    "Everything on %page": "%page 上的全部",
     "Failed to load data": "載入數據失敗",
     "Failed to load latency data": "載入延遲數據失敗",
     "Failed to load status data for this day": "無法載入當天的狀態數據",
@@ -89,8 +94,10 @@
     "Notifications": "通知",
     "One-time": "單次",
     "Ongoing": "進行中",
+    "Only what I choose": "僅我選擇的",
     "Operational": "正常運行",
     "Own check": "自身檢查",
+    "Page": "頁面",
     "Part of (%count)": "屬於 (%count)",
     "Partial Degraded Performance": "部分效能下降",
     "Partial System Outage": "部分系統故障",
@@ -103,6 +110,7 @@
     "Read more": "更多",
     "READY": "就緒",
     "Recurring": "週期性",
+    "Remove": "移除",
     "RESOLVED": "已解決",
     "RSS feed": "RSS 訂閱源",
     "SCHEDULED": "已計劃",
@@ -120,6 +128,7 @@
     "Status history and latency trend": "狀態歷史和延遲趨勢",
     "Subscribe": "訂閱",
     "Subscribe to Updates": "訂閱更新",
+    "Switching to everything discards the list above.": "切換為全部會捨棄上面的清單。",
     "There are no incidents or maintenances scheduled for this month.": "本月沒有任何事故或安排的維護。",
     "There are no ongoing incidents or maintenance events.": "當前沒有正在進行的事件或維護。",
     "Total Incidents": "事件總數",
@@ -137,6 +146,8 @@
     "Verification failed": "驗證失敗",
     "Verify": "驗證",
     "Verifying": "正在驗證",
-    "We sent a 6-digit code to": "我們發送了一個 6 位代碼至"
+    "We sent a 6-digit code to": "我們發送了一個 6 位代碼至",
+    "What to send": "傳送哪些內容",
+    "You will only hear about these.": "您將只收到這些的通知。"
   }
 }

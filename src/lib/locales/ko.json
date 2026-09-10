@@ -2,6 +2,7 @@
   "name": "Korean",
   "mappings": {
     "%latency %metric latency": "%latency %metric 대기 시간",
+    "Add": "추가",
     "Affected Monitors (%count)": "영향을 받는 모니터(%count)",
     "All Systems Operational": "모든 시스템 정상 운영 중",
     "Average Latency": "평균 지연 시간",
@@ -9,7 +10,9 @@
     "Back": "뒤쪽에",
     "Badges": "배지",
     "CANCELLED": "취소됨",
+    "Choose a component": "구성 요소 선택",
     "COMPLETED": "완료됨",
+    "Component": "구성 요소",
     "Continue": "계속하다",
     "Copied": "복사됨",
     "Current": "현재",
@@ -31,6 +34,8 @@
     "End Time": "종료 시간",
     "Enter the verification code sent to your email.": "이메일로 전송된 인증코드를 입력하세요.",
     "Events": "이벤트",
+    "Everything": "전체",
+    "Everything on %page": "%page 의 전체",
     "Failed to load data": "데이터를 로드하지 못했습니다.",
     "Failed to load latency data": "지연 시간 데이터를 로드하지 못했습니다.",
     "Failed to load status data for this day": "오늘의 상태 데이터를 로드하지 못했습니다.",
@@ -89,8 +94,10 @@
     "Notifications": "알림",
     "One-time": "일회성",
     "Ongoing": "전진",
+    "Only what I choose": "선택한 항목만",
     "Operational": "정상",
     "Own check": "자체 점검",
+    "Page": "페이지",
     "Part of (%count)": "상위 구성 (%count)",
     "Partial Degraded Performance": "부분적 성능 저하",
     "Partial System Outage": "부분적 시스템 장애.",
@@ -103,6 +110,7 @@
     "Read more": "더 읽어보세요",
     "READY": "준비됨",
     "Recurring": "반복",
+    "Remove": "제거",
     "RESOLVED": "RESOLVED",
     "RSS feed": "RSS feed",
     "SCHEDULED": "예정됨",
@@ -120,6 +128,7 @@
     "Status history and latency trend": "상태 기록 및 대기 시간 추세",
     "Subscribe": "구독하다",
     "Subscribe to Updates": "업데이트 구독",
+    "Switching to everything discards the list above.": "전체로 바꾸면 위 목록이 삭제됩니다.",
     "There are no incidents or maintenances scheduled for this month.": "이번 달에는 예정된 사고나 점검이 없습니다.",
     "There are no ongoing incidents or maintenance events.": "진행 중인 인시던트 또는 유지보수 이벤트가 없습니다.",
     "Total Incidents": "총 사고",
@@ -137,6 +146,8 @@
     "Verification failed": "확인 실패",
     "Verify": "확인하다",
     "Verifying": "확인 중",
-    "We sent a 6-digit code to": "6자리 코드를 다음 주소로 보냈습니다."
+    "We sent a 6-digit code to": "6자리 코드를 다음 주소로 보냈습니다.",
+    "What to send": "보낼 내용",
+    "You will only hear about these.": "이 항목에 대해서만 알림을 받습니다."
   }
 }

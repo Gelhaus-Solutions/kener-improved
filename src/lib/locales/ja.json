@@ -2,6 +2,7 @@
   "name": "Japanese",
   "mappings": {
     "%latency %metric latency": "%latency %metric レイテンシー",
+    "Add": "追加",
     "Affected Monitors (%count)": "影響を受けるモニター (%count)",
     "All Systems Operational": "すべてのシステムは正常に稼働しています",
     "Average Latency": "平均レイテンシ",
@@ -9,7 +10,9 @@
     "Back": "戻る",
     "Badges": "バッジ",
     "CANCELLED": "キャンセル",
+    "Choose a component": "コンポーネントを選択",
     "COMPLETED": "完了",
+    "Component": "コンポーネント",
     "Continue": "続く",
     "Copied": "コピーされました",
     "Current": "現在",
@@ -31,6 +34,8 @@
     "End Time": "終了時間",
     "Enter the verification code sent to your email.": "メールに送信された確認コードを入力してください。",
     "Events": "イベント",
+    "Everything": "すべて",
+    "Everything on %page": "%page のすべて",
     "Failed to load data": "データのロードに失敗しました",
     "Failed to load latency data": "レイテンシデータのロードに失敗しました",
     "Failed to load status data for this day": "この日のステータスデータのロードに失敗しました",
@@ -89,8 +94,10 @@
     "Notifications": "通知",
     "One-time": "一度",
     "Ongoing": "進行中",
+    "Only what I choose": "選んだものだけ",
     "Operational": "稼働中",
     "Own check": "自身のチェック",
+    "Page": "ページ",
     "Part of (%count)": "構成元 (%count)",
     "Partial Degraded Performance": "部分的なパフォーマンス低下",
     "Partial System Outage": "部分的なシステム障害。",
@@ -103,6 +110,7 @@
     "Read more": "続きを読む",
     "READY": "準備完了",
     "Recurring": "繰り返し",
+    "Remove": "削除",
     "RESOLVED": "RESOLVED",
     "RSS feed": "RSS feed",
     "SCHEDULED": "予定済み",
@@ -120,6 +128,7 @@
     "Status history and latency trend": "ステータス履歴と遅延傾向",
     "Subscribe": "購読する",
     "Subscribe to Updates": "アップデートを購読する",
+    "Switching to everything discards the list above.": "すべてに切り替えると上の一覧は破棄されます。",
     "There are no incidents or maintenances scheduled for this month.": "今月は予定されているインシデントやメンテナンスはありません。",
     "There are no ongoing incidents or maintenance events.": "進行中のインシデントまたはメンテナンスイベントはありません。",
     "Total Incidents": "総インシデント数",
@@ -137,6 +146,8 @@
     "Verification failed": "検証に失敗しました",
     "Verify": "確認する",
     "Verifying": "検証中",
-    "We sent a 6-digit code to": "6桁のコードを送信しました"
+    "We sent a 6-digit code to": "6桁のコードを送信しました",
+    "What to send": "送信する内容",
+    "You will only hear about these.": "これらについてのみ通知されます。"
   }
 }

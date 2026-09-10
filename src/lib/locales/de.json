@@ -2,6 +2,7 @@
   "name": "Deutsch",
   "mappings": {
     "%latency %metric latency": "%latency %metric Latenz",
+    "Add": "Hinzufügen",
     "Affected Monitors (%count)": "Betroffene Monitore (%count)",
     "All Systems Operational": "Alle Systeme betriebsbereit",
     "Average Latency": "Durchschnittliche Latenz",
@@ -9,7 +10,9 @@
     "Back": "Zurück",
     "Badges": "Anzeigen",
     "CANCELLED": "ABGESAGT",
+    "Choose a component": "Komponente wählen",
     "COMPLETED": "ABGESCHLOSSEN",
+    "Component": "Komponente",
     "Continue": "Fortsetzen",
     "Copied": "Kopiert",
     "Current": "Aktuell",
@@ -31,6 +34,8 @@
     "End Time": "Endzeit",
     "Enter the verification code sent to your email.": "Geben Sie den Bestätigungscode ein, der an Ihre E-Mail-Adresse gesendet wurde.",
     "Events": "Ereignisse",
+    "Everything": "Alles",
+    "Everything on %page": "Alles auf %page",
     "Failed to load data": "Daten konnten nicht geladen werden",
     "Failed to load latency data": "Latenzdaten konnten nicht geladen werden",
     "Failed to load status data for this day": "Statusdaten für diesen Tag konnten nicht geladen werden",
@@ -89,8 +94,10 @@
     "Notifications": "Benachrichtigungen",
     "One-time": "Einmalig",
     "Ongoing": "Laufend",
+    "Only what I choose": "Nur meine Auswahl",
     "Operational": "Betriebsbereit",
     "Own check": "Eigene Prüfung",
+    "Page": "Seite",
     "Part of (%count)": "Teil von (%count)",
     "Partial Degraded Performance": "Teilweise beeinträchtigte Leistung",
     "Partial System Outage": "Teilweiser Systemausfall",
@@ -103,6 +110,7 @@
     "Read more": "Mehr lesen",
     "READY": "BEREIT",
     "Recurring": "Wiederkehrend",
+    "Remove": "Entfernen",
     "RESOLVED": "BEHOBEN",
     "RSS feed": "RSS feed",
     "SCHEDULED": "GEPLANT",
@@ -120,6 +128,7 @@
     "Status history and latency trend": "Statusverlauf und Latenztrend",
     "Subscribe": "Abonnieren",
     "Subscribe to Updates": "Benachrichtigungen abonnieren",
+    "Switching to everything discards the list above.": "Der Wechsel zu Alles verwirft die obige Liste.",
     "There are no incidents or maintenances scheduled for this month.": "Für diesen Monat sind keine Vorfälle oder Wartungsarbeiten geplant.",
     "There are no ongoing incidents or maintenance events.": "Es gibt keine laufenden Vorfälle oder Wartungsarbeiten.",
     "Total Incidents": "Gesamtzahl der Vorfälle",
@@ -137,6 +146,8 @@
     "Verification failed": "Überprüfung fehlgeschlagen",
     "Verify": "Verifizieren",
     "Verifying": "Verifizieren",
-    "We sent a 6-digit code to": "Wir haben einen 6-stelligen Code gesendet an"
+    "We sent a 6-digit code to": "Wir haben einen 6-stelligen Code gesendet an",
+    "What to send": "Was gesendet wird",
+    "You will only hear about these.": "Sie hören nur von diesen."
   }
 }

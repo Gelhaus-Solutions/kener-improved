@@ -2,6 +2,7 @@
   "name": "Persian",
   "mappings": {
     "%latency %metric latency": "تأخیر %latency %metric",
+    "Add": "افزودن",
     "Affected Monitors (%count)": "مانیتورهای تحت تأثیر (%count)",
     "All Systems Operational": "تمام سیستم‌ها عملیاتی هستند",
     "Average Latency": "تأخیر متوسط",
@@ -9,7 +10,9 @@
     "Back": "برگشت",
     "Badges": "نشان ها",
     "CANCELLED": "لغو شده",
+    "Choose a component": "یک مؤلفه انتخاب کنید",
     "COMPLETED": "تکمیل شده",
+    "Component": "مؤلفه",
     "Continue": "ادامه دهید",
     "Copied": "کپی شده",
     "Current": "فعلی",
@@ -31,6 +34,8 @@
     "End Time": "زمان پایان",
     "Enter the verification code sent to your email.": "کد تأیید ارسال شده به ایمیل خود را وارد کنید.",
     "Events": "رویدادها",
+    "Everything": "همه چیز",
+    "Everything on %page": "همه چیز در %page",
     "Failed to load data": "داده ها بارگیری نشد",
     "Failed to load latency data": "داده‌های تأخیر بارگیری نشد",
     "Failed to load status data for this day": "اطلاعات وضعیت برای این روز بارگیری نشد",
@@ -89,8 +94,10 @@
     "Notifications": "اعلان‌ها",
     "One-time": "یک بار",
     "Ongoing": "در حال انجام است",
+    "Only what I choose": "فقط موارد انتخابی من",
     "Operational": "عملیاتی",
     "Own check": "بررسی خود",
+    "Page": "صفحه",
     "Part of (%count)": "بخشی از (%count)",
     "Partial Degraded Performance": "کاهش عملکرد جزئی",
     "Partial System Outage": "قطعی جزئی سیستم",
@@ -103,6 +110,7 @@
     "Read more": "ادامه مطلب",
     "READY": "آماده",
     "Recurring": "دوره‌ای",
+    "Remove": "حذف",
     "RESOLVED": "RESOLVED",
     "RSS feed": "RSS feed",
     "SCHEDULED": "زمان‌بندی شده",
@@ -120,6 +128,7 @@
     "Status history and latency trend": "تاریخچه وضعیت و روند تاخیر",
     "Subscribe": "مشترک شوید",
     "Subscribe to Updates": "مشترک شدن در به روز رسانی",
+    "Switching to everything discards the list above.": "تغییر به همه چیز فهرست بالا را حذف می‌کند.",
     "There are no incidents or maintenances scheduled for this month.": "هیچ حادثه یا تعمیراتی برای این ماه برنامه ریزی نشده است.",
     "There are no ongoing incidents or maintenance events.": "هیچ رخداد یا رویداد نگهداری فعالی وجود ندارد.",
     "Total Incidents": "مجموع حوادث",
@@ -137,6 +146,8 @@
     "Verification failed": "تأیید ناموفق بود",
     "Verify": "تأیید کنید",
     "Verifying": "در حال تأیید",
-    "We sent a 6-digit code to": "ما یک کد 6 رقمی ارسال کردیم"
+    "We sent a 6-digit code to": "ما یک کد 6 رقمی ارسال کردیم",
+    "What to send": "چه چیزی ارسال شود",
+    "You will only hear about these.": "فقط درباره این موارد اطلاع می‌گیرید."
   }
 }

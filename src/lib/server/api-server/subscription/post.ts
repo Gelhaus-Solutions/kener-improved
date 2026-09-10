@@ -9,8 +9,13 @@ import {
   VerifySubscriberToken,
   UpdateSubscriberPreferences,
   UpdateSubscriberScope,
+  RemoveSubscriberScope,
+  SetSubscriberScopeMode,
   GetScopedSubscriptions,
+  GetLabelledScopes,
+  GetScopeMode,
 } from "$lib/server/controllers/userSubscriptionsController";
+import { GetScopeOptionsForPage } from "$lib/server/controllers/subscriptionScopeOptions";
 
 interface LoginRequest {
   action: "login";
@@ -27,6 +32,12 @@ interface VerifyRequest {
 interface GetPreferencesRequest {
   action: "getPreferences";
   token: string;
+  /**
+   * The page the dialog is standing on, so it can offer that page and its
+   * components (E1b). Absent, or unknown, simply means no pickers are offered -
+   * the severity floor and the on/off switches still work everywhere.
+   */
+  page_path?: string;
 }
 
 interface UpdatePreferencesRequest {
@@ -53,12 +64,31 @@ interface UpdateScopeRequest {
   enabled?: boolean;
 }
 
+/** Removes one narrow scope (E1b). Widens back to everything if it was the last. */
+interface RemoveScopeRequest {
+  action: "removeScope";
+  token: string;
+  event_class: "incidents" | "maintenances";
+  scope_type: "PAGE" | "COMPONENT" | "GROUP";
+  scope_id: string;
+}
+
+/** Switches an event class between everything and only-what-I-chose (E1b). */
+interface SetScopeModeRequest {
+  action: "setScopeMode";
+  token: string;
+  event_class: "incidents" | "maintenances";
+  mode: "ALL" | "NARROW";
+}
+
 type PostRequestBody =
   | LoginRequest
   | VerifyRequest
   | GetPreferencesRequest
   | UpdatePreferencesRequest
-  | UpdateScopeRequest;
+  | UpdateScopeRequest
+  | RemoveScopeRequest
+  | SetScopeModeRequest;
 
 export default async function post(req: APIServerRequest): Promise<Response> {
   const body = req.body as PostRequestBody;
@@ -81,7 +111,11 @@ export default async function post(req: APIServerRequest): Promise<Response> {
     case "verify":
       return handleVerify((body as VerifyRequest).email, (body as VerifyRequest).code);
     case "getPreferences":
-      return handleGetPreferences((body as GetPreferencesRequest).token, config);
+      return handleGetPreferences(
+        (body as GetPreferencesRequest).token,
+        config,
+        (body as GetPreferencesRequest).page_path,
+      );
     case "updatePreferences":
       return handleUpdatePreferences(
         (body as UpdatePreferencesRequest).token,
@@ -99,6 +133,24 @@ export default async function post(req: APIServerRequest): Promise<Response> {
         enabled: scopeBody.enabled,
       });
       if (!result.success) return error(400, { message: result.error ?? "Could not update the subscription" });
+      return json({ success: true });
+    }
+    case "removeScope": {
+      const removeBody = body as RemoveScopeRequest;
+      const result = await RemoveSubscriberScope(removeBody.token, {
+        event_class: removeBody.event_class,
+        scope_type: removeBody.scope_type,
+        scope_id: removeBody.scope_id,
+      });
+      if (!result.success) return error(400, { message: result.error ?? "Could not remove the subscription" });
+      // The dialog needs to know it was widened, because that flips the mode
+      // control without the subscriber having touched it.
+      return json({ success: true, widened: result.widened === true });
+    }
+    case "setScopeMode": {
+      const modeBody = body as SetScopeModeRequest;
+      const result = await SetSubscriberScopeMode(modeBody.token, modeBody.event_class, modeBody.mode);
+      if (!result.success) return error(400, { message: result.error ?? "Could not change the subscription" });
       return json({ success: true });
     }
     default:
@@ -141,7 +193,7 @@ async function handleVerify(email: string, code: string): Promise<Response> {
   return json({ success: true, token: result.token });
 }
 
-async function handleGetPreferences(token: string, config: SubscriptionsConfig): Promise<Response> {
+async function handleGetPreferences(token: string, config: SubscriptionsConfig, pagePath?: string): Promise<Response> {
   const result = await VerifySubscriberToken(token);
   if (!result.success) {
     return error(401, { message: result.error || "Invalid token" });
@@ -150,12 +202,21 @@ async function handleGetPreferences(token: string, config: SubscriptionsConfig):
   // The severity floor on the all-scope incidents subscription, which is the one
   // the preferences screen can show without knowing anything about pages or
   // components. A subscriber with no scoped row yet has no floor: ANY.
+  //
+  // Read off the ALL row whatever its status, because a subscriber who narrowed
+  // has a retired ALL row and would otherwise see their floor silently reset to
+  // "Everything" on the very screen that is meant to show it.
   let minSeverity = "ANY";
+  let scopes: Awaited<ReturnType<typeof GetLabelledScopes>> = [];
+  let scopeMode = { incidents: "ALL" as "ALL" | "NARROW", maintenances: "ALL" as "ALL" | "NARROW" };
   if (result.method) {
     const scoped = await GetScopedSubscriptions(result.method.id);
-    minSeverity =
-      scoped.find((r) => r.event_class === "incidents" && r.scope_type === "ALL" && r.status === "ACTIVE")
-        ?.min_severity ?? "ANY";
+    minSeverity = scoped.find((r) => r.event_class === "incidents" && r.scope_type === "ALL")?.min_severity ?? "ANY";
+    scopes = await GetLabelledScopes(result.method.id);
+    scopeMode = {
+      incidents: await GetScopeMode(result.method.id, "incidents"),
+      maintenances: await GetScopeMode(result.method.id, "maintenances"),
+    };
   }
 
   return json({
@@ -163,6 +224,11 @@ async function handleGetPreferences(token: string, config: SubscriptionsConfig):
     email: result.user?.email,
     subscriptions: result.subscriptions,
     minSeverity,
+    scopes,
+    scopeMode,
+    // What this particular page can offer as a scope. Null when the dialog did
+    // not say where it is, or said somewhere that is not a page.
+    scopeOptions: await GetScopeOptionsForPage(pagePath),
     availableSubscriptions: {
       incidents: config.methods?.emails?.incidents === true,
       maintenances: config.methods?.emails?.maintenances === true,

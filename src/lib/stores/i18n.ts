@@ -175,22 +175,25 @@ export const translations = derived(i18n, ($i18n) => $i18n.translations);
 export const t = derived(i18n, ($i18n) => {
   return (key: string, args: Record<string, string> = {}): string => {
     try {
-      let str = $i18n.translations[key];
-
-      // Replace placeholders in the string using the args object
-      if (str && typeof str === "string") {
-        str = str.replace(/%\w+/g, (placeholder) => {
-          const argKey = placeholder.slice(1); // Remove the `%` to get the key
-          return args[argKey] !== undefined ? args[argKey] : placeholder;
-        });
-      }
+      const translated = $i18n.translations[key];
 
       //warn if missing translation
-      if (!str) {
+      if (!translated) {
         console.warn(`Missing translation for key: "${key}"`);
       }
 
-      return str || key;
+      // Fall back to the key itself, then substitute either way. Substituting
+      // only the translated form meant a locale missing one key rendered the
+      // raw placeholder - "Everything on %page" - rather than the English
+      // sentence with the value in it. The fallback is already English; leaving
+      // it half-built helps nobody.
+      const str = typeof translated === "string" && translated ? translated : key;
+
+      // Replace placeholders in the string using the args object
+      return str.replace(/%\w+/g, (placeholder) => {
+        const argKey = placeholder.slice(1); // Remove the `%` to get the key
+        return args[argKey] !== undefined ? args[argKey] : placeholder;
+      });
     } catch (e) {
       return key;
     }

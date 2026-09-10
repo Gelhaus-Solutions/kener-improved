@@ -2,6 +2,7 @@
   "name": "Norsk Bokmål",
   "mappings": {
     "%latency %metric latency": "%latency %metric forsinkelse",
+    "Add": "Legg til",
     "Affected Monitors (%count)": "Berørte skjermer (%count)",
     "All Systems Operational": "Alle systemer er operative",
     "Average Latency": "Gjennomsnittlig ventetid",
@@ -9,7 +10,9 @@
     "Back": "Tilbake",
     "Badges": "Merker",
     "CANCELLED": "AVLYST",
+    "Choose a component": "Velg en komponent",
     "COMPLETED": "FULLFØRT",
+    "Component": "Komponent",
     "Continue": "Fortsette",
     "Copied": "Kopiert",
     "Current": "Nåværende",
@@ -31,6 +34,8 @@
     "End Time": "Slutttid",
     "Enter the verification code sent to your email.": "Skriv inn bekreftelseskoden som ble sendt til e-posten din.",
     "Events": "Hendelser",
+    "Everything": "Alt",
+    "Everything on %page": "Alt på %page",
     "Failed to load data": "Kunne ikke laste inn data",
     "Failed to load latency data": "Kunne ikke laste forsinkelsesdata",
     "Failed to load status data for this day": "Kunne ikke laste inn statusdata for denne dagen",
@@ -89,8 +94,10 @@
     "Notifications": "Varsler",
     "One-time": "En gang",
     "Ongoing": "Pågående",
+    "Only what I choose": "Bare det jeg velger",
     "Operational": "Operativ",
     "Own check": "Egen sjekk",
+    "Page": "Side",
     "Part of (%count)": "Del av (%count)",
     "Partial Degraded Performance": "Delvis redusert ytelse",
     "Partial System Outage": "Delvis systemutfall",
@@ -103,6 +110,7 @@
     "Read more": "Les mer",
     "READY": "KLAR",
     "Recurring": "Gjentakende",
+    "Remove": "Fjern",
     "RESOLVED": "RESOLVED",
     "RSS feed": "RSS feed",
     "SCHEDULED": "PLANLAGT",
@@ -120,6 +128,7 @@
     "Status history and latency trend": "Statushistorikk og latenstidstrend",
     "Subscribe": "Abonner",
     "Subscribe to Updates": "Abonner på oppdateringer",
+    "Switching to everything discards the list above.": "Å bytte til alt forkaster listen over.",
     "There are no incidents or maintenances scheduled for this month.": "Det er ingen hendelser eller vedlikehold planlagt denne måneden.",
     "There are no ongoing incidents or maintenance events.": "Det er ingen pågående hendelser eller vedlikeholdsaktiviteter.",
     "Total Incidents": "Totale hendelser",
@@ -137,6 +146,8 @@
     "Verification failed": "Bekreftelsen mislyktes",
     "Verify": "Verifisere",
     "Verifying": "Bekrefter",
-    "We sent a 6-digit code to": "Vi sendte en 6-sifret kode til"
+    "We sent a 6-digit code to": "Vi sendte en 6-sifret kode til",
+    "What to send": "Hva som sendes",
+    "You will only hear about these.": "Du hører bare om disse."
   }
 }

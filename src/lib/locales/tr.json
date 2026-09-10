@@ -2,6 +2,7 @@
   "name": "Türkçe",
   "mappings": {
     "%latency %metric latency": "%latency %metric gecikme",
+    "Add": "Ekle",
     "Affected Monitors (%count)": "Etkilenen Monitörler (%count)",
     "All Systems Operational": "Tüm sistemler çalışıyor",
     "Average Latency": "Ortalama Gecikme",
@@ -9,7 +10,9 @@
     "Back": "Geri",
     "Badges": "Rozetler",
     "CANCELLED": "İPTAL EDİLMİŞ",
+    "Choose a component": "Bir bileşen seçin",
     "COMPLETED": "TAMAMLANMIŞ",
+    "Component": "Bileşen",
     "Continue": "Devam et",
     "Copied": "Kopyalandı",
     "Current": "Güncel",
@@ -31,6 +34,8 @@
     "End Time": "Bitiş Zamanı",
     "Enter the verification code sent to your email.": "E-postanıza gönderilen doğrulama kodunu girin.",
     "Events": "Olaylar",
+    "Everything": "Her şey",
+    "Everything on %page": "%page üzerindeki her şey",
     "Failed to load data": "Veriler yüklenemedi",
     "Failed to load latency data": "Gecikme verileri yüklenemedi",
     "Failed to load status data for this day": "Bu güne ait durum verileri yüklenemedi",
@@ -89,8 +94,10 @@
     "Notifications": "Bildirimler",
     "One-time": "Bir kerelik",
     "Ongoing": "devam ediyor",
+    "Only what I choose": "Yalnızca seçtiklerim",
     "Operational": "Çalışıyor",
     "Own check": "Kendi kontrolü",
+    "Page": "Sayfa",
     "Part of (%count)": "Şunun parçası (%count)",
     "Partial Degraded Performance": "Kısmi düşük performans",
     "Partial System Outage": "Kısmi sistem kesintisi",
@@ -103,6 +110,7 @@
     "Read more": "Devamını oku",
     "READY": "HAZIR",
     "Recurring": "Tekrarlayan",
+    "Remove": "Kaldır",
     "RESOLVED": "ÇÖZÜLDÜ",
     "RSS feed": "RSS feed",
     "SCHEDULED": "PLANLANMIŞ",
@@ -120,6 +128,7 @@
     "Status history and latency trend": "Durum geçmişi ve gecikme eğilimi",
     "Subscribe": "Abone Ol",
     "Subscribe to Updates": "Güncellemelere abone olun",
+    "Switching to everything discards the list above.": "Her şeye geçmek yukarıdaki listeyi siler.",
     "There are no incidents or maintenances scheduled for this month.": "Bu ay için planlanmış herhangi bir olay veya bakım bulunmamaktadır.",
     "There are no ongoing incidents or maintenance events.": "Devam eden olay veya bakım etkinliği yok.",
     "Total Incidents": "Toplam Olaylar",
@@ -137,6 +146,8 @@
     "Verification failed": "Doğrulama başarısız oldu",
     "Verify": "Doğrulamak",
     "Verifying": "Doğrulanıyor",
-    "We sent a 6-digit code to": "6 haneli kodu gönderdik"
+    "We sent a 6-digit code to": "6 haneli kodu gönderdik",
+    "What to send": "Ne gönderilsin",
+    "You will only hear about these.": "Yalnızca bunlar hakkında bilgilendirileceksiniz."
   }
 }

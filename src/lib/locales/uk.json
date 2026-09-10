@@ -3,6 +3,7 @@
   "code": "uk",
   "mappings": {
     "%latency %metric latency": "%latency %metric latency",
+    "Add": "Додати",
     "Affected Monitors (%count)": "Затронуті монітори (%count)",
     "All Systems Operational": "Усі системи працюють",
     "Average Latency": "Середня затримка",
@@ -10,7 +11,9 @@
     "Back": "Назад",
     "Badges": "Бейджі",
     "CANCELLED": "СКАСОВАНО",
+    "Choose a component": "Оберіть компонент",
     "COMPLETED": "ЗАВЕРШЕНО",
+    "Component": "Компонент",
     "Continue": "Продовжити",
     "Copied": "Скопійовано",
     "Current": "Поточні",
@@ -32,6 +35,8 @@
     "End Time": "Час завершення",
     "Enter the verification code sent to your email.": "Введіть код підтвердження, надісланий на вашу пошту.",
     "Events": "Події",
+    "Everything": "Усе",
+    "Everything on %page": "Усе на %page",
     "Failed to load data": "Не вдалося завантажити дані",
     "Failed to load latency data": "Не вдалося завантажити дані затримки",
     "Failed to load status data for this day": "Не вдалося завантажити дані статусу за цей день",
@@ -90,8 +95,10 @@
     "Notifications": "Сповіщення",
     "One-time": "Одноразове",
     "Ongoing": "Поточні",
+    "Only what I choose": "Лише те, що я обрав",
     "Operational": "Працює",
     "Own check": "Власна перевірка",
+    "Page": "Сторінка",
     "Part of (%count)": "Частина (%count)",
     "Partial Degraded Performance": "Часткове зниження продуктивності",
     "Partial System Outage": "Частковий збій системи",
@@ -104,6 +111,7 @@
     "Read more": "Читати більше",
     "READY": "ГОТОВО",
     "Recurring": "Повторюване",
+    "Remove": "Вилучити",
     "RESOLVED": "ВИРІШЕНО",
     "RSS feed": "RSS feed",
     "SCHEDULED": "ЗАПЛАНОВАНО",
@@ -121,6 +129,7 @@
     "Status history and latency trend": "Історія статусів та тренд затримки",
     "Subscribe": "Підписатися",
     "Subscribe to Updates": "Підписатися на оновлення",
+    "Switching to everything discards the list above.": "Перехід на «Усе» вилучить список вище.",
     "There are no incidents or maintenances scheduled for this month.": "На цей місяць не заплановано інцидентів або обслуговування",
     "There are no ongoing incidents or maintenance events.": "Наразі немає активних інцидентів або обслуговування",
     "Total Incidents": "Загальна кількість інцидентів",
@@ -138,6 +147,8 @@
     "Verification failed": "Перевірка не вдалася",
     "Verify": "Підтвердити",
     "Verifying": "Перевірка",
-    "We sent a 6-digit code to": "Ми надіслали 6-значний код на"
+    "We sent a 6-digit code to": "Ми надіслали 6-значний код на",
+    "What to send": "Що надсилати",
+    "You will only hear about these.": "Ви отримуватимете сповіщення лише про них."
   }
 }

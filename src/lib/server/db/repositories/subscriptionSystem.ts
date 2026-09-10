@@ -200,16 +200,69 @@ export class SubscriptionSystemRepository extends BaseRepository {
    * not come through here.
    */
   private async mirrorToScopedSubscription(sub: UserSubscriptionV2Record): Promise<void> {
+    await this.syncScopedStatus(
+      sub.subscriber_user_id,
+      sub.subscriber_method_id,
+      sub.event_type,
+      sub.status ?? "ACTIVE",
+    );
+  }
+
+  /**
+   * Puts one method's scoped rows for an event class into the state the
+   * inherited on/off switch says they should be in (E1b).
+   *
+   * **Why this is not simply "write the ALL row".** Scopes are OR'd in
+   * `getRecipientsForScopedEvent`, and until E1b nothing could create a narrow
+   * row through the product, so mirroring onto the ALL row alone was complete.
+   * The moment the subscribe dialog can create a COMPONENT row, it stops being:
+   * a subscriber who switched incident mail *off* would keep receiving mail for
+   * their components, because only their ALL row was retired. Off has to mean
+   * off, so off retires every row for the class.
+   *
+   * **Turning it back on cannot blindly revive the ALL row**, or a subscriber
+   * who had narrowed to two components would silently come back subscribed to
+   * everything. The rule is memoryless and reads straight off the data: the
+   * existence of narrow rows *is* the record that this subscriber narrowed. So
+   * on means revive the narrow rows if there are any, and otherwise fall back to
+   * the ALL row, creating it when this is a first subscribe.
+   *
+   * The invariant that makes this work - **narrow rows exist if and only if the
+   * subscriber has narrowed** - is why widening back to "everything" deletes
+   * them rather than retiring them. See `deleteScopedSubscription`.
+   */
+  private async syncScopedStatus(userId: number, methodId: number, eventClass: string, status: string): Promise<void> {
+    if (status !== "ACTIVE") {
+      await this.table("subscriber_subscriptions")
+        .where({ subscriber_method_id: methodId, event_class: eventClass })
+        .update({ status, updated_at: this.knexUnscoped.fn.now() });
+      return;
+    }
+
+    const narrow = await this.table("subscriber_subscriptions")
+      .where({ subscriber_method_id: methodId, event_class: eventClass })
+      .whereNot("scope_type", "ALL");
+
+    if (narrow.length > 0) {
+      // Narrowed. Revive exactly what they chose, and leave the ALL row retired
+      // so switching the class back on does not quietly widen them.
+      await this.table("subscriber_subscriptions")
+        .where({ subscriber_method_id: methodId, event_class: eventClass })
+        .whereNot("scope_type", "ALL")
+        .update({ status: "ACTIVE", updated_at: this.knexUnscoped.fn.now() });
+      return;
+    }
+
     await this.table("subscriber_subscriptions")
       .insert({
-        subscriber_user_id: sub.subscriber_user_id,
-        subscriber_method_id: sub.subscriber_method_id,
+        subscriber_user_id: userId,
+        subscriber_method_id: methodId,
         scope_type: "ALL",
         scope_id: "",
-        event_class: sub.event_type,
+        event_class: eventClass,
         min_severity: "ANY",
         notify_on: null,
-        status: sub.status ?? "ACTIVE",
+        status: "ACTIVE",
         created_at: this.knexUnscoped.fn.now(),
         updated_at: this.knexUnscoped.fn.now(),
       })
@@ -217,8 +270,43 @@ export class SubscriptionSystemRepository extends BaseRepository {
       // fail: the old table's UNIQUE is on (user, method, event) and this one's
       // is on (method, scope, scope_id, class), so the same second subscribe
       // reaches a conflict on both and both have to mean the same thing.
+      //
+      // `min_severity` is deliberately not in the merge: a subscriber who set a
+      // floor and later toggled the class off and on again keeps their floor.
       .onConflict(["subscriber_method_id", "scope_type", "scope_id", "event_class"])
-      .merge({ status: sub.status ?? "ACTIVE", updated_at: this.knexUnscoped.fn.now() });
+      .merge({ status: "ACTIVE", updated_at: this.knexUnscoped.fn.now() });
+  }
+
+  /**
+   * Removes one scoped subscription outright.
+   *
+   * A delete rather than a retire, and the difference is load-bearing: INACTIVE
+   * has to keep meaning "switched off by the inherited on/off toggle" so that
+   * `syncScopedStatus` can revive precisely those rows. If removing a component
+   * merely retired it, switching the class off and on again would bring it back.
+   */
+  async deleteScopedSubscription(
+    methodId: number,
+    eventClass: string,
+    scopeType: string,
+    scopeId: string,
+  ): Promise<number> {
+    return await this.table("subscriber_subscriptions")
+      .where({
+        subscriber_method_id: methodId,
+        event_class: eventClass,
+        scope_type: scopeType,
+        scope_id: scopeId,
+      })
+      .del();
+  }
+
+  /** Every narrow (non-ALL) scope one method holds for an event class. */
+  async deleteNarrowScopedSubscriptions(methodId: number, eventClass: string): Promise<number> {
+    return await this.table("subscriber_subscriptions")
+      .where({ subscriber_method_id: methodId, event_class: eventClass })
+      .whereNot("scope_type", "ALL")
+      .del();
   }
 
   async getUserSubscriptionV2ById(id: number): Promise<UserSubscriptionV2Record | undefined> {
@@ -257,14 +345,15 @@ export class SubscriptionSystemRepository extends BaseRepository {
     const rows = await this.table("user_subscriptions_v2").where("id", id).update(updateData);
 
     if (existing && data.status !== undefined) {
-      await this.table("subscriber_subscriptions")
-        .where({
-          subscriber_method_id: existing.subscriber_method_id,
-          scope_type: "ALL",
-          scope_id: "",
-          event_class: existing.event_type,
-        })
-        .update({ status: data.status, updated_at: this.knexUnscoped.fn.now() });
+      // Through the same rule as a first subscribe, not straight onto the ALL
+      // row: off must retire every scope, and on must not widen a subscriber who
+      // had narrowed. See `syncScopedStatus`.
+      await this.syncScopedStatus(
+        existing.subscriber_user_id,
+        existing.subscriber_method_id,
+        existing.event_type,
+        data.status,
+      );
     }
     return rows;
   }

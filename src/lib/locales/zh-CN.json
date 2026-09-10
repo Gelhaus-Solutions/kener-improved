@@ -2,6 +2,7 @@
   "name": "简体中文",
   "mappings": {
     "%latency %metric latency": "%latency %metric 延迟",
+    "Add": "添加",
     "Affected Monitors (%count)": "受影响的监控项 (%count)",
     "All Systems Operational": "所有系统运行正常",
     "Average Latency": "平均延迟",
@@ -9,7 +10,9 @@
     "Back": "返回",
     "Badges": "徽章",
     "CANCELLED": "已取消",
+    "Choose a component": "选择一个组件",
     "COMPLETED": "已完成",
+    "Component": "组件",
     "Continue": "继续",
     "Copied": "已复制",
     "Current": "当前",
@@ -31,6 +34,8 @@
     "End Time": "结束时间",
     "Enter the verification code sent to your email.": "输入发送到您的电子邮件的验证码。",
     "Events": "动态",
+    "Everything": "全部",
+    "Everything on %page": "%page 上的全部",
     "Failed to load data": "加载数据失败",
     "Failed to load latency data": "加载延迟数据失败",
     "Failed to load status data for this day": "无法加载当天的状态数据",
@@ -89,8 +94,10 @@
     "Notifications": "通知",
     "One-time": "单次",
     "Ongoing": "进行中",
+    "Only what I choose": "仅我选择的",
     "Operational": "正常运行",
     "Own check": "自身检查",
+    "Page": "页面",
     "Part of (%count)": "属于 (%count)",
     "Partial Degraded Performance": "部分性能下降",
     "Partial System Outage": "部分系统故障",
@@ -103,6 +110,7 @@
     "Read more": "更多",
     "READY": "就绪",
     "Recurring": "周期性",
+    "Remove": "移除",
     "RESOLVED": "已解决",
     "RSS feed": "RSS 订阅源",
     "SCHEDULED": "已计划",
@@ -120,6 +128,7 @@
     "Status history and latency trend": "状态历史和延迟趋势",
     "Subscribe": "订阅",
     "Subscribe to Updates": "订阅更新",
+    "Switching to everything discards the list above.": "切换为全部会丢弃上面的列表。",
     "There are no incidents or maintenances scheduled for this month.": "本月没有任何事故或安排的维护。",
     "There are no ongoing incidents or maintenance events.": "当前没有正在进行的事件或维护。",
     "Total Incidents": "事件总数",
@@ -137,6 +146,8 @@
     "Verification failed": "验证失败",
     "Verify": "验证",
     "Verifying": "正在验证",
-    "We sent a 6-digit code to": "我们发送了一个 6 位代码至"
+    "We sent a 6-digit code to": "我们发送了一个 6 位代码至",
+    "What to send": "发送哪些内容",
+    "You will only hear about these.": "您将只收到这些的通知。"
   }
 }
