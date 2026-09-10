@@ -189,6 +189,104 @@ export class RollupsRepository extends BaseRepository {
   }
 
   /**
+   * Every rollup bucket in range, as a **stream** (F2).
+   *
+   * The export exists because the buffered readers cannot serve it.
+   * `getRollups` materialises an array and `readUptimeBuckets` builds a Map of
+   * accumulators; either is fine for a page of ninety buckets and neither
+   * survives the acceptance case, which is 365 days by 200 monitors at hourly
+   * grain - 1.75 million rows. So this hands back a stream and the CSV writer
+   * turns rows into lines one at a time, and the process's memory stays flat
+   * whatever the range.
+   *
+   * **`pg-query-stream` is a real dependency of this method on Postgres.** knex
+   * resolves it lazily inside the pg dialect, so its absence is not a build
+   * error or a type error: it is a `Cannot find module` thrown at the moment a
+   * customer asks for an export, on the one dialect production runs. It is in
+   * `package.json` for this method and removing it breaks only this path.
+   *
+   * `monitorTags` of `null` means every monitor in the org, which is what the ALL
+   * scope wants. That is not the same as passing every tag: `table()` already
+   * constrains the query to the org, so omitting the `whereIn` is both correct
+   * and avoids binding thousands of parameters into a single statement.
+   *
+   * Ordered by `(monitor_tag, bucket_start)` so the CSV comes out grouped by
+   * component and chronological within each - the order a human reads it in, and
+   * the order that lets the writer close off one monitor's rows before starting
+   * the next without holding anything.
+   */
+  streamRollups(
+    grain: RollupGrain,
+    monitorTags: ReadonlyArray<string> | null,
+    regionId: number,
+    from: number,
+    to: number,
+  ): NodeJS.ReadableStream {
+    let query = this.table(ROLLUP_TABLES[grain])
+      .where("region_id", regionId)
+      .where("bucket_start", ">=", from)
+      .where("bucket_start", "<", to);
+
+    if (monitorTags !== null) {
+      query = query.whereIn("monitor_tag", monitorTags as string[]);
+    }
+
+    return query.orderBy("monitor_tag", "asc").orderBy("bucket_start", "asc").stream();
+  }
+
+  /**
+   * Per-monitor latency totals over a window, summed in SQL (F2).
+   *
+   * The companion to `getSloCounts`, which does the same for the status counts.
+   * Together they are the whole per-component summary the PDF prints, and both
+   * are bounded by the number of monitors rather than the number of buckets, so
+   * a year-long report costs the same as a day-long one.
+   *
+   * **No percentiles here, deliberately.** `latency_p95` on a rollup row is
+   * authoritative for that one bucket and meaningless averaged across a
+   * thousand; a percentile over a range has to merge the histograms, which is
+   * what `latencyPercentiles.ts` is for. The summary reports the mean, the
+   * minimum and the maximum, all three of which do combine by addition, and the
+   * CSV carries the per-bucket percentiles for anyone who wants them.
+   */
+  async getLatencySummary(
+    grain: RollupGrain,
+    monitorTags: ReadonlyArray<string> | null,
+    regionId: number,
+    from: number,
+    to: number,
+  ): Promise<Map<string, { count: number; sum: number; min: number | null; max: number | null }>> {
+    const out = new Map<string, { count: number; sum: number; min: number | null; max: number | null }>();
+    if (monitorTags !== null && monitorTags.length === 0) return out;
+
+    let query = this.table(ROLLUP_TABLES[grain])
+      .select("monitor_tag")
+      .sum({ latency_count: "latency_count" })
+      .sum({ latency_sum: "latency_sum" })
+      .min({ latency_min: "latency_min" })
+      .max({ latency_max: "latency_max" })
+      .where("region_id", regionId)
+      .where("bucket_start", ">=", from)
+      .where("bucket_start", "<", to);
+
+    if (monitorTags !== null) {
+      query = query.whereIn("monitor_tag", monitorTags as string[]);
+    }
+
+    const rows = await query.groupBy("monitor_tag");
+
+    for (const row of rows as Array<Record<string, unknown>>) {
+      out.set(String(row.monitor_tag), {
+        count: Number(row.latency_count ?? 0),
+        sum: Number(row.latency_sum ?? 0),
+        min: row.latency_min === null || row.latency_min === undefined ? null : Number(row.latency_min),
+        max: row.latency_max === null || row.latency_max === undefined ? null : Number(row.latency_max),
+      });
+    }
+    return out;
+  }
+
+  /**
    * Sums rollup buckets into the caller's own buckets, **in SQL**.
    *
    * The obvious implementation of the read path fetches rollup rows and folds

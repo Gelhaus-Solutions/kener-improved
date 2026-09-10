@@ -2,6 +2,7 @@ import db from "../db/db.js";
 import { MERGED_REGION_ID } from "../db/regions.js";
 import { addSample, emptyAccumulator } from "./rollupCompute.js";
 import { rollupsUsable } from "./uptimeAggregator.js";
+import { resolveScopeTags, type MonitorScopeType } from "./monitorScope.js";
 import {
   BURN_WINDOWS,
   addSloCounts,
@@ -36,26 +37,13 @@ function hourStart(ts: number): number {
  * rule in `publicMonitorResolver`, and for a different reason: that one decides
  * what a stranger may *see*, this one decides what a number is computed *from*.
  * The public panel filters what it displays; it never changes what was measured.
+ *
+ * The resolution itself moved to `services/monitorScope.ts` when F2 needed the
+ * same three scope types for reports. Two copies that were supposed to agree is
+ * the shape of bug this repository keeps finding, so there is one.
  */
 export async function resolveScope(target: SlaTargetRow): Promise<string[]> {
-  if (target.scope_type === "MONITOR") {
-    const monitor = await db.getMonitorByTag(target.scope_ref);
-    return monitor ? [target.scope_ref] : [];
-  }
-
-  if (target.scope_type === "PAGE") {
-    const pageId = Number(target.scope_ref);
-    if (!Number.isFinite(pageId)) return [];
-    const rows = await db.getPageMonitors(pageId);
-    return rows.map((row) => String(row.monitor_tag));
-  }
-
-  if (target.scope_type === "CATEGORY") {
-    const monitors = await db.getMonitors({ category_name: target.scope_ref });
-    return monitors.map((monitor) => String(monitor.tag));
-  }
-
-  return [];
+  return await resolveScopeTags(target.scope_type as MonitorScopeType, target.scope_ref);
 }
 
 /**

@@ -84,6 +84,10 @@ export const ROUTE_SCOPE_MAP: Record<string, MethodScopes> = {
     DELETE: "incidents.write",
   },
 
+  // Reporting (F2, F3). Exports and incident metrics are reads; a key that may
+  // pull a monthly PDF need not be able to touch a monitor.
+  "/(api)/api/v5/reports/uptime": { GET: "reports.read" },
+
   // Maintenances
   "/(api)/api/v4/maintenances": { GET: "maintenances.read", POST: "maintenances.write" },
   "/(api)/api/v4/maintenances/[maintenance_id]": {

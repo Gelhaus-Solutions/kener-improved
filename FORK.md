@@ -201,7 +201,7 @@ git push
 
 | Area                                                                               | Divergence                                                                   |
 | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `package.json`                                                                     | `repository`, `homepage`, `bugs` point here; fork-added `scripts` entries    |
+| `package.json`                                                                     | `repository`, `homepage`, `bugs` point here; fork-added `scripts` entries and fork-only dependencies (`pdfkit`, `pg-query-stream`) |
 | `package.json` `version`                                                           | Fork-owned; the fork releases on its own schedule and numbers                |
 | `README.md`                                                                        | Fork notice at the top; upstream content otherwise                           |
 | `.github/FUNDING.yml`                                                              | Emptied - sponsor upstream directly, not this fork                           |

@@ -8,6 +8,7 @@
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
   import BlendIcon from "@lucide/svelte/icons/blend";
   import TargetIcon from "@lucide/svelte/icons/target";
+  import FileChartColumnIcon from "@lucide/svelte/icons/file-chart-column";
   import MailboxIcon from "@lucide/svelte/icons/mailbox";
   import AppSidebar from "./manage/app-sidebar.svelte";
   import Settings2Icon from "@lucide/svelte/icons/settings-2";
@@ -65,7 +66,11 @@
         { title: "Monitoring Data", url: "/manage/app/monitoring-data", icon: DatabaseIcon },
         // F1a. In Operate rather than Settings: an error budget is something an
         // operator watches during a bad week, not a preference set once.
-        { title: "SLOs", url: "/manage/app/slo", icon: TargetIcon }
+        { title: "SLOs", url: "/manage/app/slo", icon: TargetIcon },
+        // F2. Beside SLOs, because the two answer the same question for two
+        // audiences: the SLO screen is what an operator watches, a report is what
+        // gets handed to the customer who asked about the same week.
+        { title: "Reports", url: "/manage/app/reports", icon: FileChartColumnIcon }
       ]
     },
     {

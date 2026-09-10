@@ -48,6 +48,14 @@ export const orgPermissions: Array<{ id: string; permission_name: string }> = [
   { id: "slo.read", permission_name: "View SLO targets, attainment and error budgets" },
   { id: "slo.write", permission_name: "Create, update, and delete SLO targets" },
 
+  // Reporting: exports, incident metrics and scheduled delivery (F2, F3, F4).
+  // Its own pair rather than folding into `slo.*` or `monitors.read`: a report is
+  // the document handed to a customer or an auditor, and the people who may pull
+  // one are routinely not the people who may change what is monitored. `write`
+  // is only about schedules - running an export on demand is a read.
+  { id: "reports.read", permission_name: "Run uptime and incident reports, and view report schedules" },
+  { id: "reports.write", permission_name: "Create, update, and delete scheduled report delivery" },
+
   // Organisations (P4)
   { id: "orgs.read", permission_name: "View organisation settings" },
   { id: "orgs.write", permission_name: "Create and update organisations" },
@@ -77,6 +85,9 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   getSlaOverview: "slo.read",
   saveSlaTarget: "slo.write",
   deleteSlaTarget: "slo.write",
+
+  // Reporting (F2, F3, F4).
+  getReportOptions: "reports.read",
 
   // Incidents (C2c). A fork-invented action on an upstream resource, so it maps
   // to the upstream permission rather than inventing one: acknowledging is
@@ -234,6 +245,11 @@ export const ORG_ROUTE_PERMISSION_MAP: Record<string, string | null> = {
   // button on it is separately gated on `slo.write` by its own action, the same
   // shape the webhooks screen uses.
   "/(manage)/manage/app/slo": "slo.read",
+
+  // Reports (F2). `reports.read` opens the screen; the export endpoint beneath
+  // it re-checks the same permission for itself, because a `+server.ts` never
+  // runs the layout that consults this map.
+  "/(manage)/manage/app/reports": "reports.read",
 
   // The postmortem editor (C1). Nested under the incident it belongs to, which
   // is safe here in a way it would not be under `/monitors/`: the segment before

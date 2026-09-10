@@ -103,6 +103,8 @@ class DbImpl {
   clearDirtyHours!: RollupsRepository["clearDirtyHours"];
   upsertRollups!: RollupsRepository["upsertRollups"];
   getRollups!: RollupsRepository["getRollups"];
+  streamRollups!: RollupsRepository["streamRollups"];
+  getLatencySummary!: RollupsRepository["getLatencySummary"];
   getRollupBucketsAggregated!: RollupsRepository["getRollupBucketsAggregated"];
   getRollupLatencyBuckets!: RollupsRepository["getRollupLatencyBuckets"];
   getLatencyRegions!: RollupsRepository["getLatencyRegions"];
@@ -646,6 +648,8 @@ class DbImpl {
     this.clearDirtyHours = this.rollups.clearDirtyHours.bind(this.rollups);
     this.upsertRollups = this.rollups.upsertRollups.bind(this.rollups);
     this.getRollups = this.rollups.getRollups.bind(this.rollups);
+    this.streamRollups = this.rollups.streamRollups.bind(this.rollups);
+    this.getLatencySummary = this.rollups.getLatencySummary.bind(this.rollups);
     this.getRollupBucketsAggregated = this.rollups.getRollupBucketsAggregated.bind(this.rollups);
     this.getRollupLatencyBuckets = this.rollups.getRollupLatencyBuckets.bind(this.rollups);
     this.getLatencyRegions = this.rollups.getLatencyRegions.bind(this.rollups);
