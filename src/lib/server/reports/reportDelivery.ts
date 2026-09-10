@@ -2,6 +2,8 @@ import db from "../db/db.js";
 import { MERGED_REGION_ID } from "../db/regions.js";
 import { GetNowTimestampUTC } from "../tool.js";
 import emailQueue from "../queues/emailQueue.js";
+import { emit } from "../events/emit.js";
+import { EMAIL_CONSUMER } from "../events/consumers/email.js";
 import { buildReportModel, prepareReport, termsFrom, type ReportRequest } from "./reportData.js";
 import { csvUptimeReportStream } from "./csvUptimeReport.js";
 import { collectIncidentSections, collectSloRows } from "./reportExtras.js";
@@ -221,18 +223,111 @@ export async function deliverArtifact(
     <p>This link stops working on ${expiresOn}. Anyone with the link can open the report, so treat it as confidential.</p>
   `;
 
+  // F4b. One event for the run, then one delivery row per recipient hanging off
+  // it, so a report that fails to send is on the E9 delivery log beside every
+  // other failed message instead of only in the container log.
+  //
+  // **A real outbox event, not a synthetic id.** `event_deliveries` is UNIQUE on
+  // (event_id, consumer, target_type, target_id), and that constraint is what
+  // collapses a duplicate delivery after a crash. A NULL event_id would not
+  // deduplicate at all - NULL is not equal to NULL - and a made-up one would put
+  // rows on a log whose whole value is that every row traces to an event. So the
+  // send emits one.
+  //
+  // The event is administrative: it exists for the audit trail and for these
+  // rows, and no customer webhook is offered it. See `event-taxonomy.ts`.
+  const emitted = await emit({
+    org_id: schedule.org_id,
+    type: "report.delivered",
+    aggregate_id: schedule.id,
+    payload: {
+      schedule_id: schedule.id,
+      schedule_name: schedule.name,
+      filename: artifact.filename,
+      size_bytes: artifact.sizeBytes,
+      range_from: artifact.rangeFrom,
+      range_to: artifact.rangeTo,
+      expires_at: artifact.expiresAt,
+      recipient_count: recipients.length,
+    },
+  });
+
   let queued = 0;
   for (const recipient of recipients) {
-    await emailQueue.push({
+    const emailJob = {
       toEmails: [recipient],
       templateSubject: subject,
       templateHtmlBody: body,
       templateTextBody: `${schedule.name}\n\n${day(artifact.rangeFrom)} to ${day(artifact.rangeTo)} (UTC)\n\nDownload: ${downloadUrl}\nThis link stops working on ${expiresOn}.`,
       variables: {},
-    });
+    };
+
+    // Written *before* the send, so a message that never leaves is still on the
+    // log. Consumer `email` rather than a new one: that consumer replays a
+    // delivery's stored `request_body`, which is exactly what retrying a report
+    // mail should do - resend the link that was sent, not re-render the report
+    // against today's data and quietly send something else.
+    const deliveryId = await createDeliveryRow(emitted.event_id, schedule.org_id, recipient, emailJob);
+
+    await emailQueue.push({ ...emailJob, delivery_id: deliveryId });
     queued++;
   }
   return queued;
+}
+
+/**
+ * The `event_deliveries` row for one recipient of one report (F4b).
+ *
+ * Mirrors `subscriberQueue.createDeliveryRow` down to the status, and for the
+ * same reasons. Kept as its own function here rather than shared with that one
+ * because the two differ in what identifies a recipient: a subscriber has a
+ * method id, and a report recipient is a literal address on the schedule.
+ *
+ * **Never throws.** A delivery row is bookkeeping; failing the send because the
+ * bookkeeping failed would turn a logging gap into a missing report.
+ */
+async function createDeliveryRow(
+  eventId: string,
+  orgId: number,
+  recipient: string,
+  emailJob: Record<string, unknown>,
+): Promise<number | undefined> {
+  // `target_id` is 128 characters. An address longer than that is far outside
+  // anything real, and truncating is better than failing: the full address is on
+  // `request_headers` either way, and a collision here degrades to no row rather
+  // than to a wrong one, because the insert below is caught.
+  const targetId = recipient.slice(0, 128);
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    await db.insertEventDeliveries([
+      {
+        event_id: eventId,
+        org_id: orgId,
+        consumer: EMAIL_CONSUMER,
+        target_type: "report_recipient",
+        target_id: targetId,
+        // IN_FLIGHT, not PENDING: the job is already on its way to emailQueue,
+        // and a PENDING row would be swept up by the relay and sent again.
+        status: "IN_FLIGHT",
+        attempts: 0,
+        next_attempt_at: null,
+        last_attempt_at: now,
+        response_code: null,
+        response_body: null,
+        error: null,
+        request_body: JSON.stringify(emailJob),
+        request_headers: JSON.stringify({ to: recipient }),
+        duration_ms: null,
+        created_at: now,
+        updated_at: now,
+      },
+    ]);
+    const rows = await db.getEventDeliveriesByEventId(eventId);
+    return rows.find((r) => r.consumer === EMAIL_CONSUMER && r.target_id === targetId)?.id;
+  } catch (error) {
+    console.error("report delivery: could not create a delivery row, sending anyway:", error);
+    return undefined;
+  }
 }
 
 /** Whether the artifact is small enough to be worth attaching as well. */

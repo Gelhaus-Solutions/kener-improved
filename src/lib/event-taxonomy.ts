@@ -120,6 +120,13 @@ export const ADMIN_EVENTS = [
   "apikey.revoked",
   "site_settings.updated",
   "role.permissions_changed",
+  // A scheduled report went out (F4b). Administrative for the same reason
+  // `webhook_endpoint.disabled` is: the system emits it rather than a person,
+  // and it exists so the send has an event to hang its `event_deliveries` rows
+  // on. Deliberately NOT subscribable - nobody has asked to be told by webhook
+  // that their own report was mailed, and offering it would be a promise to
+  // keep. Making it subscribable later is additive and breaks nothing.
+  "report.delivered",
 ] as const;
 
 export const EVENT_TYPES = [
@@ -203,6 +210,7 @@ export const EVENT_AGGREGATE_TYPE: Record<EventType, string> = {
   "apikey.revoked": "api_key",
   "site_settings.updated": "site_settings",
   "role.permissions_changed": "role",
+  "report.delivered": "report_schedule",
 };
 
 const ADMIN_EVENT_SET: ReadonlySet<string> = new Set(ADMIN_EVENTS);
