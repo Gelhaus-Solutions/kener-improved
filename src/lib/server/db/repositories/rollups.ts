@@ -521,6 +521,36 @@ export class RollupsRepository extends BaseRepository {
     return { lo: Number(row.lo), hi: Number(row.hi) };
   }
 
+  /**
+   * Every region the rollup engine must cover for this org (F6d).
+   *
+   * **The catalogue, not a DISTINCT over the samples.** A sample can only carry
+   * a region that exists in `regions`, so the catalogue is the complete answer
+   * and costs a handful of rows; asking `monitoring_data` for its distinct
+   * regions would scan the largest table in the schema to learn something a
+   * five-row table already knows.
+   *
+   * Retired regions are included deliberately. Their watermark still has to
+   * advance, because `retention` refuses to delete raw samples until *every*
+   * region's watermark is past the cutoff - a region that stopped advancing
+   * would block raw deletion for good. Advancing a silent region is nearly free:
+   * it finds no tags and writes one number.
+   *
+   * `MERGED_REGION_ID` is prepended rather than selected, and always comes
+   * first. Region 0's row carries a null `org_id` so a scoped read cannot return
+   * it, which is the point - it is a constant, not something to look up - and
+   * being first is what keeps a slow probe region from delaying the merged
+   * verdict the public page reads.
+   */
+  async getRollupRegionIds(): Promise<number[]> {
+    const rows = await this.table("regions").select("id");
+    const ids = rows
+      .map((row: { id: number }) => Number(row.id))
+      .filter((id: number) => Number.isFinite(id) && id !== MERGED_REGION_ID)
+      .sort((a: number, b: number) => a - b);
+    return [MERGED_REGION_ID, ...ids];
+  }
+
   /** Every monitor tag that has samples in a region. Drives the backfill's fan-out. */
   async getTagsWithSamples(regionId: number, from: number, to: number): Promise<string[]> {
     const rows = await this.table("monitoring_data")

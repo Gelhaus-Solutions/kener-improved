@@ -105,14 +105,19 @@ export interface UptimeBucketRequest {
 /**
  * Whether the rollups can be believed for this region.
  *
+ * Defaults to the merged region, which is what uptime always means: a bar on the
+ * status page is the single authoritative verdict, never one probe's view of it.
+ * F6d gave every region its own watermark and backfill flag, so latency reads
+ * pass a region here; uptime deliberately does not.
+ *
  * The kill switch. `backfill_complete` is false until the history behind the
  * watermark has actually been built, and it can be set back to false by hand or
  * by `npm run rollups:backfill --reset` to put the read path onto raw SQL
  * without a deploy.
  */
-export async function rollupsUsable(grain: RollupGrain): Promise<boolean> {
+export async function rollupsUsable(grain: RollupGrain, regionId: number = MERGED_REGION_ID): Promise<boolean> {
   try {
-    const state = await db.getRollupState(grain, MERGED_REGION_ID);
+    const state = await db.getRollupState(grain, regionId);
     return !!state?.backfill_complete && state.watermark_ts !== null;
   } catch {
     // A read path that throws because the rollup bookkeeping is unavailable is

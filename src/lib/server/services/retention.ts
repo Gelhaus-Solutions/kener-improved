@@ -168,14 +168,31 @@ export function describeCoverage(
  * end up in a log an operator will actually read.
  */
 async function rawDeletionBlockedBecause(cutoff: number): Promise<string | null> {
-  for (const grain of ["5m", "1h", "1d"] as RollupGrain[]) {
-    const state = await db.getRollupState(grain, MERGED_REGION_ID);
-    if (!state) return `the ${grain} rollups have never run`;
-    if (!state.backfill_complete) return `the ${grain} rollup backfill has not finished`;
-    if (state.watermark_ts === null) return `the ${grain} rollups have no watermark`;
-    if (state.watermark_ts < cutoff) {
-      const behind = Math.round((cutoff - state.watermark_ts) / DAY);
-      return `the ${grain} rollup watermark is ${behind} day(s) behind the retention cutoff`;
+  // **Every region, not just the merged one (F6d).** This is the guard that
+  // stands between the retention sweep and permanent data loss, and until F6d
+  // only region 0 was rolled up, so checking only region 0 was the whole truth.
+  // It stopped being the whole truth the moment probe regions started getting
+  // buckets: region 0 being caught up says nothing about whether a probe's
+  // samples have been rolled up yet, and deleting them on region 0's word would
+  // destroy history that was never summarised.
+  //
+  // Cheap, and it cannot deadlock: `getRollupRegionIds` returns the same set the
+  // scheduler advances every five minutes, retired regions included, precisely
+  // so that a silent region's watermark keeps moving rather than blocking
+  // deletion for good.
+  const regionIds = await db.getRollupRegionIds();
+
+  for (const regionId of regionIds) {
+    const where = regionId === MERGED_REGION_ID ? "" : ` for region ${regionId}`;
+    for (const grain of ["5m", "1h", "1d"] as RollupGrain[]) {
+      const state = await db.getRollupState(grain, regionId);
+      if (!state) return `the ${grain} rollups have never run${where}`;
+      if (!state.backfill_complete) return `the ${grain} rollup backfill has not finished${where}`;
+      if (state.watermark_ts === null) return `the ${grain} rollups have no watermark${where}`;
+      if (state.watermark_ts < cutoff) {
+        const behind = Math.round((cutoff - state.watermark_ts) / DAY);
+        return `the ${grain} rollup watermark is ${behind} day(s) behind the retention cutoff${where}`;
+      }
     }
   }
   return null;

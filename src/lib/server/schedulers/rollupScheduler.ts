@@ -85,23 +85,82 @@ async function runForwardPass(): Promise<void> {
       );
     }
 
-    const advanced = await advanceWatermark(MERGED_REGION_ID, nowTs);
-    if (advanced.hours > 0) {
-      console.log(
-        `Rollups: sealed ${advanced.hours} hour(s) -> ${advanced.buckets5m} 5m, ${advanced.buckets1h} 1h, ${advanced.days} 1d`,
-      );
+    // One watermark per region (F6d). Before this the scheduler passed
+    // `MERGED_REGION_ID` here and the rollup tables held exactly one region
+    // however many probes were reporting, so every per-region read fell back to
+    // a raw scan over the full retention window.
+    //
+    // **Region 0 goes first and each region is isolated.** `getRollupRegionIds`
+    // puts the merged verdict at the head of the list, and the try/catch means a
+    // probe region whose samples are corrupt, or whose queries are slow, cannot
+    // delay or fail the merged verdict the public page reads. That is the
+    // property this loop exists to preserve; losing it would make adding a probe
+    // a risk to the status page.
+    for (const regionId of await db.getRollupRegionIds()) {
+      try {
+        const advanced = await advanceWatermark(regionId, nowTs);
+        if (advanced.hours > 0) {
+          console.log(
+            `Rollups: region ${regionId} sealed ${advanced.hours} hour(s) -> ` +
+              `${advanced.buckets5m} 5m, ${advanced.buckets1h} 1h, ${advanced.days} 1d`,
+          );
+        }
+      } catch (error) {
+        console.error(`Rollup forward pass failed for region ${regionId}:`, error);
+      }
     }
   });
+}
+
+/**
+ * The region this tick should backfill, or null when every region is done.
+ *
+ * **One region per tick, not one chunk per region (F6d).** The whole reason
+ * backfill is its own rate-limited job is that it must not starve the monitor
+ * checks of the five worker connections they share; fanning out per region would
+ * multiply the work per tick by the number of probes and undo exactly that.
+ * History arrives a little slower with several regions, which is the right
+ * trade: it is history, and the forward pass is already current.
+ *
+ * Region 0 wins outright while it is incomplete. It is the verdict every read in
+ * Kener goes through, so its history is worth more than any probe's, and the
+ * read path stays on raw SQL until its `backfill_complete` flips.
+ *
+ * After that, the least-progressed region goes first. A region that has never
+ * started sorts ahead of one part-way through, so a newly added probe is not
+ * left behind a region that is nearly finished.
+ */
+async function pickBackfillRegion(): Promise<number | null> {
+  const regionIds = await db.getRollupRegionIds();
+
+  let candidate: { regionId: number; cursor: number } | null = null;
+  for (const regionId of regionIds) {
+    const state = await db.getRollupState("1h", regionId);
+    if (state?.backfill_complete) continue;
+
+    if (regionId === MERGED_REGION_ID) return regionId;
+
+    // Never started sorts first: `backfill_cursor_ts` is null until the first
+    // chunk lands, and treating that as "furthest behind" is what stops a new
+    // probe queueing behind an almost-finished one forever.
+    const cursor = state?.backfill_cursor_ts ?? Number.NEGATIVE_INFINITY;
+    if (!candidate || cursor < candidate.cursor) candidate = { regionId, cursor };
+  }
+
+  return candidate?.regionId ?? null;
 }
 
 async function runBackfillPass(): Promise<void> {
   await forEachOrg("Rollup backfill", async () => {
     const nowTs = GetNowTimestampUTC();
-    const progress = await backfillChunk(MERGED_REGION_ID, nowTs, 1);
+    const regionId = await pickBackfillRegion();
+    if (regionId === null) return;
+
+    const progress = await backfillChunk(regionId, nowTs, 1);
     if (progress.chunksProcessed > 0) {
       console.log(
-        `Rollups: backfilled to ${new Date((progress.cursor ?? 0) * 1000).toISOString()} ` +
-          `(${progress.summary.hours} hours)${progress.done ? " — COMPLETE" : ""}`,
+        `Rollups: region ${regionId} backfilled to ${new Date((progress.cursor ?? 0) * 1000).toISOString()} ` +
+          `(${progress.summary.hours} hours)${progress.done ? " (COMPLETE)" : ""}`,
       );
     }
   });
@@ -120,17 +179,32 @@ async function runDailySweep(): Promise<void> {
   await forEachOrg("Rollup daily sweep", async () => {
     const nowTs = GetNowTimestampUTC();
     const from = nowTs - 3 * 86400;
-    const tags = await db.getTagsWithSamples(MERGED_REGION_ID, from, nowTs);
-    if (tags.length === 0) return;
 
+    // Per region (F6d), and asking each region for its own tags rather than
+    // reusing region 0's: a probe that watches three of twenty monitors should
+    // refold three days of three monitors, not of twenty.
+    //
+    // Unbounded across regions on purpose, unlike the backfill. This runs once a
+    // day over three days, and every day it touches is one somebody may already
+    // have been shown - so a region skipped here is a region whose daily bars
+    // stay wrong until something else happens to dirty them.
     const days: Array<{ monitor_tag: string; region_id: number; day_start: number }> = [];
-    for (const monitor_tag of tags) {
-      for (let day = Math.floor(from / 86400) * 86400; day <= nowTs; day += 86400) {
-        days.push({ monitor_tag, region_id: MERGED_REGION_ID, day_start: day });
+    let regionsWithSamples = 0;
+
+    for (const regionId of await db.getRollupRegionIds()) {
+      const tags = await db.getTagsWithSamples(regionId, from, nowTs);
+      if (tags.length === 0) continue;
+      regionsWithSamples++;
+      for (const monitor_tag of tags) {
+        for (let day = Math.floor(from / 86400) * 86400; day <= nowTs; day += 86400) {
+          days.push({ monitor_tag, region_id: regionId, day_start: day });
+        }
       }
     }
+    if (days.length === 0) return;
+
     const written = await foldDays(days, nowTs);
-    console.log(`Rollups: daily sweep refolded ${written} day bucket(s) across ${tags.length} monitor(s)`);
+    console.log(`Rollups: daily sweep refolded ${written} day bucket(s) across ${regionsWithSamples} region(s)`);
   });
 }
 

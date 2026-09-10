@@ -148,23 +148,31 @@ export async function readLatencySeries(request: LatencySeriesRequest): Promise<
 
   const grain = pickGrain(startTimestamp, intervalSeconds);
 
-  // **Only the merged region has rollups.** `rollupScheduler` passes
-  // `MERGED_REGION_ID` to the watermark, the backfill and the dirty drain alike,
-  // so the rollup tables hold region 0 and nothing else. A probe region is
-  // therefore served from raw samples - correct, and cheap for the same reason
-  // it is not rolled up: a probe reports far less often than the merged verdict.
-  // When B1b starts writing regions in earnest this is the line to revisit.
-  const canUseRollups =
-    regionId === MERGED_REGION_ID && grainFits(grain, startTimestamp, intervalSeconds) && (await rollupsUsable(grain));
+  // Every region has rollups now (F6d). This used to require
+  // `regionId === MERGED_REGION_ID`, because the scheduler passed that constant
+  // to the watermark and the backfill alike and the rollup tables held region 0
+  // and nothing else - so a probe region had to be served from raw samples. The
+  // scheduler now advances a watermark per region, and `rollupsUsable` is asked
+  // about *this* region, so a probe that has finished backfilling is served from
+  // its own buckets like any other.
+  //
+  // Asking per region rather than trusting region 0 is the load-bearing part: a
+  // probe added yesterday has no history yet, and serving its empty buckets as
+  // though they were authoritative would report an outage that never happened.
+  const canUseRollups = grainFits(grain, startTimestamp, intervalSeconds) && (await rollupsUsable(grain, regionId));
 
-  // Discovered from the samples, because the rollup tables cannot answer it.
+  // Still discovered from the samples rather than from the rollup tables. The
+  // rollups only reach as far as the watermark, so a region that started
+  // reporting an hour ago has samples and no buckets - and "which regions
+  // reported?" has to include it, or the UI offers no way to look at the region
+  // whose data is newest. The DISTINCT is served by the covering index.
   const regions = await db.getLatencyRegions(monitorTag, startTimestamp, endTimestamp);
 
   if (!canUseRollups) {
     return { ...(await readFromRaw(monitorTag, regionId, startTimestamp, intervalSeconds, points)), regions };
   }
 
-  const state = await db.getRollupState(grain, MERGED_REGION_ID);
+  const state = await db.getRollupState(grain, regionId);
   const watermark = state?.watermark_ts ?? 0;
   const sealedEnd = Math.min(endTimestamp, watermark);
 
