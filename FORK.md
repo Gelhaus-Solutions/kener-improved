@@ -199,29 +199,30 @@ git push
 
 ## How the fork diverges
 
-| Area                                                                               | Divergence                                                                   |
-| ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Area                                                                               | Divergence                                                                                                                         |
+| ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | `package.json`                                                                     | `repository`, `homepage`, `bugs` point here; fork-added `scripts` entries and fork-only dependencies (`pdfkit`, `pg-query-stream`) |
-| `package.json` `version`                                                           | Fork-owned; the fork releases on its own schedule and numbers                |
-| `README.md`                                                                        | Fork notice at the top; upstream content otherwise                           |
-| `.github/FUNDING.yml`                                                              | Emptied - sponsor upstream directly, not this fork                           |
-| `.github/workflows/publish-*.yml`                                                  | Publish to GHCR only; no Docker Hub, no cosign signing                       |
-| `.github/workflows/create-release.yml`                                             | Uses `GITHUB_TOKEN` instead of upstream's `RELEASE_TOKEN`                    |
-| `CHANGELOG.md`                                                                     | Fork-only; the GitHub release body, recorded on publish                      |
-| `scripts/apply-release.mjs`                                                        | Applies a published release: version bump plus the changelogs                |
-| `scripts/pg-partition-monitoring-data.ts`                                          | Fork-only: converts `monitoring_data` to a partitioned table (B1a)           |
-| `scripts/rollups-backfill.ts`, `scripts/rollups-verify.ts`                         | Fork-only: build the rollup grains, and check them against raw samples (F6b) |
-| `scripts/retention-plan.ts`                                                        | Fork-only: dry-runs the per-grain retention sweep before it deletes (F6c)    |
-| `.github/ISSUE_TEMPLATE/`                                                          | No upstream assignee                                                         |
-| `docs/agents/issue-tracker.md`                                                     | Points at the Plane project, not GitHub Issues                               |
-| `docs/agents/triage-labels.md`                                                     | States that triage labels are unused                                         |
-| `CLAUDE.md`, `AGENTS.md`                                                           | Fork-specific agent instructions; no upstream counterpart                    |
-| `docs/adr/`                                                                        | ADRs reconstructed by the fork, numbered from 0100                           |
-| `src/routes/(manage)/manage/api/+server.ts`                                        | 7 lines here vs upstream's ~930; upstream's actions are reported, not merged |
-| `scripts/diff-upstream-actions.mjs`, `docs/agents/upstream-manage-api.snapshot.ts` | The machinery that reports them                                              |
-| `svelte.config.js`                                                                 | `paths.relative: false`, so the `/o/<slug>/` org prefix survives into links  |
-| `src/**`, `migrations/**`                                                          | Diverge by design; conflicts are resolved by hand on each sync               |
-| `LICENSE`, product name, UI strings, docs content                                  | **Unchanged** - the fork does not rebrand                                    |
+| `package.json` `version`                                                           | Fork-owned; the fork releases on its own schedule and numbers                                                                      |
+| `README.md`                                                                        | Fork notice at the top; upstream content otherwise                                                                                 |
+| `.github/FUNDING.yml`                                                              | Emptied - sponsor upstream directly, not this fork                                                                                 |
+| `.github/workflows/publish-*.yml`                                                  | Publish to GHCR only; no Docker Hub, no cosign signing                                                                             |
+| `.github/workflows/create-release.yml`                                             | Uses `GITHUB_TOKEN` instead of upstream's `RELEASE_TOKEN`                                                                          |
+| `CHANGELOG.md`                                                                     | Fork-only; the GitHub release body, recorded on publish                                                                            |
+| `scripts/apply-release.mjs`                                                        | Applies a published release: version bump plus the changelogs                                                                      |
+| `scripts/pg-partition-monitoring-data.ts`                                          | Fork-only: converts `monitoring_data` to a partitioned table (B1a)                                                                 |
+| `scripts/rollups-backfill.ts`, `scripts/rollups-verify.ts`                         | Fork-only: build the rollup grains, and check them against raw samples (F6b)                                                       |
+| `scripts/retention-plan.ts`                                                        | Fork-only: dry-runs the per-grain retention sweep before it deletes (F6c)                                                          |
+| `tsconfig.scripts.json`                                                            | Fork-only: puts `scripts/`, `migrations/` and `seeds/` under `npm run check`                                                       |
+| `.github/ISSUE_TEMPLATE/`                                                          | No upstream assignee                                                                                                               |
+| `docs/agents/issue-tracker.md`                                                     | Points at the Plane project, not GitHub Issues                                                                                     |
+| `docs/agents/triage-labels.md`                                                     | States that triage labels are unused                                                                                               |
+| `CLAUDE.md`, `AGENTS.md`                                                           | Fork-specific agent instructions; no upstream counterpart                                                                          |
+| `docs/adr/`                                                                        | ADRs reconstructed by the fork, numbered from 0100                                                                                 |
+| `src/routes/(manage)/manage/api/+server.ts`                                        | 7 lines here vs upstream's ~930; upstream's actions are reported, not merged                                                       |
+| `scripts/diff-upstream-actions.mjs`, `docs/agents/upstream-manage-api.snapshot.ts` | The machinery that reports them                                                                                                    |
+| `svelte.config.js`                                                                 | `paths.relative: false`, so the `/o/<slug>/` org prefix survives into links                                                        |
+| `src/**`, `migrations/**`                                                          | Diverge by design; conflicts are resolved by hand on each sync                                                                     |
+| `LICENSE`, product name, UI strings, docs content                                  | **Unchanged** - the fork does not rebrand                                                                                          |
 
 Not every row here is `merge=ours`. A file is _fork-owned_ only when an upstream
 diff to it has nothing useful to contribute, and those are the rows that also

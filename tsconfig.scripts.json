@@ -1,0 +1,34 @@
+{
+  // KENER-122. `npm run check` runs svelte-check over the project SvelteKit
+  // generates, and that project's `include` covers `src/`, `test/` and the vite
+  // config and nothing else. Everything outside it has been shipping unchecked:
+  // `scripts/main.ts` is the **production entry point**, and the migrations and
+  // seeds run against a customer's database on every deploy.
+  //
+  // A second project rather than an `include` in `tsconfig.json`, because
+  // `extends` replaces `include` wholesale: restating SvelteKit's generated list
+  // here would silently drift the day SvelteKit changes it, and the failure mode
+  // is a directory quietly falling out of the typecheck again.
+  //
+  // Nothing Svelte-flavoured lives in these directories, so plain `tsc` is the
+  // right tool and svelte-check is not needed a second time.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // The one place this project has to disagree with the root config.
+    //
+    // `scripts/main.ts` imports `../build/handler.js`, which is adapter-node's
+    // generated output. With `checkJs` on, `tsc` follows that import and reports
+    // a few hundred errors in code we do not write and cannot fix - and only
+    // after a build has run, so the check would pass on a clean checkout and
+    // fail on a built one. `exclude` cannot prevent it either: exclude filters
+    // `include`, it does not stop a file being pulled in by an import.
+    //
+    // Turning it off costs nothing that was being checked before: every file
+    // this project is aimed at is TypeScript, and those are still checked in
+    // full.
+    "checkJs": false
+  },
+  "include": ["scripts/**/*.ts", "migrations/**/*.ts", "seeds/**/*.ts"],
+  "exclude": ["node_modules/**", "build/**"]
+}
