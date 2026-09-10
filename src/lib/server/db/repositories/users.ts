@@ -289,7 +289,14 @@ export class UsersRepository extends BaseRepository {
       created_by: data.created_by ?? null,
       rotated_from: data.rotated_from ?? null,
       key_prefix: data.key_prefix ?? null,
-      org_id: data.org_id ?? null,
+      // **Omitted when the caller does not name one**, rather than defaulted to
+      // null. `api_keys` is a tenant table, so `this.table().insert` stamps the
+      // ambient org onto the row - and it does that by spreading the row *after*
+      // the stamp, so an explicit `org_id: null` here silently won that spread
+      // and every key minted from an admin session hit the NOT NULL constraint.
+      // Creating an API key was impossible. Passing one through is still
+      // supported, for the seeds and scripts that write outside an org context.
+      ...(data.org_id !== undefined && data.org_id !== null ? { org_id: data.org_id } : {}),
       created_at: this.knexUnscoped.fn.now(),
       updated_at: this.knexUnscoped.fn.now(),
     });
