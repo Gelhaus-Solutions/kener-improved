@@ -168,6 +168,71 @@ async function relationExists(knex: Knex, name: string): Promise<boolean> {
   return (((result as { rows?: unknown[] }).rows ?? []) as unknown[]).length > 0;
 }
 
+/** A partition and the range it covers. `lo`/`hi` are null for the DEFAULT partition. */
+export interface PartitionInfo {
+  name: string;
+  lo: number | null;
+  hi: number | null;
+}
+
+/**
+ * Every partition of `table`, with its bounds.
+ *
+ * The bounds are parsed out of `pg_get_expr(relpartbound, ...)` rather than
+ * recomputed from the partition's name. The name is this module's convention and
+ * the catalogue is the truth: a partition created by hand, or by an older
+ * version of this file, still has to be handled correctly by retention.
+ */
+export async function listPartitions(knex: Knex, table: string): Promise<PartitionInfo[]> {
+  if (!isPg(knex)) return [];
+  const result = await knex.raw(
+    `select c.relname as name, pg_get_expr(c.relpartbound, c.oid) as bound
+       from pg_inherits i
+       join pg_class c on c.oid = i.inhrelid
+      where i.inhparent = (
+        select c2.oid from pg_class c2 join pg_namespace n on n.oid = c2.relnamespace
+         where c2.relname = ? and n.nspname = current_schema()
+      )
+      order by c.relname`,
+    [table],
+  );
+  const rows = ((result as { rows?: Array<{ name: string; bound: string }> }).rows ?? []) as Array<{
+    name: string;
+    bound: string;
+  }>;
+  return rows.map((row) => {
+    // `FOR VALUES FROM ('1788220800') TO ('1790812800')`, or `DEFAULT`.
+    const match = /FROM \('?(-?\d+)'?\) TO \('?(-?\d+)'?\)/.exec(row.bound ?? "");
+    return match
+      ? { name: row.name, lo: Number(match[1]), hi: Number(match[2]) }
+      : { name: row.name, lo: null, hi: null };
+  });
+}
+
+/**
+ * Partitions entirely older than `cutoff`.
+ *
+ * `hi <= cutoff` and nothing weaker. A partition that merely *starts* before the
+ * cutoff still holds rows that must survive, and dropping it is the one
+ * retention bug that cannot be undone. The DEFAULT partition is never returned:
+ * it has no upper bound, so nothing can prove it is entirely in the past.
+ */
+export async function partitionsEntirelyBefore(knex: Knex, table: string, cutoff: number): Promise<PartitionInfo[]> {
+  const partitions = await listPartitions(knex, table);
+  return partitions.filter((partition) => partition.hi !== null && partition.hi <= cutoff);
+}
+
+/**
+ * Detaches and drops a partition.
+ *
+ * This is the whole point of partitioning for retention: a catalogue update that
+ * reclaims the space at once, instead of a delete that leaves dead tuples for
+ * autovacuum to find days later.
+ */
+export async function dropPartition(knex: Knex, name: string): Promise<void> {
+  await knex.raw(`DROP TABLE IF EXISTS ??`, [name]);
+}
+
 /**
  * Creates every missing partition, for every table that is partitioned.
  *

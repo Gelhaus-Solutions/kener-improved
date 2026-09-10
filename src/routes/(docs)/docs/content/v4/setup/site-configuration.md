@@ -25,7 +25,7 @@ Use **Manage → Site Configurations** to control identity, navigation, monitor 
 | Favicon                      | `favicon`                                                    | Used in `<head>` as page icon                                                                   |
 | Monitor sub menu options     | `subMenuOptions`                                             | Gates monitor share actions (badges/embed) on public monitor pages                              |
 | Global page visibility       | `globalPageVisibilitySettings`                               | Controls page switcher visibility and page-scoped navigation/events                             |
-| Data retention policy        | `dataRetentionPolicy`                                        | Controls daily cleanup of old `monitoring_data`                                                 |
+| Data retention policy        | `dataRetentionPolicy`                                        | Controls daily cleanup of `monitoring_data` and each rollup grain                               |
 | Event display settings       | `eventDisplaySettings`                                       | Controls event visibility and whether events render inline or in the notification surface       |
 | Maintenance notifications    | `globalMaintenanceNotificationSettings`                      | Controls which maintenance lifecycle events notify subscribers and reminder buffer timing       |
 | Social preview & SEO         | `metaSiteTitle`, `metaSiteDescription`, `socialPreviewImage` | Default `<title>`, `og:title`, `<meta description>`, `og:description`, `og:image` for all pages |
@@ -66,12 +66,32 @@ See [Pages](/docs/v4/pages).
 
 ## Data retention policy {#data-retention-policy}
 
-`dataRetentionPolicy` drives the daily cleanup scheduler:
+`dataRetentionPolicy` drives the daily cleanup scheduler, which runs at midnight UTC and prunes raw samples and each rollup grain separately:
 
-- `enabled`: turn cleanup on/off
-- `retentionDays`: how many days of monitor data to keep
+| Field                   | Default | Keeps                                               |
+| ----------------------- | ------- | --------------------------------------------------- |
+| `enabled`               | `true`  | Turns cleanup on or off                             |
+| `retentionDays`         | `90`    | Raw per-minute samples. Minimum 7 days              |
+| `rollup5mRetentionDays` | `400`   | 5-minute buckets. `0` keeps them forever            |
+| `rollup1hRetentionDays` | `1095`  | Hourly buckets. `0` keeps them forever              |
+| `rollup1dRetentionDays` | `0`     | Daily buckets. `0` (the default) keeps them forever |
 
-When enabled, cleanup runs daily at midnight UTC.
+Uptime bars are served from the rollups, not from raw samples, so `retentionDays` can be much shorter than the history your pages display. Raw samples are still needed for the last few minutes of every bar, for alert evaluation and for incident metrics, which is why 7 days is the enforced minimum.
+
+### How long a bar can be {#retention-bar-length}
+
+A viewer's day boundaries are offset by their timezone, and only a bucket size that divides that offset can be used. That makes the answer differ per viewer:
+
+- **Every timezone** is bounded by `rollup5mRetentionDays` — India (+05:30) and Nepal (+05:45) need 5-minute buckets.
+- **Whole-hour offsets** are bounded by `rollup1hRetentionDays`.
+- **UTC** is bounded by `rollup1dRetentionDays`.
+
+**Manage → Site Configurations** shows all three, and warns when a page is configured to display more history than retention keeps.
+
+> [!IMPORTANT]
+> Raw samples are only deleted once the rollups computed from them are complete and have passed the cutoff. If the rollup scheduler is behind, the raw stage is skipped and the reason is logged rather than history being destroyed.
+
+Run `npm run retention:plan` to print what the next sweep would delete without deleting anything.
 
 ## Event display settings {#event-display-settings}
 

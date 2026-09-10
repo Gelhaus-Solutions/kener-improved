@@ -91,6 +91,43 @@
 
   let dataRetentionPolicy = $state<DataRetentionPolicy>(page.data.seedSiteData.dataRetentionPolicy);
 
+  /**
+   * What retention would delete tonight, and how long a bar can still be served.
+   *
+   * Loaded separately from the policy because it is not configuration - it is the
+   * consequence of the configuration, computed server-side against the actual
+   * rollup watermarks. Without it the three inputs below are three numbers with
+   * no way to tell whether they are safe.
+   */
+  interface RetentionStatus {
+    effective: {
+      retentionDays: number;
+      rollup5mRetentionDays: number;
+      rollup1hRetentionDays: number;
+      rollup1dRetentionDays: number;
+    };
+    clamped: string[];
+    coverage: {
+      allTimezonesDays: number;
+      wholeHourTimezonesDays: number;
+      utcDays: number;
+      truncated: boolean;
+      longestConfiguredBarDays: number;
+    };
+    rollupStates: Array<{ grain: string; watermark_ts: number | null; backfill_complete: boolean }>;
+    dirtyHours: number;
+    stages: Array<{
+      label: string;
+      table: string;
+      cutoff: number | null;
+      rowsToDelete: number;
+      partitionsToDrop: string[];
+      skipped: string | null;
+    }>;
+  }
+  let retentionStatus = $state<RetentionStatus | null>(null);
+  let loadingRetentionStatus = $state(false);
+
   let eventDisplaySettings = $state<EventDisplaySettings>(structuredClone(defaultEventDisplaySettings));
   let metaSiteTitle = $state("");
   let metaSiteDescription = $state("");
@@ -200,7 +237,12 @@
 
         dataRetentionPolicy = {
           enabled: data.dataRetentionPolicy?.enabled ?? true,
-          retentionDays: data.dataRetentionPolicy?.retentionDays ?? 90
+          retentionDays: data.dataRetentionPolicy?.retentionDays ?? 90,
+          // `??` and not `||`: 0 means "keep forever" on these three, and `||`
+          // would silently turn that into the default.
+          rollup5mRetentionDays: data.dataRetentionPolicy?.rollup5mRetentionDays ?? 400,
+          rollup1hRetentionDays: data.dataRetentionPolicy?.rollup1hRetentionDays ?? 1095,
+          rollup1dRetentionDays: data.dataRetentionPolicy?.rollup1dRetentionDays ?? 0
         };
 
         if (data.eventDisplaySettings) {
@@ -449,13 +491,44 @@
     }
   }
 
+  async function loadRetentionStatus() {
+    loadingRetentionStatus = true;
+    try {
+      const response = await fetch(clientResolver(resolve, "/manage/api"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "getRetentionStatus", data: {} })
+      });
+      const result = await response.json();
+      retentionStatus = result?.error ? null : (result as RetentionStatus);
+    } catch {
+      // A status panel that cannot load is not a reason to make the whole
+      // settings page unusable; the inputs above still work.
+      retentionStatus = null;
+    } finally {
+      loadingRetentionStatus = false;
+    }
+  }
+
+  const formatDays = (days: number) => (days === 0 ? "forever" : `${days} days`);
+  const formatCutoff = (cutoff: number | null) =>
+    cutoff === null ? "never" : new Date(cutoff * 1000).toISOString().slice(0, 10);
+
   async function saveDataRetentionPolicy() {
     savingDataRetentionPolicy = true;
     try {
       const safeRetentionDays = Math.max(1, Number(dataRetentionPolicy.retentionDays) || 90);
+      // Zero is allowed here and means forever; negatives are not.
+      const safeGrain = (value: unknown, fallback: number) => {
+        const days = Math.floor(Number(value));
+        return Number.isFinite(days) && days >= 0 ? days : fallback;
+      };
       const payload: DataRetentionPolicy = {
         enabled: dataRetentionPolicy.enabled,
-        retentionDays: safeRetentionDays
+        retentionDays: safeRetentionDays,
+        rollup5mRetentionDays: safeGrain(dataRetentionPolicy.rollup5mRetentionDays, 400),
+        rollup1hRetentionDays: safeGrain(dataRetentionPolicy.rollup1hRetentionDays, 1095),
+        rollup1dRetentionDays: safeGrain(dataRetentionPolicy.rollup1dRetentionDays, 0)
       };
 
       const response = await fetch(clientResolver(resolve, "/manage/api"), {
@@ -472,6 +545,9 @@
       } else {
         dataRetentionPolicy.retentionDays = safeRetentionDays;
         toast.success("Data retention policy saved successfully");
+        // Reload the consequences, not just the form: the server clamps unsafe
+        // values and recomputes what tonight's sweep would remove.
+        void loadRetentionStatus();
       }
     } catch (e) {
       toast.error("Failed to save data retention policy");
@@ -779,6 +855,7 @@
   onMount(() => {
     currentOrigin = window.location.origin;
     void fetchSiteData();
+    void loadRetentionStatus();
   });
 </script>
 
@@ -1252,7 +1329,7 @@
         </div>
 
         <div class="space-y-2">
-          <Label for="retention-days">Retention Days</Label>
+          <Label for="retention-days">Raw sample retention (days)</Label>
           <Input
             id="retention-days"
             type="number"
@@ -1260,8 +1337,118 @@
             bind:value={dataRetentionPolicy.retentionDays}
             disabled={!dataRetentionPolicy.enabled}
           />
-          <p class="text-muted-foreground text-xs">Default is 90 days if not configured.</p>
+          <p class="text-muted-foreground text-xs">
+            Per-minute samples. The uptime bar no longer reads these, so this can be short - a minimum of 7 days is
+            enforced. This is by far the largest table.
+          </p>
         </div>
+
+        <div class="grid gap-4 md:grid-cols-3">
+          <div class="space-y-2">
+            <Label for="retention-5m">5-minute buckets (days)</Label>
+            <Input
+              id="retention-5m"
+              type="number"
+              min="0"
+              bind:value={dataRetentionPolicy.rollup5mRetentionDays}
+              disabled={!dataRetentionPolicy.enabled}
+            />
+            <p class="text-muted-foreground text-xs">
+              Bounds the bar for viewers on :30 and :45 timezone offsets. 0 keeps them forever.
+            </p>
+          </div>
+          <div class="space-y-2">
+            <Label for="retention-1h">Hourly buckets (days)</Label>
+            <Input
+              id="retention-1h"
+              type="number"
+              min="0"
+              bind:value={dataRetentionPolicy.rollup1hRetentionDays}
+              disabled={!dataRetentionPolicy.enabled}
+            />
+            <p class="text-muted-foreground text-xs">Serves every whole-hour offset. 0 keeps them forever.</p>
+          </div>
+          <div class="space-y-2">
+            <Label for="retention-1d">Daily buckets (days)</Label>
+            <Input
+              id="retention-1d"
+              type="number"
+              min="0"
+              bind:value={dataRetentionPolicy.rollup1dRetentionDays}
+              disabled={!dataRetentionPolicy.enabled}
+            />
+            <p class="text-muted-foreground text-xs">Reporting and UTC viewers. 0 keeps them forever, the default.</p>
+          </div>
+        </div>
+
+        {#if loadingRetentionStatus}
+          <div class="text-muted-foreground flex items-center gap-2 text-xs">
+            <Loader class="h-3 w-3 animate-spin" /> Checking what tonight's cleanup would remove...
+          </div>
+        {:else if retentionStatus}
+          <div class="space-y-3 rounded-md border p-4">
+            <p class="text-sm font-medium">What your pages can show</p>
+            <div class="grid gap-2 text-xs md:grid-cols-3">
+              <div>
+                <span class="text-muted-foreground">Every timezone</span>
+                <div class="font-mono">{formatDays(retentionStatus.coverage.allTimezonesDays)}</div>
+              </div>
+              <div>
+                <span class="text-muted-foreground">Whole-hour offsets</span>
+                <div class="font-mono">{formatDays(retentionStatus.coverage.wholeHourTimezonesDays)}</div>
+              </div>
+              <div>
+                <span class="text-muted-foreground">UTC</span>
+                <div class="font-mono">{formatDays(retentionStatus.coverage.utcDays)}</div>
+              </div>
+            </div>
+            <p class="text-muted-foreground text-xs">
+              These differ because a viewer's day boundary is offset by their timezone, and only a bucket size that
+              divides that offset can be used. India (+05:30) needs 5-minute buckets; London needs hourly.
+            </p>
+
+            {#if retentionStatus.coverage.truncated}
+              <p class="text-destructive text-xs">
+                A page is configured to show {retentionStatus.coverage.longestConfiguredBarDays} days, but retention keeps
+                only {formatDays(retentionStatus.coverage.allTimezonesDays)} for some viewers. Those bars are silently cut
+                short.
+              </p>
+            {/if}
+
+            {#each retentionStatus.clamped as note (note)}
+              <p class="text-muted-foreground text-xs">Adjusted: {note}</p>
+            {/each}
+
+            <p class="pt-2 text-sm font-medium">Tonight's cleanup would remove</p>
+            <div class="space-y-1 text-xs">
+              {#each retentionStatus.stages as stage (stage.label)}
+                <div class="flex flex-wrap items-baseline gap-2">
+                  <span class="w-10 font-mono">{stage.label}</span>
+                  {#if stage.skipped}
+                    <span class={stage.skipped === "kept forever" ? "text-muted-foreground" : "text-destructive"}>
+                      skipped - {stage.skipped}
+                    </span>
+                  {:else}
+                    <span class="font-mono">{stage.rowsToDelete.toLocaleString()}</span>
+                    <span class="text-muted-foreground">
+                      rows before {formatCutoff(stage.cutoff)}
+                      {#if stage.partitionsToDrop.length > 0}
+                        ({stage.partitionsToDrop.length} whole partition(s) dropped, not deleted row by row)
+                      {/if}
+                    </span>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+
+            <p class="text-muted-foreground text-xs">
+              Raw samples are only deleted once the rollups computed from them are complete and have passed the cutoff.
+              {#if retentionStatus.dirtyHours > 0}
+                {retentionStatus.dirtyHours} hour(s) are queued for recomputation.
+              {/if}
+            </p>
+          </div>
+        {/if}
       </Card.Content>
       <Card.Footer class="flex justify-end">
         <Button onclick={saveDataRetentionPolicy} disabled={savingDataRetentionPolicy} class="cursor-pointer">

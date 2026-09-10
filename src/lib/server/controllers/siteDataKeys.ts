@@ -17,6 +17,35 @@ interface SiteDataKey {
   data_type: string;
 }
 
+/**
+ * A retention policy: a boolean, a positive raw retention, and three optional
+ * non-negative rollup retentions where 0 means forever.
+ *
+ * Deliberately does NOT enforce the raw floor or the ordering between grains.
+ * Those are applied when the policy is *used* (`services/retention.ts`), so an
+ * operator who saves something unwise gets it clamped and reported rather than a
+ * rejected form telling them nothing about what the safe value is.
+ */
+function IsValidDataRetentionPolicy(value: string): boolean {
+  if (!IsValidJSONString(value)) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return false;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+  const policy = parsed as Record<string, unknown>;
+  if (typeof policy.enabled !== "boolean") return false;
+  if (!Number.isFinite(Number(policy.retentionDays)) || Number(policy.retentionDays) < 1) return false;
+  for (const key of ["rollup5mRetentionDays", "rollup1hRetentionDays", "rollup1dRetentionDays"]) {
+    if (policy[key] === undefined || policy[key] === null) continue;
+    const days = Number(policy[key]);
+    if (!Number.isFinite(days) || days < 0) return false;
+  }
+  return true;
+}
+
 export const siteDataKeys: SiteDataKey[] = [
   {
     key: "title",
@@ -269,8 +298,12 @@ export const siteDataKeys: SiteDataKey[] = [
     data_type: "object",
   },
   {
+    // F6c: validated by shape rather than merely as JSON. The rollup grains are
+    // what the uptime bar reads now, so a typo that stored a string here would
+    // be a silent instruction to delete history - and `IsValidJSONString`
+    // accepts every one of them.
     key: "dataRetentionPolicy",
-    isValid: IsValidJSONString,
+    isValid: IsValidDataRetentionPolicy,
     data_type: "object",
   },
   {

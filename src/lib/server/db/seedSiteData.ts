@@ -139,7 +139,17 @@ const seedSiteData = {
   },
   dataRetentionPolicy: {
     enabled: true,
+    // Unchanged, so an existing install upgrades without its raw history
+    // changing length. Dropping it is the operator's decision to make once they
+    // can see that the bar no longer depends on it.
     retentionDays: 90,
+    // Longer than raw, because these are what the bar actually reads now.
+    // 400 days of 5m buckets covers a 365-day bar for every timezone; 1095 days
+    // of hourly covers three years for whole-hour offsets; daily is kept
+    // forever, which costs almost nothing.
+    rollup5mRetentionDays: 400,
+    rollup1hRetentionDays: 1095,
+    rollup1dRetentionDays: 0,
   },
   eventDisplaySettings: {
     showInlineEvents: false,

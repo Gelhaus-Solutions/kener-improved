@@ -92,9 +92,28 @@ export interface SiteSubMenuOptions {
   showRssFeed: boolean;
 }
 
+/**
+ * How long each grain of monitoring history is kept (F6c).
+ *
+ * `retentionDays` is the raw `monitoring_data` table; the three rollup fields
+ * are the grains that outlive it. **0 means forever** on the rollup fields, and
+ * is the default for daily buckets - a decade of them for a thousand monitors is
+ * a few million rows, which is not worth throwing history away for.
+ *
+ * The point of the split: the bar no longer reads raw samples, so raw retention
+ * can drop to weeks while the 90- or 365-day bar keeps being served from the
+ * hourly and daily grains.
+ */
 export interface DataRetentionPolicy {
   enabled: boolean;
+  /** Raw `monitoring_data`. Floored at `MIN_RAW_RETENTION_DAYS`; see `services/retention.ts`. */
   retentionDays: number;
+  /** Five-minute buckets. Serves viewers on :30 and :45 timezone offsets. */
+  rollup5mRetentionDays?: number;
+  /** Hourly buckets. Serves every whole-hour offset, which is most viewers. */
+  rollup1hRetentionDays?: number;
+  /** Daily buckets. 0 = forever, and that is the default. */
+  rollup1dRetentionDays?: number;
 }
 
 export interface EventDisplaySettings {

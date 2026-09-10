@@ -6,6 +6,7 @@ import type { DataRetentionPolicy } from "../../types/site.js";
 import { GetSiteDataByKey } from "../controllers/siteDataController.js";
 import { GetNowTimestampUTC } from "../tool.js";
 import { ensurePartitions } from "../db/partitions.js";
+import { runRetention } from "../services/retention.js";
 
 let dailyCleanupQueue: Queue | null = null;
 let worker: Worker | null = null;
@@ -16,11 +17,16 @@ interface DailyCleanupResult {
   skipped: boolean;
   deletedRows: number;
   retentionDays: number;
+  /** Per-grain detail, so the log says which stage did what (F6c). */
+  stages: string[];
 }
 
 const defaultPolicy: DataRetentionPolicy = {
   enabled: true,
   retentionDays: 90,
+  rollup5mRetentionDays: 400,
+  rollup1hRetentionDays: 1095,
+  rollup1dRetentionDays: 0,
 };
 
 const getQueue = () => {
@@ -41,6 +47,11 @@ const getRetentionPolicy = async (): Promise<DataRetentionPolicy> => {
     return {
       enabled: parsed.enabled ?? defaultPolicy.enabled,
       retentionDays: parsed.retentionDays ?? defaultPolicy.retentionDays,
+      // `??` and not `||`: 0 is a meaningful value on these three - it means
+      // "keep forever" - and `||` would silently replace it with the default.
+      rollup5mRetentionDays: parsed.rollup5mRetentionDays ?? defaultPolicy.rollup5mRetentionDays,
+      rollup1hRetentionDays: parsed.rollup1hRetentionDays ?? defaultPolicy.rollup1hRetentionDays,
+      rollup1dRetentionDays: parsed.rollup1dRetentionDays ?? defaultPolicy.rollup1dRetentionDays,
     };
   } catch (error) {
     console.error("Failed to parse dataRetentionPolicy. Using defaults.", error);
@@ -133,15 +144,29 @@ const runDailyCleanup = async (): Promise<DailyCleanupResult> => {
       skipped: true,
       deletedRows: 0,
       retentionDays,
+      stages: [],
     };
   }
 
-  const deletedRows = await db.background(retentionDays);
+  // F6c: four stages rather than one delete. `db.background` is deliberately no
+  // longer called from here - it deletes raw with no regard for whether the
+  // rollups computed from it exist yet, which is the one retention mistake that
+  // cannot be undone by recomputing.
+  const run = await runRetention(policy, GetNowTimestampUTC(), false);
+  for (const note of run.clamped) console.warn(`Retention: ${note}`);
+
+  const stages = run.stages.map((stage) => {
+    if (stage.skipped) return `${stage.label}: skipped (${stage.skipped})`;
+    const dropped = stage.partitionsToDrop.length > 0 ? `, ${stage.partitionsToDrop.length} partition(s) dropped` : "";
+    return `${stage.label}: ${stage.rowsDeleted} row(s) deleted${dropped}`;
+  });
+  console.log(`Retention: ${stages.join("; ")}`);
 
   return {
     skipped: false,
-    deletedRows,
-    retentionDays,
+    deletedRows: run.stages.reduce((sum, stage) => sum + stage.rowsDeleted, 0),
+    retentionDays: run.effective.retentionDays,
+    stages,
   };
 };
 

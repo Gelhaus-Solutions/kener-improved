@@ -211,6 +211,7 @@ git push
 | `scripts/apply-release.mjs`                                                        | Applies a published release: version bump plus the changelogs                |
 | `scripts/pg-partition-monitoring-data.ts`                                          | Fork-only: converts `monitoring_data` to a partitioned table (B1a)           |
 | `scripts/rollups-backfill.ts`, `scripts/rollups-verify.ts`                         | Fork-only: build the rollup grains, and check them against raw samples (F6b) |
+| `scripts/retention-plan.ts`                                                        | Fork-only: dry-runs the per-grain retention sweep before it deletes (F6c)    |
 | `.github/ISSUE_TEMPLATE/`                                                          | No upstream assignee                                                         |
 | `docs/agents/issue-tracker.md`                                                     | Points at the Plane project, not GitHub Issues                               |
 | `docs/agents/triage-labels.md`                                                     | States that triage labels are unused                                         |

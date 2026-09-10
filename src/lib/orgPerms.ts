@@ -57,6 +57,13 @@ export const orgPermissions: Array<{ id: string; permission_name: string }> = [
 export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   getAuditLog: "audit.read",
 
+  // Retention (F6c). A fork-invented action mapped onto the upstream settings
+  // permission rather than a new one: it reads the retention policy and reports
+  // what it would delete, and anybody who may read site settings may see that.
+  // It writes nothing - the policy itself is still saved through `storeSiteData`,
+  // which already requires `settings.write`.
+  getRetentionStatus: "settings.read",
+
   // Incidents (C2c). A fork-invented action on an upstream resource, so it maps
   // to the upstream permission rather than inventing one: acknowledging is
   // acting on an incident, and anybody who may comment on one may take it.
