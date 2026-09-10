@@ -7,6 +7,7 @@ import dailyCleanupScheduler from "./dailyCleanup";
 // connection open through a graceful shutdown. Both are registered now.
 import rollupScheduler from "./rollupScheduler";
 import slaScheduler from "./slaScheduler";
+import reportScheduler from "./reportScheduler";
 
 export default async () => {
   await appScheduler.shutdown();
@@ -15,4 +16,5 @@ export default async () => {
   await dailyCleanupScheduler.shutdown();
   await rollupScheduler.shutdown();
   await slaScheduler.shutdown();
+  await reportScheduler.shutdown();
 };

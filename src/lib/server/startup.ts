@@ -5,6 +5,7 @@ import maintenanceScheduler from "./schedulers/maintenanceScheduler.js";
 import dailyCleanupScheduler from "./schedulers/dailyCleanup.js";
 import rollupScheduler from "./schedulers/rollupScheduler.js";
 import slaScheduler from "./schedulers/slaScheduler.js";
+import reportScheduler from "./schedulers/reportScheduler.js";
 import eventRelayQueue from "./queues/eventRelayQueue.js";
 import backfillQueue from "./queues/backfillQueue.js";
 import { registerAllConsumers } from "./events/consumers/index.js";
@@ -42,6 +43,10 @@ async function Startup(): Promise<void> {
   // SLO target every five minutes, and the web process must never be doing that
   // on a page load.
   await slaScheduler.start();
+  // F4. Scheduler process only, like the rollups and the SLO evaluations it
+  // renders from: the hourly tick enqueues due schedules and sweeps expired
+  // artifacts, and neither is work the web process should duplicate.
+  await reportScheduler.start();
   // Consumers must be registered before the relay starts, or the first pass
   // publishes events with no delivery rows and they are never reconsidered.
   // What each one is allowed to do is not decided here: it is read per event

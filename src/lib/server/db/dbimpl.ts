@@ -17,6 +17,7 @@ import { IncidentsRepository } from "./repositories/incidents.js";
 import { DependenciesRepository } from "./repositories/dependencies.js";
 import { RollupsRepository } from "./repositories/rollups.js";
 import { SlaRepository } from "./repositories/sla.js";
+import { ReportsRepository } from "./repositories/reports.js";
 import { PostmortemsRepository } from "./repositories/postmortems.js";
 import { IncidentTemplatesRepository } from "./repositories/incidentTemplates.js";
 import { ImagesRepository } from "./repositories/images.js";
@@ -60,6 +61,7 @@ class DbImpl {
   private dependencies!: DependenciesRepository;
   private rollups!: RollupsRepository;
   private sla!: SlaRepository;
+  private reports!: ReportsRepository;
   private postmortems!: PostmortemsRepository;
   private incidentTemplates!: IncidentTemplatesRepository;
 
@@ -125,6 +127,17 @@ class DbImpl {
   getSlaEvaluations!: SlaRepository["getSlaEvaluations"];
   upsertSlaEvaluation!: SlaRepository["upsertSlaEvaluation"];
   getSloCounts!: SlaRepository["getSloCounts"];
+  getReportSchedules!: ReportsRepository["getReportSchedules"];
+  getReportScheduleById!: ReportsRepository["getReportScheduleById"];
+  insertReportSchedule!: ReportsRepository["insertReportSchedule"];
+  updateReportSchedule!: ReportsRepository["updateReportSchedule"];
+  deleteReportSchedule!: ReportsRepository["deleteReportSchedule"];
+  getDueReportSchedules!: ReportsRepository["getDueReportSchedules"];
+  insertReportArtifact!: ReportsRepository["insertReportArtifact"];
+  getArtifactByToken!: ReportsRepository["getArtifactByToken"];
+  getReportArtifacts!: ReportsRepository["getReportArtifacts"];
+  getExpiredArtifacts!: ReportsRepository["getExpiredArtifacts"];
+  deleteArtifactRows!: ReportsRepository["deleteArtifactRows"];
   private images!: ImagesRepository;
   private pages!: PagesRepository;
   private maintenances!: MaintenancesRepository;
@@ -576,6 +589,7 @@ class DbImpl {
   subscriptionV2Exists!: SubscriptionSystemRepository["subscriptionV2Exists"];
   getSubscriptionsWithMethodsForUser!: SubscriptionSystemRepository["getSubscriptionsWithMethodsForUser"];
   getSubscribersForEvent!: SubscriptionSystemRepository["getSubscribersForEvent"];
+  getEmailSubscribersForPages!: SubscriptionSystemRepository["getEmailSubscribersForPages"];
   getRecipientsForScopedEvent!: SubscriptionSystemRepository["getRecipientsForScopedEvent"];
   getPageIdsForMonitorTags!: SubscriptionSystemRepository["getPageIdsForMonitorTags"];
   upsertScopedSubscription!: SubscriptionSystemRepository["upsertScopedSubscription"];
@@ -663,6 +677,8 @@ class DbImpl {
     this.getMaintenanceWindowsForRollup = this.rollups.getMaintenanceWindows.bind(this.rollups);
 
     this.sla = new SlaRepository(this.knex);
+
+    this.reports = new ReportsRepository(this.knex);
     this.getSlaTargets = this.sla.getSlaTargets.bind(this.sla);
     this.getSlaTargetById = this.sla.getSlaTargetById.bind(this.sla);
     this.getSlaTargetsForMonitor = this.sla.getSlaTargetsForMonitor.bind(this.sla);
@@ -670,6 +686,17 @@ class DbImpl {
     this.updateSlaTarget = this.sla.updateSlaTarget.bind(this.sla);
     this.deleteSlaTarget = this.sla.deleteSlaTarget.bind(this.sla);
     this.getSlaEvaluations = this.sla.getSlaEvaluations.bind(this.sla);
+    this.getReportSchedules = this.reports.getReportSchedules.bind(this.reports);
+    this.getReportScheduleById = this.reports.getReportScheduleById.bind(this.reports);
+    this.insertReportSchedule = this.reports.insertReportSchedule.bind(this.reports);
+    this.updateReportSchedule = this.reports.updateReportSchedule.bind(this.reports);
+    this.deleteReportSchedule = this.reports.deleteReportSchedule.bind(this.reports);
+    this.getDueReportSchedules = this.reports.getDueReportSchedules.bind(this.reports);
+    this.insertReportArtifact = this.reports.insertReportArtifact.bind(this.reports);
+    this.getArtifactByToken = this.reports.getArtifactByToken.bind(this.reports);
+    this.getReportArtifacts = this.reports.getReportArtifacts.bind(this.reports);
+    this.getExpiredArtifacts = this.reports.getExpiredArtifacts.bind(this.reports);
+    this.deleteArtifactRows = this.reports.deleteArtifactRows.bind(this.reports);
     this.upsertSlaEvaluation = this.sla.upsertSlaEvaluation.bind(this.sla);
     this.getSloCounts = this.sla.getSloCounts.bind(this.sla);
 
@@ -1147,6 +1174,9 @@ class DbImpl {
       this.subscriptionSystem,
     );
     this.getSubscribersForEvent = this.subscriptionSystem.getSubscribersForEvent.bind(this.subscriptionSystem);
+    this.getEmailSubscribersForPages = this.subscriptionSystem.getEmailSubscribersForPages.bind(
+      this.subscriptionSystem,
+    );
     this.getRecipientsForScopedEvent = this.subscriptionSystem.getRecipientsForScopedEvent.bind(
       this.subscriptionSystem,
     );

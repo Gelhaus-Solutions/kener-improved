@@ -11,6 +11,11 @@
   import FileTextIcon from "@lucide/svelte/icons/file-text";
   import TriangleAlertIcon from "@lucide/svelte/icons/triangle-alert";
   import ActivityIcon from "@lucide/svelte/icons/activity";
+  import PlusIcon from "@lucide/svelte/icons/plus";
+  import TrashIcon from "@lucide/svelte/icons/trash";
+  import PencilIcon from "@lucide/svelte/icons/pencil";
+  import SendIcon from "@lucide/svelte/icons/send";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { toast } from "svelte-sonner";
   import { resolve } from "$app/paths";
   import clientResolver from "$lib/client/resolver.js";
@@ -69,6 +74,68 @@
   let grains = $state<GrainOption[]>([]);
   let loading = $state(true);
   let error = $state<string | null>(null);
+
+  interface Artifact {
+    id: number;
+    filename: string;
+    size_bytes: number;
+    expires_at: number;
+    created_at: number;
+  }
+  interface Schedule {
+    id: number;
+    name: string;
+    scope_type: string;
+    scope_ref: string;
+    format: string;
+    grain: string;
+    range_kind: string;
+    rrule: string;
+    timezone: string;
+    recipients: string[];
+    recipient_page_ids: number[];
+    exclude_maintenance: string;
+    degraded_counts_as_bad: string;
+    status: string;
+    next_run_at: number | null;
+    last_run_at: number | null;
+    last_error: string | null;
+    projected_next_run_at: number | null;
+    latest_artifact: Artifact | null;
+  }
+
+  const RANGE_KINDS = [
+    { value: "PREV_MONTH", label: "The previous calendar month" },
+    { value: "PREV_WEEK", label: "The previous week" },
+    { value: "LAST_7D", label: "The last 7 days" },
+    { value: "LAST_30D", label: "The last 30 days" },
+    { value: "LAST_90D", label: "The last 90 days" }
+  ];
+  const RRULE_PRESETS = [
+    { value: "FREQ=MONTHLY;BYMONTHDAY=1;BYHOUR=9;BYMINUTE=0;BYSECOND=0", label: "Monthly, on the 1st at 09:00" },
+    { value: "FREQ=WEEKLY;BYDAY=MO;BYHOUR=9;BYMINUTE=0;BYSECOND=0", label: "Weekly, Monday at 09:00" },
+    { value: "FREQ=DAILY;BYHOUR=7;BYMINUTE=0;BYSECOND=0", label: "Daily at 07:00" }
+  ];
+
+  let schedules = $state<Schedule[]>([]);
+  let schedulesLoading = $state(false);
+  let scheduleDialogOpen = $state(false);
+  let editingScheduleId = $state<number | null>(null);
+  let savingSchedule = $state(false);
+  let recipientsText = $state("");
+  let scheduleForm = $state({
+    name: "",
+    scope_type: "ALL",
+    scope_ref: "",
+    format: "pdf",
+    grain: "1d",
+    range_kind: "PREV_MONTH",
+    rrule: RRULE_PRESETS[0].value,
+    timezone: "UTC",
+    exclude_maintenance: true,
+    degraded_counts_as_bad: false,
+    status: "ACTIVE"
+  });
 
   let incidentReport = $state<IncidentReport | null>(null);
   let incidentLoading = $state(false);
@@ -174,6 +241,7 @@
       form.to = utcSecondsToDay(end);
       form.from = utcSecondsToDay(end - 30 * 86400);
       error = null;
+      await loadSchedules();
     } catch (e) {
       error = e instanceof Error ? e.message : "Could not load report options";
     } finally {
@@ -220,6 +288,123 @@
       incidentReport = null;
     } finally {
       incidentLoading = false;
+    }
+  }
+
+  const scheduleScopeOptions = $derived.by(() => {
+    if (scheduleForm.scope_type === "PAGE") {
+      return pages.map((page) => ({ value: String(page.id), label: `${page.page_title} (${page.page_path})` }));
+    }
+    if (scheduleForm.scope_type === "CATEGORY") {
+      return categories.map((name) => ({ value: name, label: name }));
+    }
+    if (scheduleForm.scope_type === "MONITOR") {
+      return monitors.map((monitor) => ({ value: monitor.tag, label: monitor.name || monitor.tag }));
+    }
+    return [];
+  });
+
+  function whenText(ts: number | null): string {
+    if (ts === null) return "never";
+    return new Date(ts * 1000).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+  }
+
+  async function loadSchedules() {
+    schedulesLoading = true;
+    try {
+      const result = await call("getReportSchedules", {});
+      schedules = result.schedules ?? [];
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not load schedules");
+    } finally {
+      schedulesLoading = false;
+    }
+  }
+
+  function openCreateSchedule() {
+    editingScheduleId = null;
+    recipientsText = "";
+    scheduleForm = {
+      name: "",
+      scope_type: "ALL",
+      scope_ref: "",
+      format: "pdf",
+      grain: "1d",
+      range_kind: "PREV_MONTH",
+      rrule: RRULE_PRESETS[0].value,
+      // Defaults to the browser's zone, because "on the 1st at 09:00" almost
+      // always means where the person setting it up is.
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+      exclude_maintenance: true,
+      degraded_counts_as_bad: false,
+      status: "ACTIVE"
+    };
+    scheduleDialogOpen = true;
+  }
+
+  function openEditSchedule(schedule: Schedule) {
+    editingScheduleId = schedule.id;
+    recipientsText = (schedule.recipients ?? []).join("\n");
+    scheduleForm = {
+      name: schedule.name,
+      scope_type: schedule.scope_type,
+      scope_ref: schedule.scope_ref,
+      format: schedule.format,
+      grain: schedule.grain,
+      range_kind: schedule.range_kind,
+      rrule: schedule.rrule,
+      timezone: schedule.timezone,
+      exclude_maintenance: schedule.exclude_maintenance === "YES",
+      degraded_counts_as_bad: schedule.degraded_counts_as_bad === "YES",
+      status: schedule.status
+    };
+    scheduleDialogOpen = true;
+  }
+
+  async function saveSchedule() {
+    savingSchedule = true;
+    try {
+      const recipients = recipientsText
+        .split(/[\n,;]+/)
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0);
+      const result = await call("saveReportSchedule", {
+        id: editingScheduleId ?? undefined,
+        ...scheduleForm,
+        recipients,
+        recipient_page_ids: []
+      });
+      toast.success(`Saved. Next run ${whenText(result.next_run_at ?? null)}.`);
+      scheduleDialogOpen = false;
+      await loadSchedules();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save the schedule");
+    } finally {
+      savingSchedule = false;
+    }
+  }
+
+  async function deleteSchedule(schedule: Schedule) {
+    if (!confirm(`Delete the schedule "${schedule.name}"? Reports already sent keep working until their links expire.`))
+      return;
+    try {
+      await call("deleteReportSchedule", { id: schedule.id });
+      toast.success("Schedule deleted");
+      await loadSchedules();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not delete the schedule");
+    }
+  }
+
+  async function sendNow(schedule: Schedule) {
+    // Said plainly, because it really does mail the recipients: a dry run that
+    // skipped delivery would not test the half most likely to be misconfigured.
+    if (!confirm(`Send "${schedule.name}" now? This emails the real recipients.`)) return;
+    try {
+      await call("runReportScheduleNow", { id: schedule.id });
+      toast.success("Queued. It will arrive shortly.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not queue the report");
     }
   }
 
@@ -509,5 +694,245 @@
         </Button>
       </Card.Footer>
     </Card.Root>
+
+    <Card.Root class="mt-6">
+      <Card.Header>
+        <Card.Title>Scheduled delivery</Card.Title>
+        <Card.Description>
+          Email a report on a recurrence. Recipients get an expiring download link, so anyone holding the link can open
+          the report without signing in.
+        </Card.Description>
+      </Card.Header>
+      <Card.Content>
+        {#if schedulesLoading}
+          <div class="flex items-center gap-2 py-6">
+            <Spinner class="size-4" />
+            <span class="text-muted-foreground text-sm">Loading schedules</span>
+          </div>
+        {:else if schedules.length === 0}
+          <p class="text-muted-foreground text-sm">No schedules yet.</p>
+        {:else}
+          <div class="space-y-3">
+            {#each schedules as schedule (schedule.id)}
+              <div class="flex flex-wrap items-start justify-between gap-3 rounded-md border p-3">
+                <div class="min-w-0 space-y-1">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-sm font-medium">{schedule.name}</span>
+                    <Badge variant="secondary">{schedule.format.toUpperCase()}</Badge>
+                    {#if schedule.status !== "ACTIVE"}
+                      <Badge variant="outline">Paused</Badge>
+                    {/if}
+                  </div>
+                  <p class="text-muted-foreground text-xs">
+                    {RANGE_KINDS.find((r) => r.value === schedule.range_kind)?.label ?? schedule.range_kind} &middot;
+                    {schedule.timezone} &middot; next {whenText(schedule.next_run_at)}
+                  </p>
+                  <p class="text-muted-foreground text-xs">
+                    {schedule.recipients.length} recipient{schedule.recipients.length === 1 ? "" : "s"}
+                    {#if schedule.latest_artifact}
+                      &middot; last file {schedule.latest_artifact.filename}
+                    {/if}
+                  </p>
+                  {#if schedule.last_error}
+                    <!-- Kept on the row so a schedule that has gone quiet
+                         explains itself here rather than in the container log. -->
+                    <p class="text-destructive text-xs">Last run failed: {schedule.last_error}</p>
+                  {/if}
+                </div>
+                <div class="flex shrink-0 gap-1">
+                  <Button variant="ghost" size="icon" title="Send now" onclick={() => sendNow(schedule)}>
+                    <SendIcon class="size-4" />
+                  </Button>
+                  <Button variant="ghost" size="icon" title="Edit" onclick={() => openEditSchedule(schedule)}>
+                    <PencilIcon class="size-4" />
+                  </Button>
+                  <Button variant="ghost" size="icon" title="Delete" onclick={() => deleteSchedule(schedule)}>
+                    <TrashIcon class="size-4" />
+                  </Button>
+                </div>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </Card.Content>
+      <Card.Footer>
+        <Button variant="outline" onclick={openCreateSchedule}>
+          <PlusIcon class="size-4" />
+          New schedule
+        </Button>
+      </Card.Footer>
+    </Card.Root>
+
+    <Dialog.Root bind:open={scheduleDialogOpen}>
+      <Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-xl">
+        <Dialog.Header>
+          <Dialog.Title>{editingScheduleId ? "Edit schedule" : "New schedule"}</Dialog.Title>
+          <Dialog.Description>
+            The range is resolved when the schedule fires, in the time zone below.
+          </Dialog.Description>
+        </Dialog.Header>
+
+        <div class="space-y-4">
+          <div class="space-y-2">
+            <Label for="schedule-name">Name</Label>
+            <Input id="schedule-name" bind:value={scheduleForm.name} placeholder="Monthly uptime for Acme" />
+          </div>
+
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div class="space-y-2">
+              <Label for="schedule-scope">Covers</Label>
+              <Select.Root
+                type="single"
+                value={scheduleForm.scope_type}
+                onValueChange={(value) => {
+                  if (!value) return;
+                  scheduleForm.scope_type = value;
+                  scheduleForm.scope_ref = "";
+                }}
+              >
+                <Select.Trigger id="schedule-scope" class="w-full">
+                  {labelFor(SCOPE_TYPES, scheduleForm.scope_type, "Choose")}
+                </Select.Trigger>
+                <Select.Content>
+                  {#each SCOPE_TYPES as option (option.value)}
+                    <Select.Item value={option.value}>{option.label}</Select.Item>
+                  {/each}
+                </Select.Content>
+              </Select.Root>
+            </div>
+
+            {#if scheduleForm.scope_type !== "ALL"}
+              <div class="space-y-2">
+                <Label for="schedule-scope-ref">Which one</Label>
+                <Select.Root
+                  type="single"
+                  value={scheduleForm.scope_ref}
+                  onValueChange={(value) => {
+                    if (value) scheduleForm.scope_ref = value;
+                  }}
+                >
+                  <Select.Trigger id="schedule-scope-ref" class="w-full">
+                    {labelFor(scheduleScopeOptions, scheduleForm.scope_ref, "Choose")}
+                  </Select.Trigger>
+                  <Select.Content>
+                    {#each scheduleScopeOptions as option (option.value)}
+                      <Select.Item value={option.value}>{option.label}</Select.Item>
+                    {/each}
+                  </Select.Content>
+                </Select.Root>
+              </div>
+            {/if}
+          </div>
+
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div class="space-y-2">
+              <Label for="schedule-range">Period covered</Label>
+              <Select.Root
+                type="single"
+                value={scheduleForm.range_kind}
+                onValueChange={(value) => {
+                  if (value) scheduleForm.range_kind = value;
+                }}
+              >
+                <Select.Trigger id="schedule-range" class="w-full">
+                  {labelFor(RANGE_KINDS, scheduleForm.range_kind, "Choose")}
+                </Select.Trigger>
+                <Select.Content>
+                  {#each RANGE_KINDS as option (option.value)}
+                    <Select.Item value={option.value}>{option.label}</Select.Item>
+                  {/each}
+                </Select.Content>
+              </Select.Root>
+            </div>
+            <div class="space-y-2">
+              <Label for="schedule-format">Format</Label>
+              <Select.Root
+                type="single"
+                value={scheduleForm.format}
+                onValueChange={(value) => {
+                  if (value) scheduleForm.format = value;
+                }}
+              >
+                <Select.Trigger id="schedule-format" class="w-full">
+                  {scheduleForm.format === "csv" ? "CSV spreadsheet" : "PDF summary"}
+                </Select.Trigger>
+                <Select.Content>
+                  <Select.Item value="pdf">PDF summary</Select.Item>
+                  <Select.Item value="csv">CSV spreadsheet</Select.Item>
+                </Select.Content>
+              </Select.Root>
+            </div>
+          </div>
+
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div class="space-y-2">
+              <Label for="schedule-rrule">Sends</Label>
+              <Select.Root
+                type="single"
+                value={scheduleForm.rrule}
+                onValueChange={(value) => {
+                  if (value) scheduleForm.rrule = value;
+                }}
+              >
+                <Select.Trigger id="schedule-rrule" class="w-full">
+                  {labelFor(RRULE_PRESETS, scheduleForm.rrule, "Custom rule")}
+                </Select.Trigger>
+                <Select.Content>
+                  {#each RRULE_PRESETS as option (option.value)}
+                    <Select.Item value={option.value}>{option.label}</Select.Item>
+                  {/each}
+                </Select.Content>
+              </Select.Root>
+            </div>
+            <div class="space-y-2">
+              <Label for="schedule-tz">Time zone</Label>
+              <Input id="schedule-tz" bind:value={scheduleForm.timezone} placeholder="Europe/Berlin" />
+            </div>
+          </div>
+
+          <div class="space-y-2">
+            <Label for="schedule-recipients">Recipients</Label>
+            <textarea
+              id="schedule-recipients"
+              bind:value={recipientsText}
+              rows="3"
+              class="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring w-full rounded-md border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:outline-none"
+              placeholder="one address per line"
+            ></textarea>
+            <p class="text-muted-foreground text-xs">
+              Each recipient gets their own message, so they never see each other.
+            </p>
+          </div>
+
+          <div class="flex items-center justify-between gap-4">
+            <div class="space-y-0.5">
+              <Label for="schedule-maint">Exclude announced maintenance</Label>
+              <p class="text-muted-foreground text-xs">Same rule as the on-demand export above.</p>
+            </div>
+            <Switch id="schedule-maint" bind:checked={scheduleForm.exclude_maintenance} />
+          </div>
+
+          <div class="flex items-center justify-between gap-4">
+            <div class="space-y-0.5">
+              <Label for="schedule-status">Active</Label>
+              <p class="text-muted-foreground text-xs">Turn off to keep the schedule but stop sending.</p>
+            </div>
+            <Switch
+              id="schedule-status"
+              checked={scheduleForm.status === "ACTIVE"}
+              onCheckedChange={(checked) => (scheduleForm.status = checked ? "ACTIVE" : "INACTIVE")}
+            />
+          </div>
+        </div>
+
+        <Dialog.Footer>
+          <Button variant="outline" onclick={() => (scheduleDialogOpen = false)}>Cancel</Button>
+          <Button onclick={saveSchedule} disabled={savingSchedule}>
+            {#if savingSchedule}<Spinner class="size-4" />{/if}
+            Save schedule
+          </Button>
+        </Dialog.Footer>
+      </Dialog.Content>
+    </Dialog.Root>
   {/if}
 </div>

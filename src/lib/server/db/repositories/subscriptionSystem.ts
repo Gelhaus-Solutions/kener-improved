@@ -509,6 +509,39 @@ export class SubscriptionSystemRepository extends BaseRepository {
   }
 
   /**
+   * Confirmed email subscribers of the named pages (F4).
+   *
+   * **Only ACTIVE users and ACTIVE methods.** An unconfirmed subscription is
+   * somebody who typed an address, not somebody who agreed to receive mail at
+   * it, and a monthly report is precisely the kind of unsolicited mail that gets
+   * a sending domain blocked.
+   *
+   * **`scope_type = 'PAGE'` only, deliberately not `'ALL'`.** A report schedule
+   * naming two pages means the people who asked about those pages. Sweeping in
+   * every subscriber who chose "everything" would mail a detailed operational
+   * PDF to an audience who subscribed to incident notices, which is a different
+   * thing than they agreed to.
+   */
+  async getEmailSubscribersForPages(pageIds: ReadonlyArray<number>): Promise<string[]> {
+    if (pageIds.length === 0) return [];
+    const rows = await this.table("subscriber_subscriptions as ss")
+      .join("subscriber_users as su", "ss.subscriber_user_id", "su.id")
+      .join("subscriber_methods as sm", "ss.subscriber_method_id", "sm.id")
+      .where("ss.status", "ACTIVE")
+      .andWhere("su.status", "ACTIVE")
+      .andWhere("sm.status", "ACTIVE")
+      .andWhere("sm.method_type", "email")
+      .andWhere("ss.scope_type", "PAGE")
+      .whereIn(
+        "ss.scope_id",
+        pageIds.map((id) => String(id)),
+      )
+      .distinct("sm.method_value as email");
+
+    return (rows as Array<{ email: string }>).map((row) => String(row.email)).filter((email) => email.includes("@"));
+  }
+
+  /**
    * Creates, revives or retires one scoped subscription (E1).
    *
    * An upsert rather than an insert because "subscribe to this again" and

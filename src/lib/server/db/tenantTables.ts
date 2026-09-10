@@ -72,6 +72,8 @@ export const TENANT_TABLES: ReadonlySet<string> = new Set([
   "webhook_endpoints",
   "sla_targets",
   "sla_evaluations",
+  "report_schedules",
+  "report_artifacts",
 
   // The big one. Scoped like the rest even though `monitor_tag` is globally
   // unique, because "it is safe by accident" is not a property to rely on.
