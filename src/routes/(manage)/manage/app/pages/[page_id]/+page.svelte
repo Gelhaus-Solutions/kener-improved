@@ -36,7 +36,12 @@
       desktop: GC.DEFAULT_STATUS_HISTORY_DAYS_DESKTOP,
       mobile: GC.DEFAULT_STATUS_HISTORY_DAYS_MOBILE
     },
-    monitor_layout_style: GC.DEFAULT_MONITOR_LAYOUT_STYLE
+    monitor_layout_style: GC.DEFAULT_MONITOR_LAYOUT_STYLE,
+    // G1/G2. Both off, matching the server's defaults in dashboardController:
+    // a page saved from this screen must not start behaving differently from one
+    // that has never been opened here.
+    status_filter: { enabled: false },
+    group_display: { mode: "none", collapsed_by_default: false, show_group_summary: true }
   };
 
   interface PageWithMonitors extends PageRecord {
@@ -140,7 +145,21 @@
               typeof foundPage.page_settings_json === "string"
                 ? JSON.parse(foundPage.page_settings_json)
                 : foundPage.page_settings_json;
-            pageSettings = { ...structuredClone(defaultPageSettings), ...parsed };
+            const defaults = structuredClone(defaultPageSettings);
+            // One level down for the nested blocks: a plain spread would replace
+            // `group_display` wholesale, so a page saved before a field existed
+            // would load with that field undefined rather than defaulted, and
+            // this screen would bind a switch to `undefined`.
+            pageSettings = {
+              ...defaults,
+              ...parsed,
+              monitor_status_history_days: {
+                ...defaults.monitor_status_history_days,
+                ...(parsed?.monitor_status_history_days ?? {})
+              },
+              status_filter: { ...defaults.status_filter, ...(parsed?.status_filter ?? {}) },
+              group_display: { ...defaults.group_display, ...(parsed?.group_display ?? {}) }
+            };
           } catch {
             pageSettings = structuredClone(defaultPageSettings);
           }
@@ -859,6 +878,84 @@
             <p class="text-muted-foreground text-xs">
               Default is <code class="bg-muted rounded px-1 font-mono">default-list</code>
             </p>
+          </div>
+
+          <hr class="border-muted" />
+
+          <!-- G1: Status filtering -->
+          <div class="space-y-4">
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <Label class="text-base font-medium">Status Filter</Label>
+                <p class="text-muted-foreground text-sm">
+                  Show filter chips so visitors can narrow the page to components at one status
+                </p>
+              </div>
+              <Switch bind:checked={pageSettings.status_filter.enabled} aria-label="Enable status filter" />
+            </div>
+            <p class="text-muted-foreground text-xs">
+              Filtering happens in the browser and issues no extra requests. The chosen status is kept in the URL, so a
+              filtered view can be shared during an incident. Chips appear only when there is more than one status on
+              the page.
+            </p>
+          </div>
+
+          <hr class="border-muted" />
+
+          <!-- G2: Group display -->
+          <div class="space-y-4">
+            <div>
+              <Label class="text-base font-medium">Component Grouping</Label>
+              <p class="text-muted-foreground text-sm">Group components into collapsible sections by their category</p>
+            </div>
+
+            <Select.Root type="single" bind:value={pageSettings.group_display.mode}>
+              <Select.Trigger class="w-full">
+                {#if pageSettings.group_display.mode === "category"}
+                  Group by category
+                {:else}
+                  No grouping
+                {/if}
+              </Select.Trigger>
+              <Select.Content>
+                <Select.Item value="none">No grouping</Select.Item>
+                <Select.Item value="category">Group by category</Select.Item>
+              </Select.Content>
+            </Select.Root>
+            <p class="text-muted-foreground text-xs">
+              Sections come from each monitor&rsquo;s category, in the order those monitors appear on this page.
+              Components with no category are collected into a final <span class="font-medium">Other</span> section.
+              This is a visual grouping only &mdash; it is not the same thing as a
+              <code class="bg-muted rounded px-1 font-mono">GROUP</code> monitor, which is a component with a status of its
+              own.
+            </p>
+
+            {#if pageSettings.group_display.mode === "category"}
+              <div class="space-y-4 pl-1">
+                <div class="flex items-start justify-between gap-4">
+                  <div>
+                    <Label>Start collapsed</Label>
+                    <p class="text-muted-foreground text-sm">Sections are closed when the page first loads</p>
+                  </div>
+                  <Switch
+                    bind:checked={pageSettings.group_display.collapsed_by_default}
+                    aria-label="Start sections collapsed"
+                  />
+                </div>
+                <div class="flex items-start justify-between gap-4">
+                  <div>
+                    <Label>Show section status</Label>
+                    <p class="text-muted-foreground text-sm">
+                      Each section header shows the worst status among its components
+                    </p>
+                  </div>
+                  <Switch
+                    bind:checked={pageSettings.group_display.show_group_summary}
+                    aria-label="Show section status"
+                  />
+                </div>
+              </div>
+            {/if}
           </div>
         </Card.Content>
         <Card.Footer class="flex justify-end">

@@ -28,7 +28,34 @@ const defaultPageSettings: PageSettingsType = {
     mobile: GC.DEFAULT_STATUS_HISTORY_DAYS_MOBILE,
   },
   monitor_layout_style: GC.DEFAULT_MONITOR_LAYOUT_STYLE,
+  // G1/G2, both off: see the note on the two interfaces. Every page that exists
+  // today renders exactly as it did before these settings were added.
+  status_filter: { enabled: false },
+  group_display: { mode: "none", collapsed_by_default: false, show_group_summary: true },
 };
+
+/**
+ * Merges stored page settings over the defaults.
+ *
+ * **The nested blocks are merged one level down, and the top-level spread is why
+ * they have to be.** `{ ...defaults, ...parsed }` replaces a nested object
+ * wholesale, so a page stored before a field was added to `group_display` would
+ * come back missing that field rather than defaulted - and the value read from it
+ * would be `undefined`, not the default the rest of the code assumes. Spelling
+ * the two new blocks out here costs three lines and removes a whole class of
+ * "why is this page rendering with no summary" that only appears on pages saved
+ * by an older build.
+ */
+function mergePageSettings(parsed: Partial<PageSettingsType> | null | undefined): PageSettingsType {
+  const merged: PageSettingsType = { ...defaultPageSettings, ...(parsed ?? {}) };
+  merged.status_filter = { ...defaultPageSettings.status_filter, ...(parsed?.status_filter ?? {}) };
+  merged.group_display = { ...defaultPageSettings.group_display, ...(parsed?.group_display ?? {}) };
+  merged.monitor_status_history_days = {
+    ...defaultPageSettings.monitor_status_history_days,
+    ...(parsed?.monitor_status_history_days ?? {}),
+  };
+  return merged;
+}
 
 export interface NotificationPayload {
   notifications: NotificationEvent[];
@@ -155,6 +182,20 @@ export interface PageDashboardData {
   upcomingMaintenances: MaintenanceEventsMonitorList[];
   monitorTags: string[];
   monitorGroupMembersByTag: Record<string, string[]>;
+  /**
+   * G2: each monitor's `category_name`, keyed by the same tag as `monitorTags`.
+   *
+   * Keyed on the *physical* tag on purpose: `monitorTags` comes from
+   * `pages_monitors.monitor_tag` and `GetMonitorsParsed` leaves `monitor.tag`
+   * physical, so the two agree. Keying it on the per-org slug instead would
+   * silently miss every lookup on a prefixed org and drop every monitor into the
+   * uncategorised section, which looks like a rendering choice rather than a bug.
+   *
+   * A tag with no entry here is uncategorised - which covers both a genuinely
+   * null `category_name` and a monitor on the page that `GetMonitorsParsed` did
+   * not return.
+   */
+  monitorCategoriesByTag: Record<string, string | null>;
   pageDetails: PageRecordTyped;
   socialPagePreviewImage?: string;
   metaPageTitle?: string;
@@ -272,16 +313,16 @@ export const GetPageDashboardData = async (
   const monitorTags = pageMonitors.map((pm) => pm.monitor_tag);
 
   // Parse page settings with defaults
-  let settings: PageSettingsType = defaultPageSettings;
+  let settings: PageSettingsType = mergePageSettings(null);
   if (pageDetails.page_settings_json) {
     try {
       const parsed =
         typeof pageDetails.page_settings_json === "string"
           ? JSON.parse(pageDetails.page_settings_json)
           : pageDetails.page_settings_json;
-      settings = { ...defaultPageSettings, ...parsed };
+      settings = mergePageSettings(parsed);
     } catch {
-      settings = defaultPageSettings;
+      settings = mergePageSettings(null);
     }
   }
   const nowTs = GetMinuteStartNowTimestampUTC();
@@ -323,6 +364,7 @@ export const GetPageDashboardData = async (
       upcomingMaintenances: [],
       monitorTags,
       monitorGroupMembersByTag: {},
+      monitorCategoriesByTag: {},
       pageDetails: pageDetailsTyped,
       socialPagePreviewImage,
       metaPageTitle,
@@ -356,6 +398,13 @@ export const GetPageDashboardData = async (
   // what makes them capable of agreeing.
   const pageStatus = await getPageStatus(monitorTags, nowTs, latestData as LatestStatus[]);
   const monitorGroupMembersByTag: Record<string, string[]> = {};
+  // G2. Trimmed and emptied to null here rather than in the component, so
+  // "   " and "" and null are one case by the time anything renders them.
+  const monitorCategoriesByTag: Record<string, string | null> = {};
+  for (const monitor of parsedMonitors) {
+    const category = (monitor.category_name ?? "").trim();
+    monitorCategoriesByTag[monitor.tag] = category.length > 0 ? category : null;
+  }
 
   for (const monitor of parsedMonitors) {
     if (monitor.monitor_type !== "GROUP") continue;
@@ -373,6 +422,7 @@ export const GetPageDashboardData = async (
     upcomingMaintenances,
     monitorTags,
     monitorGroupMembersByTag,
+    monitorCategoriesByTag,
     pageDetails: pageDetailsTyped,
     socialPagePreviewImage,
     metaPageTitle,

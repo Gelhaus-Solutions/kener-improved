@@ -678,12 +678,48 @@ export interface PageRecordInsert {
   page_settings_json?: string | null;
 }
 
+/**
+ * G1: the status filter chips on the public page.
+ *
+ * Off by default, and that is a deliberate cost. Every setting in this block is
+ * presentation on a page that is already live and already public, so shipping it
+ * on would grow a new control row on every existing status page the moment the
+ * deploy lands. Nobody asked for that, and a status page is the one screen where
+ * an unexplained change reads as something being wrong.
+ */
+export interface PageStatusFilterSettings {
+  enabled: boolean;
+}
+
+/**
+ * G2: how monitors are grouped on the public page.
+ *
+ * **A category group is not a GROUP monitor, and the UI must not let them read
+ * as the same thing.** A `GROUP` monitor is a synthetic monitor that computes its
+ * own status from members and has its own bar; a category group here is a purely
+ * visual section over `monitors.category_name`. Conflating the two is the source
+ * of most of the upstream confusion, so they are labelled differently and a
+ * category section never renders as a bar.
+ *
+ * `mode: "none"` is the default and reproduces today's flat list exactly, for the
+ * same reason `status_filter` is off by default.
+ */
+export interface PageGroupDisplaySettings {
+  mode: "none" | "category";
+  /** Sections render collapsed on first paint. */
+  collapsed_by_default: boolean;
+  /** Show each section's worst-of-members status beside its header. */
+  show_group_summary: boolean;
+}
+
 export interface PageSettingsType {
   monitor_status_history_days: {
     desktop: number;
     mobile: number;
   };
   monitor_layout_style: PageMonitorLayoutStyle;
+  status_filter: PageStatusFilterSettings;
+  group_display: PageGroupDisplaySettings;
   metaPageTitle?: string;
   metaPageDescription?: string;
   socialPagePreviewImage?: string;
