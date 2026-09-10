@@ -32,6 +32,8 @@ const defaultPageSettings: PageSettingsType = {
   // today renders exactly as it did before these settings were added.
   status_filter: { enabled: false },
   group_display: { mode: "none", collapsed_by_default: false, show_group_summary: true },
+  // G3, an opt-out: a page is listed in the switcher unless it says otherwise.
+  switcher: { listed: true },
 };
 
 /**
@@ -50,6 +52,7 @@ function mergePageSettings(parsed: Partial<PageSettingsType> | null | undefined)
   const merged: PageSettingsType = { ...defaultPageSettings, ...(parsed ?? {}) };
   merged.status_filter = { ...defaultPageSettings.status_filter, ...(parsed?.status_filter ?? {}) };
   merged.group_display = { ...defaultPageSettings.group_display, ...(parsed?.group_display ?? {}) };
+  merged.switcher = { ...defaultPageSettings.switcher, ...(parsed?.switcher ?? {}) };
   merged.monitor_status_history_days = {
     ...defaultPageSettings.monitor_status_history_days,
     ...(parsed?.monitor_status_history_days ?? {}),

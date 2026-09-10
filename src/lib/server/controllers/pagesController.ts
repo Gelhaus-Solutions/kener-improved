@@ -1,5 +1,8 @@
 import db from "../db/db.js";
 import type { PageRecord, PageRecordInsert, PageMonitorRecord, PageMonitorRecordInsert } from "../types/db.js";
+import type { PageNavItem } from "./dashboardController.js";
+import type { PageOrderingSettings } from "../../types/site.js";
+import { GetSiteDataByKey } from "./siteDataController.js";
 
 // ============ Page CRUD Operations ============
 
@@ -47,6 +50,66 @@ export async function GetPageById(id: number): Promise<PageRecord | undefined> {
  */
 export async function GetAllPages(): Promise<PageRecord[]> {
   return await db.getAllPages();
+}
+
+/**
+ * The pages the public switcher may list, ordered (G3).
+ *
+ * **One definition, used by both callers.** The layout renders the switcher from
+ * this, and `/dashboard-apis/pages` answers from it too. They were separate
+ * before, and separate would mean the endpoint listing a page the switcher hides
+ * the moment either grew a rule the other did not - which is exactly what the
+ * per-page `listed` flag below would have caused.
+ *
+ * **Org scoping is not done here, and that is the point.** `db.getAllPages()`
+ * goes through `BaseRepository.table()`, `pages` is in `TENANT_TABLES`, and the
+ * request's org was established by `orgResolveHandle` from the hostname. So this
+ * is scoped by the same chokepoint as everything else rather than by a filter
+ * somebody has to remember to write - and with no org context at all it throws
+ * rather than quietly listing every tenant's pages.
+ */
+export async function GetSwitcherPages(): Promise<PageNavItem[]> {
+  const [allPages, orderingSettings] = await Promise.all([
+    db.getAllPages(),
+    GetSiteDataByKey("pageOrderingSettings") as Promise<PageOrderingSettings | null>,
+  ]);
+
+  // A page opts *out*, so every page that predates the flag keeps appearing.
+  const listed = allPages.filter((page) => {
+    if (!page.page_settings_json) return true;
+    try {
+      const parsed =
+        typeof page.page_settings_json === "string" ? JSON.parse(page.page_settings_json) : page.page_settings_json;
+      return parsed?.switcher?.listed !== false;
+    } catch {
+      // Unparseable settings must not remove a page from navigation: the page
+      // itself still renders, and a switcher that silently drops it is worse
+      // than one that shows it.
+      return true;
+    }
+  });
+
+  let ordered = listed;
+  if (orderingSettings?.enabled && orderingSettings.order?.length > 0) {
+    const orderMap = new Map(orderingSettings.order.map((id, idx) => [id, idx]));
+    ordered = [...listed].sort((a, b) => {
+      const aIdx = orderMap.get(a.id);
+      const bIdx = orderMap.get(b.id);
+      // Pages in the order list come first, sorted by their position
+      if (aIdx !== undefined && bIdx !== undefined) return aIdx - bIdx;
+      if (aIdx !== undefined) return -1;
+      if (bIdx !== undefined) return 1;
+      // Pages not in the order list keep their default order (by id)
+      return a.id - b.id;
+    });
+  }
+
+  return ordered.map((p) => ({
+    page_title: p.page_title,
+    page_path: p.page_path,
+    page_header: p.page_header,
+    page_logo: p.page_logo,
+  }));
 }
 
 /**

@@ -41,7 +41,9 @@
     // a page saved from this screen must not start behaving differently from one
     // that has never been opened here.
     status_filter: { enabled: false },
-    group_display: { mode: "none", collapsed_by_default: false, show_group_summary: true }
+    group_display: { mode: "none", collapsed_by_default: false, show_group_summary: true },
+    // G3, an opt-out: a page is listed in the switcher unless it says otherwise.
+    switcher: { listed: true }
   };
 
   interface PageWithMonitors extends PageRecord {
@@ -158,7 +160,8 @@
                 ...(parsed?.monitor_status_history_days ?? {})
               },
               status_filter: { ...defaults.status_filter, ...(parsed?.status_filter ?? {}) },
-              group_display: { ...defaults.group_display, ...(parsed?.group_display ?? {}) }
+              group_display: { ...defaults.group_display, ...(parsed?.group_display ?? {}) },
+              switcher: { ...defaults.switcher, ...(parsed?.switcher ?? {}) }
             };
           } catch {
             pageSettings = structuredClone(defaultPageSettings);
@@ -877,6 +880,27 @@
             </Select.Root>
             <p class="text-muted-foreground text-xs">
               Default is <code class="bg-muted rounded px-1 font-mono">default-list</code>
+            </p>
+          </div>
+
+          <hr class="border-muted" />
+
+          <!-- G3: Page switcher visibility -->
+          <div class="space-y-4">
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <Label class="text-base font-medium">Show in Page Switcher</Label>
+                <p class="text-muted-foreground text-sm">
+                  List this page in the switcher shown on every public status page
+                </p>
+              </div>
+              <Switch bind:checked={pageSettings.switcher.listed} aria-label="Show in page switcher" />
+            </div>
+            <p class="text-muted-foreground text-xs">
+              This controls navigation only. Turning it off does not make the page private &mdash; it stays reachable at
+              its own address, and anyone with the link can still open it. The switcher itself is enabled site-wide
+              under
+              <span class="font-medium">Site Configurations</span>.
             </p>
           </div>
 

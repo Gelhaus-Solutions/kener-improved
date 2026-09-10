@@ -1,40 +1,19 @@
 import { json } from "@sveltejs/kit";
 import type { APIServerRequest } from "$lib/server/types/api-server";
-import { GetAllPages } from "$lib/server/controllers/pagesController";
-import { GetSiteDataByKey } from "$lib/server/controllers/siteDataController";
-import type { PageNavItem } from "$lib/server/controllers/dashboardController";
-import type { PageOrderingSettings } from "$lib/types/site";
+import { GetSwitcherPages } from "$lib/server/controllers/pagesController";
 
 /**
  * GET /dashboard-apis/pages
- * Returns all pages as PageNavItem[] (page_title, page_path)
- * Respects pageOrderingSettings if enabled
+ *
+ * The pages the public switcher may list, as PageNavItem[].
+ *
+ * Delegates to `GetSwitcherPages` rather than resolving the list itself (G3).
+ * This endpoint used to apply `pageOrderingSettings` with its own copy of the
+ * sort, which was fine until the switcher grew a second rule - a per-page
+ * `listed` flag - that this copy would not have known about. Two lists of "the
+ * public pages" that disagree is a bug nobody notices until a page an operator
+ * hid turns up in something.
  */
 export default async function get(_req: APIServerRequest): Promise<Response> {
-  const allPagesData = await GetAllPages();
-  const pageOrderingSettings = (await GetSiteDataByKey("pageOrderingSettings")) as PageOrderingSettings | null;
-
-  let orderedPages = allPagesData;
-
-  if (pageOrderingSettings?.enabled && pageOrderingSettings.order?.length > 0) {
-    const orderMap = new Map(pageOrderingSettings.order.map((id, idx) => [id, idx]));
-    orderedPages = [...allPagesData].sort((a, b) => {
-      const aIdx = orderMap.get(a.id);
-      const bIdx = orderMap.get(b.id);
-      // Pages in the order list come first, sorted by their position
-      if (aIdx !== undefined && bIdx !== undefined) return aIdx - bIdx;
-      if (aIdx !== undefined) return -1;
-      if (bIdx !== undefined) return 1;
-      // Pages not in the order list keep their default order (by id)
-      return a.id - b.id;
-    });
-  }
-
-  const pages: PageNavItem[] = orderedPages.map((p) => ({
-    page_title: p.page_title,
-    page_path: p.page_path,
-    page_header: p.page_header,
-    page_logo: p.page_logo,
-  }));
-  return json(pages);
+  return json(await GetSwitcherPages());
 }

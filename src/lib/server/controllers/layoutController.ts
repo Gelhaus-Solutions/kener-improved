@@ -12,6 +12,8 @@ import {
 } from "./controller.js";
 import type { EventDisplaySettings, GlobalPageVisibilitySettings, SiteDateTimeFormat } from "$lib/types/site.js";
 import serverResolve from "../resolver.js";
+import { GetSwitcherPages } from "./pagesController.js";
+import type { PageNavItem } from "./dashboardController.js";
 
 export interface LayoutServerData {
   isMobile: boolean;
@@ -72,6 +74,16 @@ export interface LayoutServerData {
   socialPreviewImage?: string;
   customCSS?: string;
   globalPageVisibilitySettings: GlobalPageVisibilitySettings;
+  /**
+   * The pages the switcher may list, already ordered and filtered (G3).
+   *
+   * Here rather than fetched by the component. `PageSelector` used to call
+   * `/dashboard-apis/pages` on mount, which cost every visitor an extra request
+   * and a spinner for a list the server already had in hand. This layout load is
+   * cached by I1, so carrying it costs nothing per request and the switcher
+   * renders server-side with its current page already selected.
+   */
+  switcherPages: PageNavItem[];
   dateAndTimeFormat: SiteDateTimeFormat;
   metaSiteTitle?: string;
   metaSiteDescription?: string;
@@ -119,10 +131,13 @@ export async function GetLayoutServerData(cookies: Cookies, request: Request): P
   const md = new MobileDetect(userAgent);
   const isMobile = !!md.mobile();
 
-  const [loggedInUser, siteData, userCounts] = await Promise.all([
+  const [loggedInUser, siteData, userCounts, switcherPages] = await Promise.all([
     GetLoggedInSession(cookies),
     GetAllSiteData(),
     GetUsersCount(),
+    // Org-scoped through `BaseRepository.table()`, using the org the request
+    // pipeline already established from the hostname. See GetSwitcherPages.
+    GetSwitcherPages(),
   ]);
 
   // Same check as IsSetupComplete, but reuses the site data fetched above
@@ -184,6 +199,7 @@ export async function GetLayoutServerData(cookies: Cookies, request: Request): P
     socialPreviewImage: siteData.socialPreviewImage,
     customCSS: siteData.customCSS,
     globalPageVisibilitySettings: siteData.globalPageVisibilitySettings || seedSiteData.globalPageVisibilitySettings,
+    switcherPages,
     dateAndTimeFormat: siteData.dateAndTimeFormat || seedSiteData.dateAndTimeFormat,
     metaSiteTitle: siteData.metaSiteTitle,
     metaSiteDescription: siteData.metaSiteDescription,

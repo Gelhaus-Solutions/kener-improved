@@ -712,6 +712,18 @@ export interface PageGroupDisplaySettings {
   show_group_summary: boolean;
 }
 
+/**
+ * G3: whether this page appears in the public page switcher.
+ *
+ * An opt-*out*, so every page that predates the flag keeps appearing and the
+ * switcher does not quietly shrink on deploy. It hides a page from navigation
+ * only; the page itself stays reachable at its own path, because this is a
+ * navigation preference and not an access control.
+ */
+export interface PageSwitcherSettings {
+  listed: boolean;
+}
+
 export interface PageSettingsType {
   monitor_status_history_days: {
     desktop: number;
@@ -720,6 +732,7 @@ export interface PageSettingsType {
   monitor_layout_style: PageMonitorLayoutStyle;
   status_filter: PageStatusFilterSettings;
   group_display: PageGroupDisplaySettings;
+  switcher: PageSwitcherSettings;
   metaPageTitle?: string;
   metaPageDescription?: string;
   socialPagePreviewImage?: string;
