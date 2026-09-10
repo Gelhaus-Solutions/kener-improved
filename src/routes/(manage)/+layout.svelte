@@ -32,6 +32,7 @@
   import clientResolver from "$lib/client/resolver.js";
   import DatabaseIcon from "@lucide/svelte/icons/database";
   import Building2Icon from "@lucide/svelte/icons/building-2";
+  import ServerCogIcon from "@lucide/svelte/icons/server-cog";
 
   import { Toaster } from "$lib/components/ui/sonner/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
@@ -110,6 +111,12 @@
         { title: "OpenID Connect", url: "/manage/app/oidc", icon: FingerprintIcon },
         { title: "API Keys", url: "/manage/app/api-keys", icon: KeyIcon },
         { title: "Organisations", url: "/manage/app/organisations", icon: Building2Icon },
+        // KENER-31. The instance console. `instanceOnly` rather than a
+        // permission, because no per-org permission can gate it: see
+        // orgPerms.ts's SUPERADMIN_ROUTES and instanceController.ts. Filtered by
+        // the same fact the route itself is gated on, so a tenant's
+        // administrator is never shown a link that would 403.
+        { title: "Instance", url: "/manage/app/instance", icon: ServerCogIcon, instanceOnly: true },
         { title: "Audit Log", url: "/manage/app/audit", icon: ScrollTextIcon }
       ]
     },
@@ -135,7 +142,11 @@
   // into Webhooks would hide it outright from somebody holding `eventbus.read`
   // and not `webhooks.read`, which is a combination the permissions are
   // deliberately split to allow.
-  function firstReachable(item: { url: string; tabs?: string[] }): string | undefined {
+  function firstReachable(item: { url: string; tabs?: string[]; instanceOnly?: boolean }): string | undefined {
+    // KENER-31. An instance-tier entry is not in the permission map at all, so
+    // asking `canReachRoute` about it would always answer no. It is shown or
+    // hidden by the one fact that gates the route itself.
+    if (item.instanceOnly) return data.isInstanceSuperadmin ? item.url : undefined;
     return (item.tabs ?? [item.url]).find((url) => canReachRoute(data.userPermissions, routeIdForManageUrl(url)));
   }
 
@@ -164,11 +175,16 @@
   // Every screen the org switcher could land on, **unfiltered**: which of them
   // are reachable depends on the org being switched *to*, and the permissions for
   // that org only exist once the switch has happened. See org-switcher.svelte.
+  // The instance console is excluded: it is the one screen that does not belong
+  // to an org, so "which of these can I still see after switching" is not a
+  // question it has an answer to (KENER-31).
   const navTargets = allNavGroups.flatMap((group) =>
-    group.items.map((item) => ({
-      section: (item as { match?: string }).match ?? item.url,
-      urls: (item as { tabs?: string[] }).tabs ?? [item.url]
-    }))
+    group.items
+      .filter((item) => !(item as { instanceOnly?: boolean }).instanceOnly)
+      .map((item) => ({
+        section: (item as { match?: string }).match ?? item.url,
+        urls: (item as { tabs?: string[] }).tabs ?? [item.url]
+      }))
   );
 
   // Derive page title from current URL. Longest match wins, so a section's own

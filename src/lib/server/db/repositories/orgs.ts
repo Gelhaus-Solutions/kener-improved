@@ -37,6 +37,14 @@ export interface OrgMembershipRecord {
   perms_epoch: number;
 }
 
+/** What the instance console shows beside each org. See `getOrgCounts`. */
+export interface OrgCounts {
+  org_id: number;
+  members: number;
+  monitors: number;
+  pages: number;
+}
+
 export class OrgsRepository extends BaseRepository {
   async getOrgById(orgId: number): Promise<OrgRecord | undefined> {
     return await this.table("orgs").where({ id: orgId }).first();
@@ -50,15 +58,91 @@ export class OrgsRepository extends BaseRepository {
     return await this.table("orgs").orderBy("id", "asc");
   }
 
+  /**
+   * Per-org row counts, for the instance console (KENER-31).
+   *
+   * Three grouped counts rather than one query with correlated subqueries: the
+   * shape is identical on SQLite, Postgres and MySQL, and an org with no
+   * monitors simply has no row in that result instead of needing an outer join
+   * that each dialect spells differently. The caller fills the gaps with zero.
+   *
+   * `monitors` and `pages` are tenant tables, so this only works inside
+   * `runAcrossOrgs` - which is correct and deliberate: counting every org's rows
+   * is the definition of an instance-wide read, and `InstanceController` is the
+   * only caller, behind the superadmin gate.
+   */
+  async getOrgCounts(): Promise<OrgCounts[]> {
+    const [members, monitors, pages] = await Promise.all([
+      this.table("org_members").groupBy("org_id").select("org_id").count({ n: "*" }),
+      this.table("monitors").groupBy("org_id").select("org_id").count({ n: "*" }),
+      this.table("pages").groupBy("org_id").select("org_id").count({ n: "*" }),
+    ]);
+
+    const byOrg = new Map<number, OrgCounts>();
+    const fold = (rows: Array<Record<string, unknown>>, key: "members" | "monitors" | "pages") => {
+      for (const row of rows) {
+        const orgId = Number(row.org_id);
+        if (!Number.isFinite(orgId)) continue;
+        const entry = byOrg.get(orgId) ?? { org_id: orgId, members: 0, monitors: 0, pages: 0 };
+        entry[key] = Number(row.n ?? 0);
+        byOrg.set(orgId, entry);
+      }
+    };
+    fold(members, "members");
+    fold(monitors, "monitors");
+    fold(pages, "pages");
+
+    return [...byOrg.values()].sort((a, b) => a.org_id - b.org_id);
+  }
+
+  /**
+   * Suspends or reactivates an org (KENER-31).
+   *
+   * `status` is the switch four different subsystems already read:
+   * `getActiveOrgIds` is what every scheduler fans out over, `getOrgsForUser`
+   * is what the switcher lists, `/o/<slug>` resolution checks it, and the two
+   * domain lookups join on it. Suspension is therefore a single column write and
+   * not a feature of its own, which is exactly why it is worth having.
+   */
+  async setOrgStatus(orgId: number, status: string): Promise<number> {
+    return await this.table("orgs").where({ id: orgId }).update({ status });
+  }
+
   /** Every active org id, for the schedulers that genuinely fan out across tenants. */
   async getActiveOrgIds(): Promise<number[]> {
     const rows = await this.table("orgs").where({ status: "ACTIVE" }).orderBy("id", "asc").select("id");
     return rows.map((r: { id: number }) => r.id);
   }
 
-  /** Verified hostnames only: a PENDING domain must not yet serve a tenant's page. */
+  /**
+   * Verified hostnames only: a PENDING domain must not yet serve a tenant's page.
+   *
+   * Joined to `orgs` so a **suspended org's custom domain stops resolving**
+   * (KENER-31). Every other route into a suspended tenant was already closed -
+   * the schedulers fan out over `getActiveOrgIds`, the switcher lists
+   * `getOrgsForUser`, and `/o/<slug>` checks the status directly - which left
+   * this one query as the way a suspended org kept serving its status page to
+   * the public on its own hostname. An inner join, so a domain whose org has
+   * been deleted stops resolving rather than resolving to nothing.
+   */
+  /**
+   * Every org hostname, whatever its status and whatever its org's.
+   *
+   * The instance console's counterpart to `getActiveOrgDomains` (KENER-31). That
+   * one answers "what should this hostname serve", so it filters hard; this one
+   * answers "how is this instance configured", where a suspended org's domains
+   * and a PENDING one are exactly what the operator came to look at.
+   */
+  async getAllOrgDomains(): Promise<OrgDomainRecord[]> {
+    return await this.table("org_domains").orderBy("id", "asc").select("id", "org_id", "hostname", "status");
+  }
+
   async getActiveOrgDomains(): Promise<OrgDomainRecord[]> {
-    return await this.table("org_domains").where({ status: "ACTIVE" }).select("id", "org_id", "hostname", "status");
+    return await this.table("org_domains as od")
+      .join("orgs as o", "o.id", "od.org_id")
+      .where("od.status", "ACTIVE")
+      .andWhere("o.status", "ACTIVE")
+      .select("od.id", "od.org_id", "od.hostname", "od.status");
   }
 
   /** The orgs a user belongs to, for the switcher and for the membership check. */

@@ -6,6 +6,7 @@ import type { ActionContext } from "./types.js";
 import { authenticate } from "./middleware/authenticate.js";
 import { requireOrg } from "./middleware/requireOrg.js";
 import { authorize, isKnownAction } from "./middleware/authorize.js";
+import { requireSuperadmin } from "./middleware/requireSuperadmin.js";
 import { requireMfaEnrolment } from "./middleware/requireMfa.js";
 import { rateLimit } from "./middleware/rateLimit.js";
 import { auditBefore, auditDiff, auditWrite, auditOutcomeOnly } from "./middleware/audit.js";
@@ -17,7 +18,8 @@ import { runWithEventContext, DEFAULT_ORG_ID } from "$lib/server/events/eventCon
  *
  * Order is load-bearing, not stylistic:
  *
- *   requestId -> authenticate -> requireMfa -> requireOrg -> authorize -> rateLimit
+ *   requestId -> authenticate -> requireMfa -> requireOrg -> authorize
+ *             -> requireSuperadmin -> rateLimit
  *             -> validate -> audit:before -> handler -> audit:diff
  *             -> events -> audit:write -> errors
  *
@@ -107,6 +109,10 @@ export async function runAction(event: RequestEvent): Promise<Response> {
     }
 
     authorize(action, def, permissions);
+
+    // KENER-31. The instance tier, for the handful of actions that act *on*
+    // organisations rather than inside one. A no-op for every other action.
+    requireSuperadmin(def, ctx);
 
     await rateLimit(action, def, ctx);
 

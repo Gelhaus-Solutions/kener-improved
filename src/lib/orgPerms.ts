@@ -182,6 +182,18 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   setOrgMemberOwner: "orgs.members.write",
   removeOrgMember: "orgs.members.write",
 
+  // The instance console (KENER-31). `null` here is not "authenticated is
+  // enough": these three carry `superadmin: true` on their definitions, and the
+  // pipeline enforces that immediately after `authorize`. They are listed with a
+  // null permission because **no per-org permission could be the right answer** -
+  // a permission id would be seeded into every org's role editor, and the first
+  // tenant administrator to tick it would own the instance. The gate is
+  // `users.is_owner`, which no screen and no role can grant. See
+  // `instanceController.ts`.
+  getInstanceOrgs: null,
+  getInstanceOrgDetail: null,
+  setInstanceOrgStatus: null,
+
   // Event bus consumers (H8c). The diff is a read of what would have been sent;
   // the mode is the switch that decides whether anything is sent at all.
   getEventConsumers: "eventbus.read",
@@ -282,6 +294,20 @@ export const ORG_ROUTE_PERMISSION_MAP: Record<string, string | null> = {
   // id, so a static `import` cannot shadow a real incident.
   "/(manage)/manage/app/incidents/import": "incidents.read",
 };
+
+/**
+ * Manage routes gated on the **instance** tier rather than on a permission
+ * (KENER-31).
+ *
+ * Kept apart from `ORG_ROUTE_PERMISSION_MAP` rather than given a sentinel value
+ * in it, because they are answers to different questions and a map whose values
+ * mean two things is a map somebody eventually reads wrong. `(manage)`'s layout
+ * consults this set first; a route in it never reaches the permission map at all.
+ *
+ * The nav entry for these routes is filtered by the same fact, so a tenant's
+ * administrator does not see a link that would 403.
+ */
+export const SUPERADMIN_ROUTES: ReadonlySet<string> = new Set(["/(manage)/manage/app/instance"]);
 
 /** Permission ids the fork owns. Used by the seeds to tell them from upstream's. */
 export const orgPermissionIds: ReadonlySet<string> = new Set(orgPermissions.map((p) => p.id));

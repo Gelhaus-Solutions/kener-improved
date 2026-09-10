@@ -6,6 +6,8 @@ import { RequirePermission } from "$lib/server/controllers/userController.js";
 import seedSiteData from "$lib/server/db/seedSiteData.js";
 import serverResolve from "$lib/server/resolver.js";
 import { MERGED_ROUTE_PERMISSION_MAP } from "$lib/routePermissions.js";
+import { SUPERADMIN_ROUTES } from "$lib/orgPerms.js";
+import { IsInstanceSuperadmin } from "$lib/server/controllers/instanceController.js";
 import { error } from "@sveltejs/kit";
 
 import { resolve } from "$app/paths";
@@ -47,15 +49,26 @@ export const load: LayoutServerLoad = async ({ cookies, route }) => {
   const userPermissions = await GetUserPermissions(loggedInUser.id);
   const routeId = route.id || "";
 
-  const requiredPermission = MERGED_ROUTE_PERMISSION_MAP[routeId];
-  if (requiredPermission === undefined) {
-    throw error(403, "Forbidden");
-  }
-  if (requiredPermission !== null) {
-    try {
-      RequirePermission(userPermissions, requiredPermission);
-    } catch {
+  // KENER-31. The instance tier is a different question from "what role do you
+  // hold here", so it is asked first and separately: a route in this set never
+  // consults the permission map, because no per-org permission could gate it.
+  // See instanceController.ts.
+  const isInstanceSuperadmin = IsInstanceSuperadmin(loggedInUser);
+  if (SUPERADMIN_ROUTES.has(routeId)) {
+    if (!isInstanceSuperadmin) {
       throw error(403, "Forbidden");
+    }
+  } else {
+    const requiredPermission = MERGED_ROUTE_PERMISSION_MAP[routeId];
+    if (requiredPermission === undefined) {
+      throw error(403, "Forbidden");
+    }
+    if (requiredPermission !== null) {
+      try {
+        RequirePermission(userPermissions, requiredPermission);
+      } catch {
+        throw error(403, "Forbidden");
+      }
     }
   }
 
@@ -92,5 +105,9 @@ export const load: LayoutServerLoad = async ({ cookies, route }) => {
     orgs,
     activeOrgId,
     canCreateOrg,
+    // Drives the one nav entry that no permission can unlock (KENER-31). The
+    // route itself is gated above; this only decides whether the link is drawn,
+    // so a tenant's administrator is not shown a screen that would 403.
+    isInstanceSuperadmin,
   };
 };

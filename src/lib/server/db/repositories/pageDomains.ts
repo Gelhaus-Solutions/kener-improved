@@ -52,7 +52,14 @@ export class PageDomainsRepository extends BaseRepository {
         // Inner join, not left: a domain whose page has been deleted must stop
         // resolving rather than resolve to nothing and 500 every request to it.
         .join("pages as p", "p.id", "pd.page_id")
+        // KENER-31. The same reasoning applied to the org: a suspended tenant's
+        // custom domain must stop serving. Suspension is otherwise enforced
+        // everywhere - schedulers, switcher, `/o/<slug>` - and a per-page domain
+        // was one of the two holes that let a suspended org keep answering the
+        // public on a hostname of its own. See `getActiveOrgDomains`.
+        .join("orgs as o", "o.id", "pd.org_id")
         .where("pd.status", "ACTIVE")
+        .andWhere("o.status", "ACTIVE")
         .select("pd.org_id", "pd.page_id", "pd.hostname", "p.page_path"),
     );
   }

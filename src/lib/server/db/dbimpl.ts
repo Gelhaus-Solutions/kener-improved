@@ -510,8 +510,11 @@ class DbImpl {
   getOrgById!: OrgsRepository["getOrgById"];
   getOrgBySlug!: OrgsRepository["getOrgBySlug"];
   getAllOrgs!: OrgsRepository["getAllOrgs"];
+  getOrgCounts!: OrgsRepository["getOrgCounts"];
+  setOrgStatus!: OrgsRepository["setOrgStatus"];
   getActiveOrgIds!: OrgsRepository["getActiveOrgIds"];
   getActiveOrgDomains!: OrgsRepository["getActiveOrgDomains"];
+  getAllOrgDomains!: OrgsRepository["getAllOrgDomains"];
   getOrgsForUser!: OrgsRepository["getOrgsForUser"];
   getOrgMembership!: OrgsRepository["getOrgMembership"];
   isOrgMember!: OrgsRepository["isOrgMember"];
@@ -1384,8 +1387,11 @@ class DbImpl {
     this.getOrgById = this.orgs.getOrgById.bind(this.orgs);
     this.getOrgBySlug = this.orgs.getOrgBySlug.bind(this.orgs);
     this.getAllOrgs = this.orgs.getAllOrgs.bind(this.orgs);
+    this.getOrgCounts = this.orgs.getOrgCounts.bind(this.orgs);
+    this.setOrgStatus = this.orgs.setOrgStatus.bind(this.orgs);
     this.getActiveOrgIds = this.orgs.getActiveOrgIds.bind(this.orgs);
     this.getActiveOrgDomains = this.orgs.getActiveOrgDomains.bind(this.orgs);
+    this.getAllOrgDomains = this.orgs.getAllOrgDomains.bind(this.orgs);
     this.getOrgsForUser = this.orgs.getOrgsForUser.bind(this.orgs);
     this.getOrgMembership = this.orgs.getOrgMembership.bind(this.orgs);
     this.isOrgMember = this.orgs.isOrgMember.bind(this.orgs);

@@ -86,6 +86,25 @@ export interface ActionDefinition<T = Record<string, unknown>> {
   permission?: string | null;
 
   /**
+   * Restricts this action to the **instance** superadmin (KENER-31).
+   *
+   * A separate axis from `permission`, not a value of it, because the two ask
+   * different questions: `permission` asks what role the caller holds in the org
+   * they are acting in, and this asks whether they run the installation at all.
+   * An action with this flag sets `permission: null` - there is no per-org
+   * permission that could be the right answer, and inventing one would seed it
+   * into every org's role editor for a tenant to grant themselves.
+   *
+   * Enforced by `requireSuperadmin`, immediately after `authorize`. Declarative
+   * rather than a check inside each handler so that the gate is visible in the
+   * definition, greppable across the tree, and cannot be reached by a handler
+   * that forgot to open with it.
+   *
+   * See `instanceController.ts` for what makes somebody a superadmin.
+   */
+  superadmin?: boolean;
+
+  /**
    * Optional payload validation, run after authorization.
    *
    * Also the only way a handler gets a typed payload: whatever this returns is
