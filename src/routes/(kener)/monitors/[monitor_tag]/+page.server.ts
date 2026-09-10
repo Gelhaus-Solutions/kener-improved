@@ -38,7 +38,12 @@ export const load: PageServerLoad = async ({ params, parent }) => {
     throw error(404, { message: "Monitor not found" });
   }
 
-  const monitorTags = [monitor_tag];
+  // The *physical* tag, not the URL segment (KENER-127). The loader resolves the
+  // slug a few lines up and then threw the result away here, so in an org with a
+  // `tag_prefix` these three queries asked about a tag that does not exist and a
+  // monitor in an active incident rendered a clean page with no incident on it.
+  // Invisible on the default org, where slug and tag are the same string.
+  const monitorTags = [monitor.tag];
 
   const eventSettings = parentData.eventDisplaySettings;
   const showInlineEvents = eventSettings.showInlineEvents === true;

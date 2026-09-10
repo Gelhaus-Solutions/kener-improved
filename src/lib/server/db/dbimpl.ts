@@ -160,6 +160,7 @@ class DbImpl {
   getMonitors!: MonitorsRepository["getMonitors"];
   getMonitorByTag!: MonitorsRepository["getMonitorByTag"];
   getMonitorBySlug!: MonitorsRepository["getMonitorBySlug"];
+  getMonitorsBySlugs!: MonitorsRepository["getMonitorsBySlugs"];
   deleteMonitorsByTag!: MonitorsRepository["deleteMonitorsByTag"];
 
   // ============ Alerts ============
@@ -710,6 +711,7 @@ class DbImpl {
     this.getMonitors = this.monitors.getMonitors.bind(this.monitors);
     this.getMonitorByTag = this.monitors.getMonitorByTag.bind(this.monitors);
     this.getMonitorBySlug = this.monitors.getMonitorBySlug.bind(this.monitors);
+    this.getMonitorsBySlugs = this.monitors.getMonitorsBySlugs.bind(this.monitors);
     this.deleteMonitorsByTag = this.monitors.deleteMonitorsByTag.bind(this.monitors);
   }
 

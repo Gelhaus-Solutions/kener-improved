@@ -107,3 +107,36 @@ export async function GetVisiblePublicMonitorsByTags(tags: string[]): Promise<Mo
   if (tags.length === 0) return [];
   return (await db.getMonitorsByTags(tags)).filter(isPubliclyVisible);
 }
+
+/**
+ * Many public names at once, resolved and filtered, keyed by what was asked for.
+ *
+ * The batch form of `ResolveVisiblePublicMonitor`, and the key matters as much as
+ * the value: the caller asked for "api" and has to be able to find "api" in the
+ * answer, even though the monitor is physically `beta_api`. Returning a map keyed
+ * by the physical tag would resolve the monitor correctly and still leave the
+ * browser unable to match the response to the request.
+ *
+ * Slug before tag, the same precedence and for the same reasons as
+ * `ResolvePublicMonitor`. Both queries are org-scoped, so neither can reach
+ * another tenant.
+ */
+export async function ResolveVisiblePublicMonitors(namesInUrl: string[]): Promise<Map<string, MonitorRecord>> {
+  const resolved = new Map<string, MonitorRecord>();
+  if (namesInUrl.length === 0) return resolved;
+
+  const [bySlugRows, byTagRows] = await Promise.all([
+    db.getMonitorsBySlugs(namesInUrl),
+    db.getMonitorsByTags(namesInUrl),
+  ]);
+  // A row whose `slug` is null is skipped rather than indexed under a null key:
+  // the column is nullable, and `null` is not a name anybody can ask for.
+  const bySlug = new Map(bySlugRows.filter((m) => !!m.slug).map((m) => [m.slug as string, m]));
+  const byTag = new Map(byTagRows.map((m) => [m.tag, m]));
+
+  for (const name of namesInUrl) {
+    const monitor = bySlug.get(name) ?? byTag.get(name);
+    if (monitor && isPubliclyVisible(monitor)) resolved.set(name, monitor);
+  }
+  return resolved;
+}

@@ -139,6 +139,12 @@ export class MonitorsRepository extends BaseRepository {
     return await this.table("monitors").where("slug", slug).first();
   }
 
+  /** The batch form, for an endpoint that resolves up to a hundred names at once. */
+  async getMonitorsBySlugs(slugs: string[]): Promise<MonitorRecord[]> {
+    if (slugs.length === 0) return [];
+    return await this.table("monitors").whereIn("slug", slugs);
+  }
+
   async deleteMonitorsByTag(tag: string): Promise<number> {
     return await this.table("monitors").where("tag", tag).del();
   }

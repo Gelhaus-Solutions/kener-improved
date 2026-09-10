@@ -162,6 +162,12 @@ export interface SiteData {
 export interface MonitorRecord {
   id: number;
   tag: string;
+  /**
+   * The per-org public name (I3e). Nullable in the schema: the migration
+   * backfilled it to `tag` for every existing row, but the column was added
+   * nullable and nothing has made it NOT NULL since.
+   */
+  slug?: string | null;
   name: string;
   description: string | null;
   image: string | null;

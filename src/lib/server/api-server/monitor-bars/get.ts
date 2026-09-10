@@ -1,6 +1,6 @@
 import { json, error } from "@sveltejs/kit";
 import type { APIServerRequest } from "$lib/server/types/api-server";
-import { GetVisiblePublicMonitorsByTags } from "$lib/server/controllers/publicMonitorResolver";
+import { ResolveVisiblePublicMonitors } from "$lib/server/controllers/publicMonitorResolver";
 import { GetMinuteStartNowTimestampUTC } from "$lib/server/tool";
 import type { StatusType } from "$lib/types/status";
 import GC from "$lib/global-constants";
@@ -55,23 +55,30 @@ export default async function get(req: APIServerRequest): Promise<Response> {
 
   const startTime = endOfDayTodayAtTz - days * 24 * 60 * 60;
 
-  const [monitors, latestDataAll, aggregatedData] = await Promise.all([
-    // Visible ones only (KENER-126). A tag the caller may not see falls through
-    // to `missingTags` below, which is exactly how a tag that does not exist is
-    // already reported - so the response cannot be used to tell "hidden" from
-    // "never existed".
-    GetVisiblePublicMonitorsByTags(tags),
-    GetLatestMonitoringDataAllActive(tags),
-    GetStatusCountsByIntervalGroupedByMonitor(tags, startTime, 86400, days),
+  // Resolve first, because everything below needs *physical* tags while the
+  // caller may have asked with per-org slugs (KENER-127). The page hands the
+  // browser `monitorTag`, which is the slug, and this endpoint used to match on
+  // `tag` alone - so in an org with a `tag_prefix` every bar on the page came
+  // back empty, reported as a missing tag.
+  //
+  // Visible monitors only (KENER-126). Anything the caller may not see simply
+  // does not resolve, and falls through to `missingTags` exactly as a name that
+  // never existed does, so the response cannot be used to tell the two apart.
+  const resolved = await ResolveVisiblePublicMonitors(tags);
+  const physicalTags = [...new Set([...resolved.values()].map((m) => m.tag))];
+
+  const [latestDataAll, aggregatedData] = await Promise.all([
+    GetLatestMonitoringDataAllActive(physicalTags),
+    GetStatusCountsByIntervalGroupedByMonitor(physicalTags, startTime, 86400, days),
   ]);
 
   const latestStatusByTag = new Map<string, StatusType>(
     latestDataAll.map((d) => [d.monitor_tag, (d.status as StatusType) || GC.NO_DATA]),
   );
 
-  const monitorByTag = new Map(monitors.map((m) => [m.tag, m]));
-  const existingTags = new Set(monitors.map((m) => m.tag));
-  const missingTags = tags.filter((t) => !existingTags.has(t));
+  // Keyed by the name the caller used, not by the physical tag, so a browser that
+  // asked for "api" can find "api" in the answer.
+  const missingTags = tags.filter((t) => !resolved.has(t));
 
   const aggregatedByTag = new Map<string, TimestampStatusCount[]>();
   for (const row of aggregatedData as TimestampStatusCountByMonitor[]) {
@@ -91,20 +98,20 @@ export default async function get(req: APIServerRequest): Promise<Response> {
 
   const responseData: Record<string, MonitorBarResponse> = {};
   const monitorResults = await Promise.all(
-    tags
-      .filter((tag) => existingTags.has(tag))
-      .map(async (tag) => {
-        const monitor = monitorByTag.get(tag);
-        if (!monitor) return null;
-        const payload = buildMonitorBarResponseFromRawData(
-          monitor,
-          aggregatedByTag.get(tag) || [],
-          days,
-          endOfDayTodayAtTz,
-          latestStatusByTag.get(tag) || GC.NO_DATA,
-        );
-        return { tag, payload };
-      }),
+    tags.map(async (requested) => {
+      const monitor = resolved.get(requested);
+      if (!monitor) return null;
+      // The data was fetched under the physical tag; the answer is filed under
+      // the name that was asked for.
+      const payload = buildMonitorBarResponseFromRawData(
+        monitor,
+        aggregatedByTag.get(monitor.tag) || [],
+        days,
+        endOfDayTodayAtTz,
+        latestStatusByTag.get(monitor.tag) || GC.NO_DATA,
+      );
+      return { tag: requested, payload };
+    }),
   );
 
   for (const result of monitorResults) {
