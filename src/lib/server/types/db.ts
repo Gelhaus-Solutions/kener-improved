@@ -1441,6 +1441,9 @@ export interface SessionRecord {
 
 export type WebhookEndpointStatus = "ACTIVE" | "DISABLED" | "DISABLED_AUTO";
 
+/** E11. Mirrors WEBHOOK_FORMATS in notification/webhook_formats.ts. */
+export type WebhookFormatType = "GENERIC" | "DISCORD";
+
 export interface WebhookEndpointRecord {
   id: number;
   org_id: number;
@@ -1452,6 +1455,10 @@ export interface WebhookEndpointRecord {
   previous_secret_expires_at: number | null;
   status: WebhookEndpointStatus;
   api_version: string;
+  /** E11. GENERIC sends Kener's envelope; DISCORD sends what Discord requires. */
+  format: WebhookFormatType;
+  /** E11. The message body an operator authored. Null means the format's default. */
+  message_template: string | null;
   custom_headers: string | null;
   timeout_ms: number;
   consecutive_failures: number;
@@ -1474,6 +1481,8 @@ export interface WebhookEndpointInsert {
   secret_hint: string | null;
   status: WebhookEndpointStatus;
   api_version: string;
+  format?: WebhookFormatType;
+  message_template?: string | null;
   custom_headers: string | null;
   timeout_ms: number;
   created_at: number;

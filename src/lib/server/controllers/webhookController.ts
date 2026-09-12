@@ -1,11 +1,17 @@
 import { randomBytes } from "node:crypto";
+import { parseFormat, normaliseTemplate } from "../notification/webhook_formats.js";
 import db from "../db/db.js";
 import { seal, secretHint, openOrPlain } from "../crypto/secretBox.js";
 import { WEBHOOK_SECRET_PURPOSE, checkWebhookUrl, sendWebhook } from "../notification/webhook_delivery.js";
 import { emit } from "../events/emit.js";
 import { currentOrgId } from "../events/eventContext.js";
 import { isEventType, isAdminEventType, subscribableEventsByDomain } from "$lib/event-taxonomy.js";
-import type { WebhookEndpointRecord, WebhookEndpointStatus, WebhookEndpointWithEvents } from "../types/db.js";
+import type {
+  WebhookEndpointRecord,
+  WebhookEndpointStatus,
+  WebhookEndpointWithEvents,
+  WebhookFormatType,
+} from "../types/db.js";
 
 // Webhook endpoint management.
 //
@@ -135,6 +141,9 @@ export interface CreateWebhookInput {
   custom_headers?: unknown;
   timeout_ms?: unknown;
   status?: WebhookEndpointStatus;
+  /** E11. GENERIC when absent, so an unconfigured endpoint behaves as before. */
+  format?: unknown;
+  message_template?: unknown;
 }
 
 /**
@@ -170,6 +179,11 @@ export const CreateWebhookEndpoint = async (
       secret_hint: secretHint(secret),
       status: data.status === "DISABLED" ? "DISABLED" : "ACTIVE",
       api_version: DEFAULT_API_VERSION,
+      // E11. Listed explicitly because this insert names its columns: a field
+      // missing from it is accepted by the caller, dropped here, and the write
+      // still reports success.
+      format: parseFormat(data.format),
+      message_template: normaliseTemplate(data.message_template),
       custom_headers: headers,
       timeout_ms: clampTimeout(data.timeout_ms),
       created_at: now,
@@ -196,6 +210,9 @@ export interface UpdateWebhookInput {
   custom_headers?: unknown;
   timeout_ms?: unknown;
   status?: WebhookEndpointStatus;
+  /** E11. */
+  format?: unknown;
+  message_template?: unknown;
 }
 
 export const UpdateWebhookEndpoint = async (data: UpdateWebhookInput): Promise<WebhookEndpointView> => {
@@ -212,6 +229,8 @@ export const UpdateWebhookEndpoint = async (data: UpdateWebhookInput): Promise<W
     patch.url = String(data.url);
   }
   if (data.custom_headers !== undefined) patch.custom_headers = normaliseHeaders(data.custom_headers);
+  if (data.format !== undefined) patch.format = parseFormat(data.format);
+  if (data.message_template !== undefined) patch.message_template = normaliseTemplate(data.message_template);
   if (data.timeout_ms !== undefined) patch.timeout_ms = clampTimeout(data.timeout_ms);
   if (data.status !== undefined) {
     if (!["ACTIVE", "DISABLED"].includes(data.status)) {

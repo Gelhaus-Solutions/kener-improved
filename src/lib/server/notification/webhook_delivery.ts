@@ -6,6 +6,7 @@ import { GetRequiredSecrets, ReplaceAllOccurrences } from "../tool.js";
 import { openOrPlain } from "../crypto/secretBox.js";
 import version from "../../version.js";
 import type { WebhookEndpointRecord } from "../types/db.js";
+import { formatEnvelope } from "./webhook_formats.js";
 
 // The event-bus webhook sender.
 //
@@ -282,7 +283,15 @@ export async function sendWebhook(
     };
   }
 
-  const rawBody = JSON.stringify(envelope);
+  // E11. The endpoint decides its own shape. GENERIC is the envelope itself, so
+  // an endpoint that predates formats serialises byte for byte what it always
+  // did. The signature is computed over whatever is actually sent, below, rather
+  // than over the envelope: a receiver verifies the bytes it received, and a
+  // Discord body signed against a different string would fail every check that
+  // bothered to run. Discord ignores the header, which is not a reason to omit
+  // it - an endpoint that silently stops being signed because of its format is a
+  // footgun for whoever changes the format later.
+  const rawBody = JSON.stringify(formatEnvelope(endpoint.format ?? "GENERIC", envelope, endpoint.message_template));
   const timestamp = now;
 
   // Same `{{ENV_VAR}}` substitution the trigger sender supports, so a header can
