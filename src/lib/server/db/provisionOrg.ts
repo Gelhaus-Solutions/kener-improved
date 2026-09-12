@@ -9,6 +9,7 @@ import inviteUserTemplate from "../templates/general/invite_user_template.ts";
 import verifyEmailTemplate from "../templates/general/verify_email_template.ts";
 import { permissions } from "../../allPerms.ts";
 import { orgPermissions } from "../../orgPerms.ts";
+import { tagFromSlug } from "./monitorSlug.ts";
 
 /**
  * Seeding a single organisation.
@@ -134,7 +135,7 @@ export async function provisionOrgMonitors(knex: Knex, orgId: number): Promise<v
 
   for (const monitor of monitorSeed) {
     const slug = monitor.tag;
-    const tag = prefix ? `${prefix}_${slug}` : slug;
+    const tag = tagFromSlug(slug, prefix);
 
     await knex("monitors").insert({
       org_id: orgId,
@@ -175,7 +176,7 @@ export async function provisionOrgPages(knex: Knex, orgId: number): Promise<void
 
   const org = await knex("orgs").where("id", orgId).first();
   const prefix: string = org?.tag_prefix ?? "";
-  const taggedAs = (slug: string) => (prefix ? `${prefix}_${slug}` : slug);
+  const taggedAs = (slug: string) => tagFromSlug(slug, prefix);
 
   for (const page of seedPagesData) {
     const [insertedPage] = await knex("pages")

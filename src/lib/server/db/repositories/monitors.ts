@@ -1,5 +1,7 @@
 import type { Knex as KnexType } from "knex";
 import { BaseRepository, type MonitorFilter, type CountResult } from "./base.js";
+import { currentOrgIdOrDefault } from "../orgContext.js";
+import { slugFromTag } from "../monitorSlug.js";
 import type { MonitorRecord, MonitorRecordInsert } from "../../types/db.js";
 
 /**
@@ -25,6 +27,19 @@ export class MonitorsRepository extends BaseRepository {
     return await this.table("monitors").where("tag", tag).first();
   }
 
+  /**
+   * This org's tag prefix, or "" when it has none.
+   *
+   * Read per insert rather than cached: monitor creation is rare, `orgs` is a
+   * handful of rows, and a cache keyed on the ambient org is a cache that has to
+   * be invalidated when an org is created mid-process.
+   */
+  private async currentTagPrefix(): Promise<string> {
+    const orgId = currentOrgIdOrDefault();
+    const org = await this.knexUnscoped("orgs").where("id", orgId).first();
+    return (org?.tag_prefix as string | undefined) ?? "";
+  }
+
   async insertMonitor(data: MonitorRecordInsert): Promise<number[]> {
     return await this.table("monitors").insert({
       tag: data.tag,
@@ -32,7 +47,14 @@ export class MonitorsRepository extends BaseRepository {
       // through the admin since that migration was written with a null slug -
       // and the public page hands the browser the *slug*, not the tag. The
       // migration's one-time backfill is the only thing that had ever set it.
-      slug: data.slug ?? data.tag,
+      //
+      // Defaulted through `slugFromTag` rather than straight from `tag`, because
+      // `tag` carries the org's prefix and the slug must not: a monitor created
+      // through the admin in an org with `tag_prefix = "postiz"` was getting
+      // `slug = "postiz_earth"`, and its public URL read
+      // `/o/postiz/monitors/postiz_earth`. A no-op on the default org, whose
+      // prefix is empty.
+      slug: data.slug ?? slugFromTag(data.tag, await this.currentTagPrefix()),
       name: data.name,
       description: data.description,
       image: data.image,

@@ -171,6 +171,9 @@ COPY --chown=node:node --from=builder /app/src/lib/allPerms.ts                  
 # `dockerfile-seed-imports.test.ts` fails the build when one is not.
 COPY --chown=node:node --from=builder /app/src/lib/orgPerms.ts                   ./src/lib/orgPerms.ts
 COPY --chown=node:node --from=builder /app/src/lib/server/db/provisionOrg.ts     ./src/lib/server/db/provisionOrg.ts
+# Imported by provisionOrg.ts for the tag/slug invariant, so it ships for the
+# same reason provisionOrg.ts does.
+COPY --chown=node:node --from=builder /app/src/lib/server/db/monitorSlug.ts      ./src/lib/server/db/monitorSlug.ts
 COPY --chown=node:node --from=builder /app/src/lib/server/templates/general       ./src/lib/server/templates/general
 
 # Locale JSON files (read at runtime by server-side i18n)
