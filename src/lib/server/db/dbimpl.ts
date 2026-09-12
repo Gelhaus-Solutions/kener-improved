@@ -34,6 +34,7 @@ import { EmailTemplateConfigRepository } from "./repositories/emailTemplateConfi
 import { OrgsRepository } from "./repositories/orgs.js";
 import { PageDomainsRepository } from "./repositories/pageDomains.js";
 import { ProbesRepository } from "./repositories/probes.js";
+import { InboundRepository } from "./repositories/inbound.js";
 
 // Re-export types from base
 export type { MonitorFilter, TriggerFilter, IncidentFilter, CountResult } from "./repositories/base.js";
@@ -154,6 +155,7 @@ class DbImpl {
   private orgs!: OrgsRepository;
   private pageDomains!: PageDomainsRepository;
   private probes!: ProbesRepository;
+  private inbound!: InboundRepository;
   private sessions!: SessionsRepository;
   private mfa!: MfaRepository;
   private subscriptionSystem!: SubscriptionSystemRepository;
@@ -521,6 +523,20 @@ class DbImpl {
   deletePageDomain!: PageDomainsRepository["deletePageDomain"];
   hostnameExists!: PageDomainsRepository["hostnameExists"];
   // B1b/B1c. Remote probe agents and their monitor assignments.
+  // H1. Inbound alert webhooks.
+  findEndpointByTokenHash!: InboundRepository["findEndpointByTokenHash"];
+  tokenHashExists!: InboundRepository["tokenHashExists"];
+  getInboundEndpoints!: InboundRepository["getInboundEndpoints"];
+  getInboundEndpointById!: InboundRepository["getInboundEndpointById"];
+  createInboundEndpoint!: InboundRepository["createInboundEndpoint"];
+  updateInboundEndpoint!: InboundRepository["updateInboundEndpoint"];
+  deleteInboundEndpoint!: InboundRepository["deleteInboundEndpoint"];
+  recordEndpointRequest!: InboundRepository["recordEndpointRequest"];
+  getInboundAlert!: InboundRepository["getInboundAlert"];
+  insertInboundAlert!: InboundRepository["insertInboundAlert"];
+  updateInboundAlert!: InboundRepository["updateInboundAlert"];
+  getRecentInboundAlerts!: InboundRepository["getRecentInboundAlerts"];
+
   findProbeAgentByTokenHash!: ProbesRepository["findProbeAgentByTokenHash"];
   getAssignableRegions!: ProbesRepository["getAssignableRegions"];
   createRegion!: ProbesRepository["createRegion"];
@@ -778,6 +794,19 @@ class DbImpl {
     this.orgs = new OrgsRepository(this.knex);
     this.pageDomains = new PageDomainsRepository(this.knex);
     this.probes = new ProbesRepository(this.knex);
+    this.inbound = new InboundRepository(this.knex);
+    this.findEndpointByTokenHash = this.inbound.findEndpointByTokenHash.bind(this.inbound);
+    this.tokenHashExists = this.inbound.tokenHashExists.bind(this.inbound);
+    this.getInboundEndpoints = this.inbound.getInboundEndpoints.bind(this.inbound);
+    this.getInboundEndpointById = this.inbound.getInboundEndpointById.bind(this.inbound);
+    this.createInboundEndpoint = this.inbound.createInboundEndpoint.bind(this.inbound);
+    this.updateInboundEndpoint = this.inbound.updateInboundEndpoint.bind(this.inbound);
+    this.deleteInboundEndpoint = this.inbound.deleteInboundEndpoint.bind(this.inbound);
+    this.recordEndpointRequest = this.inbound.recordEndpointRequest.bind(this.inbound);
+    this.getInboundAlert = this.inbound.getInboundAlert.bind(this.inbound);
+    this.insertInboundAlert = this.inbound.insertInboundAlert.bind(this.inbound);
+    this.updateInboundAlert = this.inbound.updateInboundAlert.bind(this.inbound);
+    this.getRecentInboundAlerts = this.inbound.getRecentInboundAlerts.bind(this.inbound);
     this.sessions = new SessionsRepository(this.knex);
     this.mfa = new MfaRepository(this.knex);
     this.subscriptionSystem = new SubscriptionSystemRepository(this.knex);
