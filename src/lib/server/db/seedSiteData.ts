@@ -148,6 +148,7 @@ const seedSiteData = {
     // of hourly covers three years for whole-hour offsets; daily is kept
     // forever, which costs almost nothing.
     rollup5mRetentionDays: 400,
+    rollup15mRetentionDays: 400,
     rollup1hRetentionDays: 1095,
     rollup1dRetentionDays: 0,
   },

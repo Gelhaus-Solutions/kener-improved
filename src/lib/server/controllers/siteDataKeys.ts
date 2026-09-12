@@ -38,7 +38,12 @@ function IsValidDataRetentionPolicy(value: string): boolean {
   const policy = parsed as Record<string, unknown>;
   if (typeof policy.enabled !== "boolean") return false;
   if (!Number.isFinite(Number(policy.retentionDays)) || Number(policy.retentionDays) < 1) return false;
-  for (const key of ["rollup5mRetentionDays", "rollup1hRetentionDays", "rollup1dRetentionDays"]) {
+  for (const key of [
+    "rollup5mRetentionDays",
+    "rollup15mRetentionDays",
+    "rollup1hRetentionDays",
+    "rollup1dRetentionDays",
+  ]) {
     if (policy[key] === undefined || policy[key] === null) continue;
     const days = Number(policy[key]);
     if (!Number.isFinite(days) || days < 0) return false;

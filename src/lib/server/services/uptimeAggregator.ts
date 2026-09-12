@@ -33,7 +33,7 @@ import { addSample, emptyAccumulator, type RollupAccumulator } from "./rollupCom
  */
 
 /** The grains this can read from, coarsest first. */
-const GRAINS_COARSEST_FIRST: RollupGrain[] = ["1d", "1h", "5m"];
+const GRAINS_COARSEST_FIRST: RollupGrain[] = ["1d", "1h", "15m", "5m"];
 
 /**
  * The coarsest grain whose bucket divides both the interval and its alignment.

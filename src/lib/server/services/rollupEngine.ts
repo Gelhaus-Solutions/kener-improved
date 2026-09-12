@@ -47,11 +47,12 @@ const DAY_SECONDS = 86400;
 export interface RecomputeSummary {
   hours: number;
   buckets5m: number;
+  buckets15m: number;
   buckets1h: number;
   days: number;
 }
 
-const emptySummary = (): RecomputeSummary => ({ hours: 0, buckets5m: 0, buckets1h: 0, days: 0 });
+const emptySummary = (): RecomputeSummary => ({ hours: 0, buckets5m: 0, buckets15m: 0, buckets1h: 0, days: 0 });
 
 /** Consecutive hours for one monitor, so a run is one query rather than N. */
 interface HourRun {
@@ -152,7 +153,22 @@ export async function recomputeHours(units: ReadonlyArray<DirtyHour>, nowTs: num
     // between the two reads made the hour disagree with its own five-minute
     // buckets, and that disagreement would persist until something marked the
     // hour dirty again.
-    const coarse = foldRollups(rows5m, grainSeconds("1h"));
+    //
+    // The chain is 5m -> 15m -> 1h (KENER-124). The hour folds from the quarter
+    // hours rather than straight from the five-minute rows, which is four inputs
+    // instead of twelve and, more importantly, keeps every grain the exact sum of
+    // the one below it. Two independent folds off `rows5m` could not drift in
+    // arithmetic, but they could drift the day somebody changes one of them.
+    const quarter = foldRollups(rows5m, grainSeconds("15m"));
+    const rows15m = [...quarter.entries()].map(([bucketStart, accumulator]) =>
+      accumulatorToRow(
+        accumulator,
+        { monitor_tag: run.monitor_tag, region_id: run.region_id, bucket_start: bucketStart },
+        nowTs,
+      ),
+    );
+
+    const coarse = foldRollups(rows15m, grainSeconds("1h"));
     const rows1h = [...coarse.entries()].map(([bucketStart, accumulator]) =>
       accumulatorToRow(
         accumulator,
@@ -167,12 +183,15 @@ export async function recomputeHours(units: ReadonlyArray<DirtyHour>, nowTs: num
     // mode where a stale rollup actively lies rather than merely lagging.
     await db.withTransaction(async () => {
       await db.deleteRollups("5m", run.monitor_tag, run.region_id, run.start, run.end);
+      await db.deleteRollups("15m", run.monitor_tag, run.region_id, run.start, run.end);
       await db.deleteRollups("1h", run.monitor_tag, run.region_id, run.start, run.end);
       await db.upsertRollups("5m", rows5m);
+      await db.upsertRollups("15m", rows15m);
       await db.upsertRollups("1h", rows1h);
     });
 
     summary.buckets5m += rows5m.length;
+    summary.buckets15m += rows15m.length;
     summary.buckets1h += rows1h.length;
 
     for (let hour = run.start; hour < run.end; hour += HOUR_SECONDS) {
@@ -289,6 +308,7 @@ export async function advanceWatermark(regionId: number, nowTs: number): Promise
 async function setWatermark(regionId: number, hourWatermark: number, nowTs: number): Promise<void> {
   const grains: Array<[RollupGrain, number]> = [
     ["5m", hourWatermark],
+    ["15m", hourWatermark],
     ["1h", hourWatermark],
     ["1d", bucketStartFor(hourWatermark, DAY_SECONDS)],
   ];
@@ -367,7 +387,7 @@ export async function backfillChunk(regionId: number, nowTs: number, chunks = 1)
 }
 
 async function markBackfillComplete(regionId: number, nowTs: number): Promise<void> {
-  for (const grain of ["5m", "1h", "1d"] as RollupGrain[]) {
+  for (const grain of ["5m", "15m", "1h", "1d"] as RollupGrain[]) {
     await db.upsertRollupState(grain, regionId, { backfill_complete: true, backfill_completed_at: nowTs }, nowTs);
   }
 }

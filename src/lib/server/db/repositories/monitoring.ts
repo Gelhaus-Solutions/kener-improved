@@ -683,7 +683,7 @@ export class MonitoringRepository extends BaseRepository {
       const rollupTo = end === undefined ? null : end + 1;
 
       for (const affectedTag of affected) {
-        for (const grain of ["5m", "1h", "1d"] as const) {
+        for (const grain of ["5m", "15m", "1h", "1d"] as const) {
           const deleteRollups = trx(ROLLUP_TABLES[grain]).where("monitor_tag", affectedTag);
           if (orgId !== null) deleteRollups.where("org_id", orgId);
           if (rollupFrom !== null) deleteRollups.where("bucket_start", ">=", rollupFrom);

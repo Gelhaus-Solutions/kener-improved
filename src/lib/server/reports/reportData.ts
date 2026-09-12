@@ -35,7 +35,7 @@ import { ROLLUP_GRAIN_SECONDS, type MonitorRollup, type RollupGrain } from "../t
 export type ReportFormat = "csv" | "pdf";
 
 export const REPORT_FORMATS: readonly ReportFormat[] = ["csv", "pdf"];
-export const REPORT_GRAINS: readonly RollupGrain[] = ["5m", "1h", "1d"];
+export const REPORT_GRAINS: readonly RollupGrain[] = ["5m", "15m", "1h", "1d"];
 
 /** Raised when the request is answerable but the data behind it is not trustworthy. */
 export class ReportUnavailableError extends Error {

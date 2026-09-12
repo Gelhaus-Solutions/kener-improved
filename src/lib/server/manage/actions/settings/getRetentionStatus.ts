@@ -74,7 +74,7 @@ export default {
     const coverage = describeCoverage(effective, longestConfiguredBarDays);
 
     const rollupStates = await Promise.all(
-      (["5m", "1h", "1d"] as const).map(async (grain) => {
+      (["5m", "15m", "1h", "1d"] as const).map(async (grain) => {
         const state = await db.getRollupState(grain, MERGED_REGION_ID);
         return {
           grain,

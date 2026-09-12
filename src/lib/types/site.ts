@@ -108,8 +108,14 @@ export interface DataRetentionPolicy {
   enabled: boolean;
   /** Raw `monitoring_data`. Floored at `MIN_RAW_RETENTION_DAYS`; see `services/retention.ts`. */
   retentionDays: number;
-  /** Five-minute buckets. Serves viewers on :30 and :45 timezone offsets. */
+  /** Five-minute buckets. The finest grain, and the fallback when nothing coarser fits. */
   rollup5mRetentionDays?: number;
+  /**
+   * Quarter-hour buckets. Serves viewers on :30 and :45 timezone offsets
+   * (KENER-124), which is what the 5m grain used to be doing for them at three
+   * times the rows.
+   */
+  rollup15mRetentionDays?: number;
   /** Hourly buckets. Serves every whole-hour offset, which is most viewers. */
   rollup1hRetentionDays?: number;
   /** Daily buckets. 0 = forever, and that is the default. */

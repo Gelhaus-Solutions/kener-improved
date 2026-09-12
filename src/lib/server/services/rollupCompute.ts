@@ -363,12 +363,19 @@ export function grainSeconds(grain: RollupGrain): number {
 /**
  * The grain each coarser one folds from.
  *
- * `1h` from `5m` and `1d` from `1h`. `5m` folds from nothing; it is the only
- * grain that reads raw samples, which is what keeps the raw scan bounded to five
- * minutes of one monitor.
+ * A chain, not a star: `15m` from `5m`, `1h` from `15m`, `1d` from `1h`. `5m`
+ * folds from nothing; it is the only grain that reads raw samples, which is what
+ * keeps the raw scan bounded to five minutes of one monitor.
+ *
+ * KENER-124 inserted `15m` between `5m` and `1h` rather than hanging it off `5m`
+ * alongside `1h`. Folding `1h` from `15m` is four rows instead of twelve, and
+ * every grain in the chain is exactly divisible by the one below it, so no
+ * bucket ever straddles two sources. Inserting it is therefore cheaper than
+ * adding it.
  */
 export const FOLD_SOURCE: Record<RollupGrain, RollupGrain | null> = {
   "5m": null,
-  "1h": "5m",
+  "15m": "5m",
+  "1h": "15m",
   "1d": "1h",
 };

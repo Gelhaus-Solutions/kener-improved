@@ -56,7 +56,7 @@ async function main(): Promise<void> {
       const nowTs = GetNowTimestampUTC();
 
       if (reset) {
-        for (const grain of ["5m", "1h", "1d"] as RollupGrain[]) {
+        for (const grain of ["5m", "15m", "1h", "1d"] as RollupGrain[]) {
           await db.upsertRollupState(
             grain,
             MERGED_REGION_ID,

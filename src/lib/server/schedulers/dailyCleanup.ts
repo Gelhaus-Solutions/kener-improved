@@ -25,6 +25,7 @@ const defaultPolicy: DataRetentionPolicy = {
   enabled: true,
   retentionDays: 90,
   rollup5mRetentionDays: 400,
+  rollup15mRetentionDays: 400,
   rollup1hRetentionDays: 1095,
   rollup1dRetentionDays: 0,
 };
@@ -50,6 +51,7 @@ const getRetentionPolicy = async (): Promise<DataRetentionPolicy> => {
       // `??` and not `||`: 0 is a meaningful value on these three - it means
       // "keep forever" - and `||` would silently replace it with the default.
       rollup5mRetentionDays: parsed.rollup5mRetentionDays ?? defaultPolicy.rollup5mRetentionDays,
+      rollup15mRetentionDays: parsed.rollup15mRetentionDays ?? defaultPolicy.rollup15mRetentionDays,
       rollup1hRetentionDays: parsed.rollup1hRetentionDays ?? defaultPolicy.rollup1hRetentionDays,
       rollup1dRetentionDays: parsed.rollup1dRetentionDays ?? defaultPolicy.rollup1dRetentionDays,
     };

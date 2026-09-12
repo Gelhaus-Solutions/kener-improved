@@ -39,6 +39,11 @@ export type PartitionGrain = "month" | "year";
 export const PARTITIONED_TABLES: ReadonlyArray<{ table: string; grain: PartitionGrain }> = [
   { table: "monitoring_data", grain: "month" },
   { table: "monitor_rollup_5m", grain: "month" },
+  // Monthly like `_5m`, not yearly like `_1h` (KENER-124). At 96 buckets per
+  // monitor per region per day it sits four times above the hourly table, which
+  // is the side of the line where a year in one partition stops being
+  // comfortable.
+  { table: "monitor_rollup_15m", grain: "month" },
   { table: "monitor_rollup_1h", grain: "year" },
 ];
 

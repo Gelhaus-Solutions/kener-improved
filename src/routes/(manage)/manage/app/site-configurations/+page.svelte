@@ -119,6 +119,7 @@
     effective: {
       retentionDays: number;
       rollup5mRetentionDays: number;
+      rollup15mRetentionDays: number;
       rollup1hRetentionDays: number;
       rollup1dRetentionDays: number;
     };
@@ -268,6 +269,7 @@
           // `??` and not `||`: 0 means "keep forever" on these three, and `||`
           // would silently turn that into the default.
           rollup5mRetentionDays: data.dataRetentionPolicy?.rollup5mRetentionDays ?? 400,
+          rollup15mRetentionDays: data.dataRetentionPolicy?.rollup15mRetentionDays ?? 400,
           rollup1hRetentionDays: data.dataRetentionPolicy?.rollup1hRetentionDays ?? 1095,
           rollup1dRetentionDays: data.dataRetentionPolicy?.rollup1dRetentionDays ?? 0
         };
@@ -602,6 +604,7 @@
         enabled: dataRetentionPolicy.enabled,
         retentionDays: safeRetentionDays,
         rollup5mRetentionDays: safeGrain(dataRetentionPolicy.rollup5mRetentionDays, 400),
+        rollup15mRetentionDays: safeGrain(dataRetentionPolicy.rollup15mRetentionDays, 400),
         rollup1hRetentionDays: safeGrain(dataRetentionPolicy.rollup1hRetentionDays, 1095),
         rollup1dRetentionDays: safeGrain(dataRetentionPolicy.rollup1dRetentionDays, 0)
       };
@@ -1515,7 +1518,7 @@
           </p>
         </div>
 
-        <div class="grid gap-4 md:grid-cols-3">
+        <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <div class="space-y-2">
             <Label for="retention-5m">5-minute buckets (days)</Label>
             <Input
@@ -1526,7 +1529,20 @@
               disabled={!dataRetentionPolicy.enabled}
             />
             <p class="text-muted-foreground text-xs">
-              Bounds the bar for viewers on :30 and :45 timezone offsets. 0 keeps them forever.
+              The finest grain, and the floor under the others. 0 keeps them forever.
+            </p>
+          </div>
+          <div class="space-y-2">
+            <Label for="retention-15m">15-minute buckets (days)</Label>
+            <Input
+              id="retention-15m"
+              type="number"
+              min="0"
+              bind:value={dataRetentionPolicy.rollup15mRetentionDays}
+              disabled={!dataRetentionPolicy.enabled}
+            />
+            <p class="text-muted-foreground text-xs">
+              Bounds the bar for viewers on :30 and :45 timezone offsets, such as India and Nepal. 0 keeps them forever.
             </p>
           </div>
           <div class="space-y-2">

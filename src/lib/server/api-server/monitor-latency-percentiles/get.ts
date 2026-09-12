@@ -22,7 +22,7 @@ import { ROLLUP_GRAIN_SECONDS, type RollupGrain } from "$lib/server/types/db";
  * output point per rollup bucket means the materialized columns are read
  * verbatim and no histogram JSON is parsed at all.
  */
-const GRAINS: RollupGrain[] = ["5m", "1h", "1d"];
+const GRAINS: RollupGrain[] = ["5m", "15m", "1h", "1d"];
 const MAX_POINTS = 1000;
 
 export default async function get(req: APIServerRequest): Promise<Response> {

@@ -103,9 +103,17 @@ export interface MonitorRollup {
  */
 export type MonitorRollupInput = Omit<MonitorRollup, "org_id">;
 
-/** The three grains, and the table each lives in. */
+/**
+ * The four grains, and the table each lives in.
+ *
+ * `15m` exists for one reason (KENER-124): the read path must use a grain whose
+ * bucket divides the viewer's UTC offset, and 3600 does not divide +05:30. 900
+ * divides every offset in use, so a quarter-hour grain serves every real viewer
+ * without falling to `5m`.
+ */
 export const ROLLUP_TABLES = {
   "5m": "monitor_rollup_5m",
+  "15m": "monitor_rollup_15m",
   "1h": "monitor_rollup_1h",
   "1d": "monitor_rollup_1d",
 } as const;
@@ -115,6 +123,7 @@ export type RollupGrain = keyof typeof ROLLUP_TABLES;
 /** Bucket width in seconds, per grain. */
 export const ROLLUP_GRAIN_SECONDS: Record<RollupGrain, number> = {
   "5m": 300,
+  "15m": 900,
   "1h": 3600,
   "1d": 86400,
 };

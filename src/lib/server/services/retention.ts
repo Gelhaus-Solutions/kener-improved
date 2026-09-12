@@ -90,6 +90,7 @@ export function effectivePolicy(policy: DataRetentionPolicy): {
   };
 
   let fiveMinute = grain(policy.rollup5mRetentionDays, 400);
+  let quarterHour = grain(policy.rollup15mRetentionDays, 400);
   let hourly = grain(policy.rollup1hRetentionDays, 1095);
   const daily = grain(policy.rollup1dRetentionDays, 0);
 
@@ -100,9 +101,16 @@ export function effectivePolicy(policy: DataRetentionPolicy): {
     clamped.push(`5m retention raised from ${fiveMinute} to ${raw} to match raw`);
     fiveMinute = raw;
   }
-  if (hourly !== 0 && hourly < fiveMinute) {
-    clamped.push(`1h retention raised from ${hourly} to ${fiveMinute} to match the 5m grain`);
-    hourly = fiveMinute;
+  // The ladder is raw <= 5m <= 15m <= 1h. Each grain kept at least as long as
+  // the finer one below it, because a coarse grain that expires first sends the
+  // read path down to a finer grain it has to scan more of, for the same answer.
+  if (quarterHour !== 0 && quarterHour < fiveMinute) {
+    clamped.push(`15m retention raised from ${quarterHour} to ${fiveMinute} to match the 5m grain`);
+    quarterHour = fiveMinute;
+  }
+  if (hourly !== 0 && hourly < quarterHour) {
+    clamped.push(`1h retention raised from ${hourly} to ${quarterHour} to match the 15m grain`);
+    hourly = quarterHour;
   }
 
   return {
@@ -110,6 +118,7 @@ export function effectivePolicy(policy: DataRetentionPolicy): {
       enabled: policy.enabled,
       retentionDays: raw,
       rollup5mRetentionDays: fiveMinute,
+      rollup15mRetentionDays: quarterHour,
       rollup1hRetentionDays: hourly,
       rollup1dRetentionDays: daily,
     },
@@ -133,10 +142,18 @@ export interface CoverageReport {
  * What length of bar the current policy can actually serve, per viewer.
  *
  * Three numbers rather than one, because the answer genuinely differs by
- * timezone: a Kolkata viewer's day boundaries are 19,800 seconds past a UTC day
- * and only the 5m grain divides that, so their bar is bounded by 5m retention
- * while a UTC viewer's is bounded by the daily grain. Reporting one number would
- * mean reporting the wrong one for somebody.
+ * timezone: a Kolkata viewer's day boundaries are 19,800 seconds past a UTC day,
+ * so their bar is bounded by the finest grain that divides that offset while a
+ * UTC viewer's is bounded by the daily grain. Reporting one number would mean
+ * reporting the wrong one for somebody.
+ *
+ * **Since KENER-124 the "all timezones" grain is `15m`, not `5m`.** 900 divides
+ * every IANA offset in use, including :30 and :45, so an offset viewer is served
+ * from the quarter-hour grain and bounded by its retention. The 5m grain is
+ * still the floor beneath it - a grain kept longer than the one below it cannot
+ * help, which is what the clamping in `effectivePolicy` guarantees - so taking
+ * the max of the two is what keeps this honest if an operator sets 5m longer
+ * than 15m.
  */
 export function describeCoverage(
   effective: RetentionRun["effective"],
@@ -146,8 +163,8 @@ export function describeCoverage(
   const asDays = (days: number) => (days === 0 ? forever : days);
 
   const utc = Math.max(asDays(effective.rollup1dRetentionDays), asDays(effective.rollup1hRetentionDays));
-  const wholeHour = Math.max(asDays(effective.rollup1hRetentionDays), asDays(effective.rollup5mRetentionDays));
-  const all = asDays(effective.rollup5mRetentionDays);
+  const wholeHour = Math.max(asDays(effective.rollup1hRetentionDays), asDays(effective.rollup15mRetentionDays));
+  const all = Math.max(asDays(effective.rollup15mRetentionDays), asDays(effective.rollup5mRetentionDays));
 
   return {
     allTimezonesDays: all === forever ? 0 : all,
@@ -184,7 +201,7 @@ async function rawDeletionBlockedBecause(cutoff: number): Promise<string | null>
 
   for (const regionId of regionIds) {
     const where = regionId === MERGED_REGION_ID ? "" : ` for region ${regionId}`;
-    for (const grain of ["5m", "1h", "1d"] as RollupGrain[]) {
+    for (const grain of ["5m", "15m", "1h", "1d"] as RollupGrain[]) {
       const state = await db.getRollupState(grain, regionId);
       if (!state) return `the ${grain} rollups have never run${where}`;
       if (!state.backfill_complete) return `the ${grain} rollup backfill has not finished${where}`;
@@ -305,6 +322,7 @@ export async function runRetention(policy: DataRetentionPolicy, nowTs: number, d
   // ---- stages 2-4: the rollup grains --------------------------------------
   const grainDays: Array<[RollupGrain, number]> = [
     ["5m", effective.rollup5mRetentionDays],
+    ["15m", effective.rollup15mRetentionDays],
     ["1h", effective.rollup1hRetentionDays],
     ["1d", effective.rollup1dRetentionDays],
   ];

@@ -23,7 +23,7 @@ import { ROLLUP_GRAIN_SECONDS, type RollupGrain } from "$lib/server/types/db";
  * asking about their own hidden monitor is entitled to an answer. The public
  * surfaces are the ones that must not.
  */
-const GRAINS: RollupGrain[] = ["5m", "1h", "1d"];
+const GRAINS: RollupGrain[] = ["5m", "15m", "1h", "1d"];
 const PERCENTILES = ["p50", "p90", "p95", "p99"] as const;
 type Percentile = (typeof PERCENTILES)[number];
 const MAX_POINTS = 5000;
