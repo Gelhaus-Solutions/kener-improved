@@ -176,19 +176,32 @@
   }
 
   /**
-   * The override for one source in the open dialog, created on demand.
+   * The override row for one source in the open dialog.
    *
-   * Rows exist only once touched, which is what keeps the override tables empty
-   * on an install that configures nothing.
+   * **A lookup, and nothing else.** This used to create the row when it was
+   * missing, and it is called from the template, where every expression runs
+   * inside a tracked computation. Pushing onto a `$state` array from there
+   * throws `state_unsafe_mutation`, the render dies, and the dialog sits on its
+   * spinner for ever with the error only visible in the browser console. The
+   * rows are created once, in `openMonitorPolicy`, where mutation is allowed.
    */
   function overrideFor(regionId: number) {
-    if (!policyOverride) return null;
-    let row = policyOverride.sources.find((s) => s.region_id === regionId);
-    if (!row) {
-      row = { region_id: regionId, weight: null, trust_rank: null, mode: null };
-      policyOverride.sources.push(row);
+    return policyOverride?.sources.find((s) => s.region_id === regionId) ?? null;
+  }
+
+  /**
+   * Every source the dialog will draw has a row to bind to, all nulls.
+   *
+   * An all-null row is still "inherited" to every reader: `setMonitorSourcePolicy`
+   * stores nulls and the cascade treats null as inherit, so creating them up
+   * front changes no behaviour. It only stops the template needing to.
+   */
+  function ensureOverrideRows(sources: EffectiveSource[]) {
+    if (!policyOverride) return;
+    for (const source of sources) {
+      if (policyOverride.sources.some((s) => s.region_id === source.region_id)) continue;
+      policyOverride.sources.push({ region_id: source.region_id, weight: null, trust_rank: null, mode: null });
     }
-    return row;
   }
 
   /** The sentinel the region picker uses for "make a new one". Not a region id. */
@@ -384,6 +397,7 @@
       policyOverride = result.override;
       policyEffective = result.effective.sources ?? [];
       policyEffectivePolicy = result.effective.policy;
+      ensureOverrideRows(policyEffective);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not load the monitor policy");
       policyMonitor = null;
@@ -840,67 +854,6 @@
       </Card.Root>
     {/if}
 
-    {#each agents as agent (agent.id)}
-      <Card.Root>
-        <Card.Header>
-          <div class="flex items-start justify-between gap-4">
-            <div class="min-w-0">
-              <Card.Title class="flex flex-wrap items-center gap-2">
-                {agent.name}
-                {#if agent.region_id === mergedRegionId}
-                  <Badge>Merged verdict</Badge>
-                {:else}
-                  <Badge variant="secondary">{regionLabel(agent.region_id)}</Badge>
-                {/if}
-                {#if agent.status !== "ACTIVE"}
-                  <Badge variant="outline">Disabled</Badge>
-                {:else if agent.live === true}
-                  <Badge variant="secondary">Connected</Badge>
-                {:else if agent.live === false}
-                  <Badge variant="outline">{agent.connection_state.toLowerCase()}</Badge>
-                {:else}
-                  <Badge variant="outline">{agent.connection_state.toLowerCase()}</Badge>
-                {/if}
-              </Card.Title>
-              <Card.Description class="flex flex-wrap gap-x-3">
-                <span>token &hellip;{agent.token_hint ?? "????"}</span>
-                <span>last seen {lastSeenText(agent.last_seen_at)}</span>
-                {#if agent.agent_version}<span>v{agent.agent_version}</span>{/if}
-                {#if agent.capabilities}<span>runs {agent.capabilities.join(", ")}</span>{/if}
-              </Card.Description>
-            </div>
-            <div class="flex shrink-0 gap-2">
-              <Button variant="outline" size="sm" disabled={busy} onclick={() => toggleStatus(agent)}>
-                {agent.status === "ACTIVE" ? "Disable" : "Enable"}
-              </Button>
-              <Button variant="outline" size="sm" disabled={busy} onclick={() => rotateToken(agent)} title="New token">
-                <KeyRoundIcon class="size-4" />
-              </Button>
-              <Button variant="outline" size="sm" disabled={busy} onclick={() => openEdit(agent)}>
-                <PencilIcon class="size-4" />
-              </Button>
-              <Button variant="outline" size="sm" disabled={busy} onclick={() => (confirmingDelete = agent)}>
-                <TrashIcon class="size-4" />
-              </Button>
-            </div>
-          </div>
-        </Card.Header>
-        <Card.Content>
-          <!-- B1e: what this agent checks is a property of its REGION, listed
-               under Coverage below. Repeating it here would invite an operator
-               to think of it as the agent's, which is the belief that made
-               deleting an agent quietly forget its monitors. -->
-          <p class="text-muted-foreground text-sm">
-            Checks whatever {regionLabel(agent.region_id)} covers: {assignmentsFor(agent.region_id).length} monitor{assignmentsFor(
-              agent.region_id
-            ).length === 1
-              ? ""
-              : "s"}.
-          </p>
-        </Card.Content>
-      </Card.Root>
-    {/each}
-
     <!-- B1e. Coverage, region first and monitor second.
          A region is what an operator configures and what survives an agent being
          deleted and recreated, so it is what the list is keyed on. Every region
@@ -916,9 +869,7 @@
           <Card.Title class="flex flex-wrap items-center gap-2">
             {regionLabel(region.id)}
             <Badge variant="outline">{covered.length} monitor{covered.length === 1 ? "" : "s"}</Badge>
-            {#if agent}
-              <Badge variant="secondary">served by {agent.name}</Badge>
-            {:else}
+            {#if !agent}
               <Badge variant="destructive">no agent</Badge>
             {/if}
           </Card.Title>
@@ -932,6 +883,49 @@
           </Card.Description>
         </Card.Header>
         <Card.Content class="flex flex-col gap-3">
+          {#if agent}
+            <div class="flex flex-wrap items-start justify-between gap-3 rounded-md border p-2">
+              <div class="min-w-0">
+                <p class="flex flex-wrap items-center gap-2 text-sm font-medium">
+                  {agent.name}
+                  {#if agent.status !== "ACTIVE"}
+                    <Badge variant="outline">Disabled</Badge>
+                  {:else if agent.live === true}
+                    <Badge variant="secondary">Connected</Badge>
+                  {:else}
+                    <Badge variant="outline">{agent.connection_state.toLowerCase()}</Badge>
+                  {/if}
+                </p>
+                <p class="text-muted-foreground flex flex-wrap gap-x-3 text-xs">
+                  <span>token &hellip;{agent.token_hint ?? "????"}</span>
+                  <span>last seen {lastSeenText(agent.last_seen_at)}</span>
+                  {#if agent.agent_version}<span>v{agent.agent_version}</span>{/if}
+                  {#if agent.capabilities}<span>runs {agent.capabilities.join(", ")}</span>{/if}
+                </p>
+              </div>
+              <div class="flex shrink-0 gap-2">
+                <Button variant="outline" size="sm" disabled={busy} onclick={() => toggleStatus(agent)}>
+                  {agent.status === "ACTIVE" ? "Disable" : "Enable"}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busy}
+                  onclick={() => rotateToken(agent)}
+                  title="New token"
+                >
+                  <KeyRoundIcon class="size-4" />
+                </Button>
+                <Button variant="outline" size="sm" disabled={busy} onclick={() => openEdit(agent)}>
+                  <PencilIcon class="size-4" />
+                </Button>
+                <Button variant="outline" size="sm" disabled={busy} onclick={() => (confirmingDelete = agent)}>
+                  <TrashIcon class="size-4" />
+                </Button>
+              </div>
+            </div>
+          {/if}
+
           <div class="flex flex-wrap items-center gap-2">
             <span class="text-sm font-medium">This region checks</span>
             <Button
