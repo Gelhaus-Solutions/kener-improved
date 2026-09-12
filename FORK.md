@@ -212,6 +212,7 @@ git push
 | `scripts/pg-partition-monitoring-data.ts`                                          | Fork-only: converts `monitoring_data` to a partitioned table (B1a)                                                                 |
 | `scripts/rollups-backfill.ts`, `scripts/rollups-verify.ts`                         | Fork-only: build the rollup grains, and check them against raw samples (F6b)                                                       |
 | `scripts/retention-plan.ts`                                                        | Fork-only: dry-runs the per-grain retention sweep before it deletes (F6c)                                                          |
+| `scripts/check-tenancy.ts`, `scripts/check-org-provisioning.ts`                    | Fork-only: assert the tenancy registration and each org's provisioning against the live schema (Z)                                 |
 | `tsconfig.scripts.json`                                                            | Fork-only: puts `scripts/`, `migrations/` and `seeds/` under `npm run check`                                                       |
 | `.github/ISSUE_TEMPLATE/`                                                          | No upstream assignee                                                                                                               |
 | `docs/agents/issue-tracker.md`                                                     | Points at the Plane project, not GitHub Issues                                                                                     |
