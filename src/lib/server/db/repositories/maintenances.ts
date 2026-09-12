@@ -188,6 +188,7 @@ export class MaintenancesRepository extends BaseRepository {
       .where("maintenance_monitors.maintenance_id", maintenance_id)
       .select(
         "maintenance_monitors.*",
+        "monitors.slug as monitor_slug",
         "monitors.name as monitor_name",
         "monitors.image as monitor_image",
         "monitors.description as monitor_description",
@@ -505,6 +506,7 @@ export class MaintenancesRepository extends BaseRepository {
         "maintenances_events.end_date_time",
         "maintenance_monitors.monitor_tag",
         "maintenance_monitors.monitor_impact",
+        "monitors.slug as monitor_slug",
         "monitors.name as monitor_name",
         "monitors.image as monitor_image",
         "monitors.is_hidden as monitor_is_hidden",
@@ -566,6 +568,7 @@ export class MaintenancesRepository extends BaseRepository {
         "maintenances_events.end_date_time",
         "maintenance_monitors.monitor_tag",
         "maintenance_monitors.monitor_impact",
+        "monitors.slug as monitor_slug",
         "monitors.name as monitor_name",
         "monitors.image as monitor_image",
         "monitors.is_hidden as monitor_is_hidden",
@@ -616,6 +619,7 @@ export class MaintenancesRepository extends BaseRepository {
         "maintenances_events.end_date_time",
         "maintenance_monitors.monitor_tag",
         "maintenance_monitors.monitor_impact",
+        "monitors.slug as monitor_slug",
         "monitors.name as monitor_name",
         "monitors.image as monitor_image",
         "monitors.is_hidden as monitor_is_hidden",
@@ -658,6 +662,7 @@ export class MaintenancesRepository extends BaseRepository {
         "maintenances_events.end_date_time",
         "maintenance_monitors.monitor_tag",
         "maintenance_monitors.monitor_impact",
+        "monitors.slug as monitor_slug",
         "monitors.name as monitor_name",
         "monitors.image as monitor_image",
         "monitors.is_hidden as monitor_is_hidden",
@@ -701,6 +706,7 @@ export class MaintenancesRepository extends BaseRepository {
         "maintenances_events.end_date_time",
         "maintenance_monitors.monitor_tag",
         "maintenance_monitors.monitor_impact",
+        "monitors.slug as monitor_slug",
         "monitors.name as monitor_name",
         "monitors.image as monitor_image",
         "monitors.is_hidden as monitor_is_hidden",
@@ -740,6 +746,7 @@ export class MaintenancesRepository extends BaseRepository {
         "maintenances_events.end_date_time",
         "maintenance_monitors.monitor_tag",
         "maintenance_monitors.monitor_impact",
+        "monitors.slug as monitor_slug",
         "monitors.name as monitor_name",
         "monitors.image as monitor_image",
         "monitors.is_hidden as monitor_is_hidden",
@@ -787,6 +794,7 @@ export class MaintenancesRepository extends BaseRepository {
       if (row.monitor_tag && row.monitor_is_hidden !== "YES") {
         maintenance.monitors.push({
           monitor_tag: row.monitor_tag,
+          monitor_slug: row.monitor_slug ?? row.monitor_tag,
           monitor_name: row.monitor_name,
           monitor_image: row.monitor_image,
           monitor_impact: row.monitor_impact,

@@ -293,7 +293,16 @@
       {/if}
       <HoverCard.Root>
         <HoverCard.Trigger>
-          <Button size="sm" target="_blank" href={clientResolver(resolve, `/monitors/${params.tag}`)} variant="outline">
+          <!-- I3e: the public page is addressed by the per-org slug, not the physical
+          tag this admin route is keyed on. They are the same string on the default
+          org; on a prefixed org the tag would show the org's prefix to whoever the
+          link is shared with. -->
+          <Button
+            size="sm"
+            target="_blank"
+            href={clientResolver(resolve, `/monitors/${monitor.slug || params.tag}`)}
+            variant="outline"
+          >
             View
           </Button>
         </HoverCard.Trigger>

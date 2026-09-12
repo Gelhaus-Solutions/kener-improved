@@ -252,6 +252,14 @@ export interface UptimeCalculatorResult {
 export interface MonitorRecordTyped {
   id: number;
   tag: string;
+  /**
+   * The per-org public name (I3e), which is what a link to this monitor carries.
+   * Identical to `tag` on the default org, whose `tag_prefix` is empty.
+   *
+   * Optional because `MonitorRecord` carries it optionally and this type is
+   * built by spreading one; a reader wanting a URL should use `slug || tag`.
+   */
+  slug?: string | null;
   name: string;
   description: string | null;
   image: string | null;
@@ -535,6 +543,13 @@ export interface IncidentRecord {
 
 export interface IncidentMonitorImpact {
   monitor_tag: string;
+  /**
+   * The per-org public name (I3e). **What a link to this monitor must carry**,
+   * because `monitor_tag` holds the org's `tag_prefix` and a visitor should
+   * never be shown another tenant's prefix. Identical to the tag on the default
+   * org, whose prefix is empty.
+   */
+  monitor_slug: string;
   monitor_impact: string;
   monitor_name: string;
   monitor_image: string | null;
@@ -601,6 +616,8 @@ export interface IncidentMonitorRecordInsert {
 export interface IncidentMonitorDetailRecord {
   id: number;
   monitor_tag: string;
+  /** The per-org public name (I3e). See `IncidentMonitorImpact.monitor_slug`. */
+  monitor_slug: string | null;
   monitor_impact: string | null;
   monitor_name: string;
   monitor_image: string | null;
@@ -908,6 +925,13 @@ export interface MaintenanceEventFilter {
 
 export interface MaintenanceMonitorImpact {
   monitor_tag: string;
+  /**
+   * The per-org public name (I3e). **What a link to this monitor must carry**,
+   * because `monitor_tag` holds the org's `tag_prefix` and a visitor should
+   * never be shown another tenant's prefix. Identical to the tag on the default
+   * org, whose prefix is empty.
+   */
+  monitor_slug: string;
   monitor_name: string;
   monitor_image: string | null;
   monitor_impact: string;

@@ -117,6 +117,7 @@
         <MonitorList
           pagePath={""}
           monitorTags={data.monitorTags}
+          monitorSlugsByTag={data.monitorSlugsByTag}
           monitorCategoriesByTag={data.monitorCategoriesByTag}
           monitorGroupMembersByTag={data.monitorGroupMembersByTag}
           {pageSettings}

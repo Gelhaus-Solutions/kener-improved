@@ -59,6 +59,8 @@ export const load: PageServerLoad = async ({ params, url }) => {
   // Fetch full monitor details (name, image, etc.)
   let affectedMonitors: Array<{
     monitor_tag: string;
+    /** The per-org public name (I3e), which is what the link on this page carries. */
+    monitor_slug: string;
     monitor_name: string;
     monitor_image: string | null;
     monitor_impact: string;
@@ -72,6 +74,7 @@ export const load: PageServerLoad = async ({ params, url }) => {
     const monitors = await GetVisiblePublicMonitorsByTags(monitorTags);
     affectedMonitors = monitors.map((m) => ({
       monitor_tag: m.tag,
+      monitor_slug: m.slug || m.tag,
       monitor_name: m.name,
       monitor_image: m.image || null,
       monitor_impact: monitorRecords.find((mr) => mr.monitor_tag === m.tag)?.monitor_impact || "",

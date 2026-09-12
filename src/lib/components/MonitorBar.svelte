@@ -15,6 +15,16 @@
 
   interface Props {
     tag: string;
+    /**
+     * The per-org public name, for the link only (I3e).
+     *
+     * Carried alongside `tag` rather than replacing it, because the two are used
+     * for different things here: the bar fetches its data by `tag`, which is the
+     * physical key the API, the cache and the BullMQ job ids all speak, while the
+     * link has to carry the slug so a visitor is never shown another tenant's
+     * prefix. Falls back to the tag, which is correct on the default org.
+     */
+    slug?: string;
     prefetchedData?: MonitorBarResponse;
     prefetchedError?: string;
     groupChildTags?: string[];
@@ -26,6 +36,7 @@
 
   let {
     tag,
+    slug,
     prefetchedData,
     prefetchedError,
     groupChildTags = [],
@@ -112,7 +123,7 @@
       {/if}
       <Item.Content class="min-w-0 flex-1">
         <Item.Title class="w-full truncate">
-          <a class="hover:underline" href={clientResolver(resolve, `/monitors/${tag}`)}>{data.name}</a>
+          <a class="hover:underline" href={clientResolver(resolve, `/monitors/${slug || tag}`)}>{data.name}</a>
         </Item.Title>
         {#if data.description}
           <Item.Description class="line-clamp-2 wrap-break-word">{data.description}</Item.Description>

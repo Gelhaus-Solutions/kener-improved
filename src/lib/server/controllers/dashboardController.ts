@@ -208,6 +208,20 @@ export interface PageDashboardData {
    * not return.
    */
   monitorCategoriesByTag: Record<string, string | null>;
+  /**
+   * I3e: each monitor's per-org public slug, keyed by the same physical tag.
+   *
+   * Keyed on the tag for exactly the reason `monitorCategoriesByTag` is, and
+   * carried *alongside* the tag rather than replacing it because the two mean
+   * different things to the page. The bar fetches its data by tag, which is the
+   * physical key the API and the cache speak; the link it wraps has to carry the
+   * slug, because `monitor_tag` holds the org's prefix and a visitor should
+   * never be shown another tenant's prefix.
+   *
+   * A tag with no entry falls back to itself, which is correct on the default
+   * org - its prefix is empty, so slug and tag are the same string.
+   */
+  monitorSlugsByTag: Record<string, string>;
   pageDetails: PageRecordTyped;
   socialPagePreviewImage?: string;
   metaPageTitle?: string;
@@ -377,6 +391,7 @@ export const GetPageDashboardData = async (
       monitorTags,
       monitorGroupMembersByTag: {},
       monitorCategoriesByTag: {},
+      monitorSlugsByTag: {},
       pageDetails: pageDetailsTyped,
       socialPagePreviewImage,
       metaPageTitle,
@@ -413,9 +428,13 @@ export const GetPageDashboardData = async (
   // G2. Trimmed and emptied to null here rather than in the component, so
   // "   " and "" and null are one case by the time anything renders them.
   const monitorCategoriesByTag: Record<string, string | null> = {};
+  // I3e. `|| tag` rather than `?? tag`: a slug that is present but empty is as
+  // unusable in a URL as one that is missing.
+  const monitorSlugsByTag: Record<string, string> = {};
   for (const monitor of parsedMonitors) {
     const category = (monitor.category_name ?? "").trim();
     monitorCategoriesByTag[monitor.tag] = category.length > 0 ? category : null;
+    monitorSlugsByTag[monitor.tag] = monitor.slug || monitor.tag;
   }
 
   for (const monitor of parsedMonitors) {
@@ -435,6 +454,7 @@ export const GetPageDashboardData = async (
     monitorTags,
     monitorGroupMembersByTag,
     monitorCategoriesByTag,
+    monitorSlugsByTag,
     pageDetails: pageDetailsTyped,
     socialPagePreviewImage,
     metaPageTitle,

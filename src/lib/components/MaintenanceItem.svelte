@@ -88,7 +88,7 @@
                     variant="outline"
                     class="rounded-btn"
                     size="icon-sm"
-                    href={clientResolver(resolve, `/monitors/${monitor.monitor_tag}`)}
+                    href={clientResolver(resolve, `/monitors/${monitor.monitor_slug || monitor.monitor_tag}`)}
                   >
                     <ArrowRight class="size-3" />
                   </Button>

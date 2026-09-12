@@ -68,6 +68,12 @@ interface IncidentRowWithMonitor {
   state: string;
   monitor_impact: string;
   monitor_tag: string;
+  /**
+   * The per-org public name, which is what a link to this monitor must carry
+   * (I3e). Falls back to the tag where a row's slug was never filled in, which
+   * is what `ResolvePublicMonitor` accepts anyway.
+   */
+  monitor_slug: string;
   monitor_name: string;
   monitor_image: string | null;
 }
@@ -105,6 +111,7 @@ export class IncidentsRepository extends BaseRepository {
         incident.monitors.push({
           monitor_tag: row.monitor_tag,
           monitor_impact: row.monitor_impact,
+          monitor_slug: row.monitor_slug ?? row.monitor_tag,
           monitor_name: row.monitor_name,
           monitor_image: row.monitor_image,
         });
@@ -242,6 +249,7 @@ export class IncidentsRepository extends BaseRepository {
         "incidents.state",
         "incident_monitors.monitor_impact",
         "incident_monitors.monitor_tag",
+        "monitors.slug as monitor_slug",
         "monitors.name as monitor_name",
         "monitors.image as monitor_image",
         "monitors.is_hidden as monitor_is_hidden",
@@ -829,6 +837,7 @@ export class IncidentsRepository extends BaseRepository {
         "incidents.state",
         "incident_monitors.monitor_impact",
         "incident_monitors.monitor_tag",
+        "monitors.slug as monitor_slug",
         "monitors.name as monitor_name",
         "monitors.image as monitor_image",
       )
@@ -903,6 +912,7 @@ export class IncidentsRepository extends BaseRepository {
         "incidents.state",
         "incident_monitors.monitor_impact",
         "incident_monitors.monitor_tag",
+        "monitors.slug as monitor_slug",
         "monitors.name as monitor_name",
         "monitors.image as monitor_image",
       )
@@ -1030,6 +1040,7 @@ export class IncidentsRepository extends BaseRepository {
         "incidents.state",
         "incident_monitors.monitor_impact",
         "incident_monitors.monitor_tag",
+        "monitors.slug as monitor_slug",
         "monitors.name as monitor_name",
         "monitors.image as monitor_image",
       )
@@ -1156,6 +1167,7 @@ export class IncidentsRepository extends BaseRepository {
       .where("incident_monitors.incident_id", incident_id)
       .select(
         "incident_monitors.*",
+        "monitors.slug as monitor_slug",
         "monitors.name as monitor_name",
         "monitors.image as monitor_image",
         "monitors.description as monitor_description",
@@ -1283,6 +1295,7 @@ export class IncidentsRepository extends BaseRepository {
         "incidents.state",
         "incident_monitors.monitor_impact",
         "incident_monitors.monitor_tag",
+        "monitors.slug as monitor_slug",
         "monitors.name as monitor_name",
         "monitors.image as monitor_image",
         "monitors.is_hidden as monitor_is_hidden",
@@ -1346,6 +1359,7 @@ export class IncidentsRepository extends BaseRepository {
         "incidents.state",
         "incident_monitors.monitor_impact",
         "incident_monitors.monitor_tag",
+        "monitors.slug as monitor_slug",
         "monitors.name as monitor_name",
         "monitors.image as monitor_image",
         "monitors.is_hidden as monitor_is_hidden",
@@ -1414,6 +1428,7 @@ export class IncidentsRepository extends BaseRepository {
         incident.monitors.push({
           monitor_tag: row.monitor_tag,
           monitor_impact: row.monitor_impact,
+          monitor_slug: row.monitor_slug ?? row.monitor_tag,
           monitor_name: row.monitor_name,
           monitor_image: row.monitor_image,
         });

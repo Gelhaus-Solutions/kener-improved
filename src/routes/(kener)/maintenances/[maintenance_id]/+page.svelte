@@ -217,7 +217,7 @@
                     <Button
                       variant="outline"
                       class="rounded-btn"
-                      href={clientResolver(resolve, `/monitors/${monitor.monitor_tag}`)}
+                      href={clientResolver(resolve, `/monitors/${monitor.monitor_slug || monitor.monitor_tag}`)}
                       size="icon"
                     >
                       <ArrowRight class="h-4 w-4" />

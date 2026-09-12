@@ -38,6 +38,8 @@
     pagePath: string;
     monitorTags: string[];
     monitorCategoriesByTag: Record<string, string | null>;
+    /** Each monitor's per-org public name, keyed by its physical tag (I3e). */
+    monitorSlugsByTag?: Record<string, string>;
     monitorGroupMembersByTag: Record<string, string[]>;
     pageSettings: PageSettingsType | null;
     barCount: number;
@@ -48,6 +50,7 @@
     pagePath,
     monitorTags,
     monitorCategoriesByTag,
+    monitorSlugsByTag,
     monitorGroupMembersByTag,
     pageSettings,
     barCount,
@@ -248,6 +251,7 @@
       >
         <MonitorBar
           {tag}
+          slug={monitorSlugsByTag?.[tag]}
           prefetchedData={barDataByTag[tag]}
           prefetchedError={monitorBarErrorByTag[tag]}
           days={barCount}

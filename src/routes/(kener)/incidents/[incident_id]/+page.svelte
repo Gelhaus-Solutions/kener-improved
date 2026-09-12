@@ -220,7 +220,7 @@
                   <Item.Actions>
                     <Button
                       variant="outline"
-                      href={clientResolver(resolve, `/monitors/${monitor.monitor_tag}`)}
+                      href={clientResolver(resolve, `/monitors/${monitor.monitor_slug || monitor.monitor_tag}`)}
                       class="rounded-btn"
                       size="icon"
                     >
