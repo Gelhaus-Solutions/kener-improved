@@ -52,6 +52,7 @@
     "pg:partition-monitoring-data": "vite-node scripts/pg-partition-monitoring-data.ts",
     "rollups:backfill": "vite-node scripts/rollups-backfill.ts",
     "rollups:verify": "vite-node scripts/rollups-verify.ts",
+    "db:check-tenancy": "vite-node scripts/check-tenancy.ts",
     "retention:plan": "vite-node scripts/retention-plan.ts",
     "prettify": "prettier --write .",
     "preview": "vite preview",
