@@ -23,6 +23,25 @@
   if (!data.headers) data.headers = [];
   if (!data.timeout) data.timeout = 10000;
   if (data.allowSelfSignedCert === undefined) data.allowSelfSignedCert = false;
+  // I6. Left undefined rather than defaulted to false, so the grandfathering
+  // migration can tell "never decided" from "deliberately off".
+  if (data.allowPlaintextSecrets === undefined) data.allowPlaintextSecrets = false;
+
+  /**
+   * I6. Whether this monitor would be refused at check time.
+   *
+   * Warns on a `$NAME` being *mentioned*, where the server refuses only when one
+   * actually resolves: the browser cannot see the server's environment, and a
+   * warning that appears when it might apply beats one that stays silent because
+   * the variable happens to be unset on the machine rendering the page.
+   */
+  const mentionsSecret = $derived(
+    /\$[A-Za-z_][A-Za-z0-9_]*/.test([data.url, JSON.stringify(data.headers ?? [])].filter(Boolean).join(" "))
+  );
+  const plaintextUrl = $derived(
+    typeof data.url === "string" && data.url.length > 0 && !/^https:\/\//i.test(data.url.trim())
+  );
+  const wouldRefuse = $derived(mentionsSecret && plaintextUrl && data.allowPlaintextSecrets !== true);
 
   function toggleDown(on: boolean) {
     data.down = on ? { operator: ">", value: 0 } : undefined;
@@ -205,4 +224,30 @@
     <Switch id="prom-self-signed" bind:checked={data.allowSelfSignedCert} />
     <Label for="prom-self-signed">Allow Self-Signed Certificates</Label>
   </div>
+
+  <!-- I6. Shown only when it applies, so it reads as a fact about this monitor
+       rather than standing advice nobody looks at. -->
+  {#if mentionsSecret}
+    <div class="flex flex-col gap-2 rounded-md border p-3" class:border-amber-500={wouldRefuse}>
+      <div class="flex items-center space-x-2">
+        <Switch id="prom-plaintext-secrets" bind:checked={data.allowPlaintextSecrets} />
+        <Label for="prom-plaintext-secrets">Allow secrets over plaintext</Label>
+      </div>
+      {#if wouldRefuse}
+        <p class="text-sm text-amber-600">
+          This monitor substitutes a secret and its URL is not <code>https://</code>, so the check will be refused
+          rather than sending the credential in clear text. Switch the URL to <code>https://</code>, or turn this on if
+          the endpoint is genuinely internal.
+        </p>
+      {:else}
+        <p class="text-muted-foreground text-sm">
+          On, the credential is sent even over an unencrypted URL. Leave it off unless the endpoint is genuinely
+          internal.
+        </p>
+      {/if}
+      <p class="text-muted-foreground text-xs">
+        Also governs whether this monitor may be handed to a remote probe: the probe channel is unencrypted.
+      </p>
+    </div>
+  {/if}
 </div>

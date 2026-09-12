@@ -1,5 +1,6 @@
 import axios, { type AxiosRequestConfig } from "axios";
 import { GetRequiredSecrets, ReplaceAllOccurrences, ApplySecretsToHeaders } from "../tool.js";
+import { plaintextSecretRefusal, redirectWouldLeak, plaintextSecretError } from "./secretTransport.js";
 import GC from "../../global-constants.js";
 import * as cheerio from "cheerio";
 import { DefaultAPIEval } from "../../anywhere.js";
@@ -62,6 +63,19 @@ class ApiCall {
       }
     }
 
+    // I6. Refuse before anything is sent, on the *resolved* URL: substitution can
+    // change the host, so the scheme that matters is the one the request will
+    // actually use. Recorded as an ERROR result rather than thrown, so the minute
+    // gets a row saying what happened instead of a hole in the timeline.
+    const refusal = plaintextSecretRefusal({
+      url,
+      secrets: this.envSecrets,
+      typeData: this.monitor.type_data,
+    });
+    if (refusal) {
+      return { status: GC.DOWN, latency: 0, type: GC.ERROR, error_message: refusal };
+    }
+
     // Substitute secrets into each header key/value individually - never into a
     // JSON blob, which a secret value could corrupt and drop the whole set.
     axiosHeaders = { ...axiosHeaders, ...ApplySecretsToHeaders(this.monitor.type_data.headers, this.envSecrets) };
@@ -75,6 +89,17 @@ class ApiCall {
       timeout: timeout,
       transformResponse: (r: string) => r,
       maxRedirects: followRedirects ? maxRedirects : 0,
+      // I6, the downgrade case. An `https://` URL answering 302 to `http://` is
+      // followed by default and carries the Authorization header with it, and
+      // nothing in the monitor's configuration looks wrong. `beforeRedirect` is
+      // axios's hook into follow-redirects; throwing here aborts the request
+      // rather than completing the hop.
+      beforeRedirect: (options: { protocol?: string; href?: string }) => {
+        const target = options.href ?? `${options.protocol ?? ""}//`;
+        if (redirectWouldLeak(target, { secrets: this.envSecrets, typeData: this.monitor.type_data })) {
+          throw new Error(plaintextSecretError("a redirect to this URL"));
+        }
+      },
       validateStatus: () => true,
       maxContentLength: Infinity,
       maxBodyLength: Infinity,

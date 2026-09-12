@@ -3,6 +3,7 @@ import { AxiosProxyConfig } from "../proxy.js";
 import GC from "../../global-constants.js";
 import version from "../../version.js";
 import { GetRequiredSecrets, ReplaceAllOccurrences, ApplySecretsToHeaders } from "../tool.js";
+import { plaintextSecretRefusal } from "./secretTransport.js";
 import type { PrometheusMonitor, PrometheusThreshold, MonitoringResult } from "../types/monitor.js";
 
 /**
@@ -84,6 +85,14 @@ class PrometheusCall {
 
     // Build the query endpoint: strip trailing slashes, append /api/v1/query.
     const endpoint = `${url.replace(/\/+$/, "")}/api/v1/query`;
+
+    // I6. Refuse before anything is sent, on the resolved endpoint. Reported
+    // through `fail` like every other refusal here, so the minute still records
+    // a row saying what happened. Deliberately not softened by `errorStatus`'s
+    // usual reasoning: a refused check is a configuration problem, not an
+    // unreachable Prometheus, and `fail` already keeps the real message.
+    const refusal = plaintextSecretRefusal({ url: endpoint, secrets: this.envSecrets, typeData: data });
+    if (refusal) return this.fail(GC.ERROR, refusal);
 
     // Merge default headers with user headers (user wins on collision). Secrets
     // are substituted into each header key/value individually - never into a

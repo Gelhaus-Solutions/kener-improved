@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { MonitorRecordTyped } from "../types/db.js";
 import type { ProbeAgentRecord, ProbeTarget } from "../db/repositories/probes.js";
 
@@ -335,5 +335,74 @@ describe("dispatchSample", () => {
     } finally {
       delete process.env.KENER_DISPATCH_TEST_SECRET;
     }
+  });
+});
+
+describe("I6: secrets are not handed to a plaintext probe", () => {
+  const saved = { ...process.env };
+  afterEach(() => {
+    process.env = { ...saved };
+  });
+
+  function secretMonitor(over: Record<string, unknown> = {}) {
+    return monitor({
+      type_data: {
+        url: "https://api.example.com",
+        timeout: 1000,
+        headers: [{ key: "Authorization", value: "Bearer $LEAKTOKEN" }],
+        ...over,
+      },
+    } as never);
+  }
+
+  it("does not dispatch a monitor carrying a resolved secret", async () => {
+    // Kener opens a plain ws:// listener and no TLS one, so an assignment puts
+    // this monitor's credentials on the wire in clear text. The server checks it
+    // locally instead, which is the fallback every unhappy probe path takes.
+    process.env.LEAKTOKEN = "s3cr3t";
+    registry.register(agent({ id: 2, region_id: 3 }), vi.fn(), vi.fn());
+    fake.getProbeTargetsForMonitor.mockResolvedValue([target({ agent_id: 2, region_id: 3 })]);
+
+    const plan = await planProbeExecution(secretMonitor());
+    expect(plan.voting).toEqual([]);
+    expect(plan.displayOnly).toEqual([]);
+    expect(plan.localSlot).toBeNull();
+  });
+
+  it("dispatches it when the monitor has opted out", async () => {
+    process.env.LEAKTOKEN = "s3cr3t";
+    registry.register(agent({ id: 2, region_id: 3 }), vi.fn(), vi.fn());
+    fake.getProbeTargetsForMonitor.mockResolvedValue([target({ agent_id: 2, region_id: 3 })]);
+
+    const plan = await planProbeExecution(secretMonitor({ allowPlaintextSecrets: true }));
+    expect(plan.voting.map((s) => s.regionId)).toEqual([3]);
+  });
+
+  it("dispatches a monitor whose secret reference never resolved", async () => {
+    delete process.env.LEAKTOKEN;
+    registry.register(agent({ id: 2, region_id: 3 }), vi.fn(), vi.fn());
+    fake.getProbeTargetsForMonitor.mockResolvedValue([target({ agent_id: 2, region_id: 3 })]);
+
+    const plan = await planProbeExecution(secretMonitor());
+    expect(plan.voting.map((s) => s.regionId)).toEqual([3]);
+  });
+
+  it("withholds it from the local slot too, not only from a sampling region", async () => {
+    // An agent at region 0 stands in for the local check, and it is just as
+    // remote as any other: the credential still crosses the network.
+    process.env.LEAKTOKEN = "s3cr3t";
+    registry.register(agent({ id: 1, region_id: 0 }), vi.fn(), vi.fn());
+    fake.getProbeTargetsForMonitor.mockResolvedValue([target({ agent_id: 1, region_id: 0 })]);
+
+    const plan = await planProbeExecution(secretMonitor());
+    expect(plan.localSlot).toBeNull();
+  });
+
+  it("leaves a monitor with no secrets alone", async () => {
+    registry.register(agent({ id: 2, region_id: 3 }), vi.fn(), vi.fn());
+    fake.getProbeTargetsForMonitor.mockResolvedValue([target({ agent_id: 2, region_id: 3 })]);
+
+    const plan = await planProbeExecution(monitor());
+    expect(plan.voting.map((s) => s.regionId)).toEqual([3]);
   });
 });

@@ -215,6 +215,7 @@ git push
 | `scripts/check-tenancy.ts`, `scripts/check-org-provisioning.ts`                    | Fork-only: assert the tenancy registration and each org's provisioning against the live schema (Z)                                   |
 | `tsconfig.scripts.json`                                                            | Fork-only: puts `scripts/`, `migrations/` and `seeds/` under `npm run check`                                                         |
 | `probe/`                                                                           | Fork-only: the standalone remote probe daemon, bundled from `src/lib/server/services/` so there is one copy of the check logic (B1c) |
+| `src/lib/server/services/secretTransport.ts`                                       | Fork-only: refuses to put a resolved `$SECRET` on an unencrypted transport, and the per-monitor opt-out (I6)                         |
 | `src/lib/server/controllers/siteDataScope.ts`                                      | Fork-only: which `site_data` keys the instance owns, and how the instance layer overlays an org's (I3g)                              |
 | `.github/workflows/publish-probe.yml`                                              | Fork-only: publishes the probe as its own GHCR image on a `probe-v*` tag, versioned independently of Kener (B1d)                     |
 | `.github/ISSUE_TEMPLATE/`                                                          | No upstream assignee                                                                                                                 |

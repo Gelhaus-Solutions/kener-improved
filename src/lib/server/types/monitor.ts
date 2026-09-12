@@ -30,6 +30,14 @@ export interface ApiMonitorTypeData {
   follow_redirects?: boolean;
   max_redirects?: number;
   proxy?: string; // http(s):// proxy URL; `$SECRET` substitution applies; empty = process env proxy
+  /**
+   * I6. Send resolved `$SECRET` values over an unencrypted URL anyway.
+   *
+   * Off by default, so a credential is never put on the wire in clear text
+   * unless somebody said so. Ticked by the migration on monitors that were
+   * already doing it, so an upgrade breaks nothing that worked yesterday.
+   */
+  allowPlaintextSecrets?: boolean;
 }
 
 export interface DnsMonitorTypeData {
@@ -118,6 +126,14 @@ export interface PrometheusMonitorTypeData {
   headers?: { key: string; value: string }[]; // optional; secret substitution applies
   timeout?: number; // ms, default 10000
   allowSelfSignedCert?: boolean; // default false
+  /**
+   * I6. Send resolved `$SECRET` values over an unencrypted URL anyway.
+   *
+   * Off by default, so a credential is never put on the wire in clear text
+   * unless somebody said so. Ticked by the migration on monitors that were
+   * already doing it, so an upgrade breaks nothing that worked yesterday.
+   */
+  allowPlaintextSecrets?: boolean;
   proxy?: string; // as ApiMonitorTypeData.proxy
 }
 

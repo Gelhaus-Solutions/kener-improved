@@ -6,7 +6,7 @@ import { MERGED_REGION_ID } from "../db/regions.js";
 import { currentOrgIdOrDefault } from "../db/orgContext.js";
 import { encode, newMessageId, type AssignMessage } from "./protocol.js";
 import { getConnection, type AssignmentOutcome, type ProbeConnection } from "./registry.js";
-import { resolveTypeDataSecrets } from "./secrets.js";
+import { resolveTypeDataSecrets, typeDataCarriesSecret } from "./secrets.js";
 import type { ProbeTarget } from "../db/repositories/probes.js";
 import {
   LOCAL_REGION_ID,
@@ -151,6 +151,18 @@ export async function planProbeExecution(monitor: MonitorRecordTyped): Promise<P
   }
   if (targets.length === 0) return localOnlyPlan();
 
+  // Asked once for the monitor rather than once per agent: resolving secrets
+  // walks the whole `type_data` and enumerates `process.env`.
+  const carriesSecret = typeDataCarriesSecret(monitor.type_data);
+  const plaintextSecretsAllowed =
+    (monitor.type_data as { allowPlaintextSecrets?: boolean } | null | undefined)?.allowPlaintextSecrets === true;
+  if (carriesSecret && !plaintextSecretsAllowed) {
+    console.warn(
+      `Monitor ${monitor.tag} carries a secret and is not dispatched to a probe: the probe channel is plaintext. ` +
+        `Tick "Allow secrets over plaintext" on the monitor to send it anyway.`,
+    );
+  }
+
   // Connected, capable agents, with the region each one's samples actually mean.
   const connected: Array<{ connection: ProbeConnection; regionId: number }> = [];
   let localSlotTaken = false;
@@ -164,6 +176,13 @@ export async function planProbeExecution(monitor: MonitorRecordTyped): Promise<P
     // server forbids. `capabilities` is null for an agent that reported none, in
     // which case the server's list alone decides.
     if (!agentSupports(connection, monitor.monitor_type)) continue;
+
+    // I6. An assignment carries this monitor's credentials to another machine
+    // over a plain `ws://` socket, because Kener opens no TLS listener. Unless
+    // the monitor says it accepts that, it is not dispatched at all and the
+    // server checks it locally - the same fallback every other unhappy probe
+    // path takes, so nothing stops being monitored.
+    if (!plaintextSecretsAllowed && carriesSecret) continue;
 
     // An agent configured at region 0 is B1c's "replaces the local check". Under
     // B1d region 0 is the computed answer and nothing may observe there, so it

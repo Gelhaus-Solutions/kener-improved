@@ -18,6 +18,15 @@ import { GetRequiredSecrets, ReplaceAllOccurrences } from "../tool.js";
  * scoping is the later mitigation. Sending unresolved tokens instead would not
  * be safer, it would simply not work.
  *
+ * **I6 narrowed that trade to one the operator has agreed to.** Kener opens a
+ * plain `ws://` listener and no TLS one, so those resolved credentials cross the
+ * network in clear text - the same defect as an `http://` monitor URL, with a
+ * wider blast radius, because one wrong `KENER_PROBE_URL` exposes every monitor
+ * assigned to that agent at once. `typeDataCarriesSecret` is what `dispatch.ts`
+ * asks before handing a monitor over; without the per-monitor opt-out the
+ * monitor is simply not dispatched and is checked locally instead, which is the
+ * fallback every other unhappy probe path already takes.
+ *
  * A token with no matching environment variable is left exactly as it is, which
  * is what `GetRequiredSecrets` already does for local checks: an unset secret is
  * an operator's configuration mistake, and substituting an empty string for it
@@ -32,6 +41,12 @@ import { GetRequiredSecrets, ReplaceAllOccurrences } from "../tool.js";
  * would corrupt the JSON, and the whole object - often including the auth
  * header - would be dropped when it was parsed back.
  */
+export function typeDataCarriesSecret(typeData: unknown): boolean {
+  return GetRequiredSecrets(collectStrings(typeData).join(" ")).some(
+    (secret) => typeof secret.replace === "string" && secret.replace.length > 0,
+  );
+}
+
 export function resolveTypeDataSecrets(typeData: unknown): unknown {
   // One scan of the whole structure to find which variables are needed, so
   // `process.env` is enumerated once rather than once per string.
