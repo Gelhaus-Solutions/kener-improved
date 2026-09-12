@@ -75,6 +75,8 @@ Turn on **Status Filter** to show filter chips above the components, so visitors
 
 Set **Component Grouping** to `Group by category` to collect components into collapsible sections using each monitor's category.
 
+Set the categories themselves under **Status page → Categories**, where you can move a component into a category, rename a category across every component in it, or clear one. A category belongs to the component, so it applies on every page that component appears on.
+
 - Sections appear in the order their monitors appear on the page, not alphabetically, so your monitor ordering is preserved.
 - Components with no category are collected into a final **Other** section.
 - **Start collapsed**: sections are closed on first load.
