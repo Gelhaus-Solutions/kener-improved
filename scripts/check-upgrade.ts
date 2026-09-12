@@ -18,9 +18,9 @@
  *
  *   1. migrate, seed, and install a fixture of the configuration an operator
  *      would actually lose and notice
- *   2. count it
+ *   2. count it, and census every index in the schema
  *   3. roll back `--depth` migrations and roll forward again
- *   4. count it again
+ *   4. count it again, and check no index went missing
  *   5. run what the app runs after migrating, and count a third time
  *
  * **Step 5 is the one that is easy to leave out and is the reason this exists.**
@@ -88,6 +88,67 @@ async function census(knex: Knex): Promise<Census> {
     counts.set(table, Number((row as { n: string | number }).n));
   }
   return counts;
+}
+
+/**
+ * Every index in the schema, as `table.index_name`.
+ *
+ * **Why an index belongs in a check about losing configuration.** It is not a
+ * row an operator typed, but it fails the same way: silently, invisibly to the
+ * schema check, and only in production, where the symptom is a status page that
+ * got slow rather than an error anybody sees. `idx_monitoring_data_timestamp`
+ * is the worked example. Nothing in `src/` names it, so a grep says it is
+ * unused, and two things depend on it anyway: the daily cleanup deletes on
+ * `timestamp <` alone (`repositories/monitoring.ts:336`), and
+ * `pg-partition-monitoring-data.ts` expects that exact name to exist as a final
+ * name. An upgrade that dropped it would report success.
+ *
+ * **Why a census rather than a list of indexes we care about.** A list has to be
+ * maintained, and the index this is guarding against losing is by definition one
+ * nobody remembered. Comparing the whole set before and after needs no upkeep
+ * and covers indexes added after this was written.
+ *
+ * Names are compared exactly, so a rename reads as a loss plus a gain. That is
+ * the right answer: the partition script looks indexes up by name.
+ */
+async function indexCensus(knex: Knex): Promise<Set<string>> {
+  const client = knex.client.config.client;
+
+  if (client === "pg") {
+    const result = await knex.raw(
+      `select tablename as tbl, indexname as idx from pg_indexes where schemaname = current_schema()`,
+    );
+    const rows = ((result as { rows?: Array<{ tbl: string; idx: string }> }).rows ?? []) as Array<{
+      tbl: string;
+      idx: string;
+    }>;
+    return new Set(rows.map((r) => `${r.tbl}.${r.idx}`));
+  }
+
+  if (client === "mysql" || client === "mysql2") {
+    const result = await knex.raw(
+      `select table_name as tbl, index_name as idx from information_schema.statistics
+        where table_schema = database()`,
+    );
+    const rows = (Array.isArray(result) ? (Array.isArray(result[0]) ? result[0] : result) : []) as Array<
+      Record<string, unknown>
+    >;
+    return new Set(rows.map((r) => `${String(r.tbl ?? r.TABLE_NAME)}.${String(r.idx ?? r.INDEX_NAME)}`));
+  }
+
+  // SQLite. `tbl_name` is the table the index sits on. Indexes SQLite creates
+  // for itself to back a UNIQUE or a PRIMARY KEY are named `sqlite_autoindex_*`
+  // and are excluded: they are a consequence of the constraint rather than an
+  // object anything names, and SQLite renumbers them when a table is rebuilt,
+  // which the key swaps in this schema do routinely.
+  const result = await knex.raw(
+    `select tbl_name as tbl, name as idx from sqlite_master
+      where type = 'index' and name not like 'sqlite_autoindex_%'`,
+  );
+  const rows = (Array.isArray(result) ? result : ((result as { rows?: unknown[] })?.rows ?? [])) as Array<
+    Record<string, unknown>
+  >;
+  return new Set(rows.map((r) => `${String(r.tbl)}.${String(r.idx)}`));
 }
 
 /**
@@ -196,6 +257,34 @@ function diff(before: Census, after: Census): Array<{ table: string; before: num
   return lost;
 }
 
+/**
+ * Indexes present before the round trip and absent after.
+ *
+ * An index on a table the round trip legitimately dropped went with its table
+ * and is not a finding, so those are filtered out here. Table existence is asked
+ * of the database rather than inferred from the row census, because that census
+ * covers only `CONFIGURATION_TABLES` and an index can sit on any table.
+ */
+async function diffIndexes(knex: Knex, before: Set<string>, after: Set<string>): Promise<string[]> {
+  const candidates = [...before].filter((entry) => !after.has(entry)).sort();
+  const lost: string[] = [];
+  for (const entry of candidates) {
+    const table = entry.slice(0, entry.indexOf("."));
+    if (await tableExists(knex, table)) lost.push(entry);
+  }
+  return lost;
+}
+
+function reportIndexes(label: string, lost: string[]): boolean {
+  if (lost.length === 0) {
+    console.log(`  PASS  ${label}`);
+    return true;
+  }
+  console.log(`  FAIL  ${label}`);
+  for (const entry of lost) console.log(`        ${entry} is gone`);
+  return false;
+}
+
 function report(label: string, lost: Array<{ table: string; before: number; after: number }>): boolean {
   if (lost.length === 0) {
     console.log(`  PASS  ${label}`);
@@ -227,7 +316,11 @@ async function main(): Promise<void> {
     await installFixture(knex);
 
     const before = await census(knex);
-    console.log(`  fixture installed: ${[...before.values()].reduce((a, b) => a + b, 0)} configuration rows\n`);
+    const indexesBefore = await indexCensus(knex);
+    console.log(
+      `  fixture installed: ${[...before.values()].reduce((a, b) => a + b, 0)} configuration rows, ` +
+        `${indexesBefore.size} indexes\n`,
+    );
 
     // Down and back up, with the data in place. Knex rolls back one migration
     // per `down()` call, newest first, and `up()` replays them in order.
@@ -246,6 +339,11 @@ async function main(): Promise<void> {
     console.log(`  and replayed\n`);
 
     ok = report("configuration survives a rollback and replay", diff(before, await census(knex))) && ok;
+    ok =
+      reportIndexes(
+        "every index survives a rollback and replay",
+        await diffIndexes(knex, indexesBefore, await indexCensus(knex)),
+      ) && ok;
 
     // What the app does next. A migration whose rows are the right shape but
     // which the reading code then discards is the failure this catches, and it
