@@ -27,6 +27,7 @@
   import ShieldIcon from "@lucide/svelte/icons/shield";
   import FingerprintIcon from "@lucide/svelte/icons/fingerprint";
   import Columns3CogIcon from "@lucide/svelte/icons/columns-3-cog";
+  import TagsIcon from "@lucide/svelte/icons/tags";
   import SiteHeader from "./manage/site-header.svelte";
   import TemplateIcon from "@lucide/svelte/icons/layout-template";
   import clientResolver from "$lib/client/resolver.js";
@@ -92,6 +93,10 @@
       title: "Status page",
       items: [
         { title: "Pages", url: "/manage/app/pages", icon: BookOpenIcon },
+        // Beside Pages rather than under Operate: a category is the section a
+        // component sits in on a status page, so the people who come here are
+        // laying out a page rather than responding to anything.
+        { title: "Categories", url: "/manage/app/categories", icon: TagsIcon },
         { title: "Customizations", url: "/manage/app/customizations", icon: Columns3CogIcon },
         { title: "Internationalization", url: "/manage/app/internationalization", icon: GlobeIcon },
         {

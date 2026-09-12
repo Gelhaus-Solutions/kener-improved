@@ -193,6 +193,8 @@ class DbImpl {
   insertMonitor!: MonitorsRepository["insertMonitor"];
   updateMonitor!: MonitorsRepository["updateMonitor"];
   updateMonitorTrigger!: MonitorsRepository["updateMonitorTrigger"];
+  setMonitorCategory!: MonitorsRepository["setMonitorCategory"];
+  recategoriseMonitors!: MonitorsRepository["recategoriseMonitors"];
   getMonitors!: MonitorsRepository["getMonitors"];
   getMonitorByTag!: MonitorsRepository["getMonitorByTag"];
   getMonitorBySlug!: MonitorsRepository["getMonitorBySlug"];
@@ -799,6 +801,8 @@ class DbImpl {
     this.insertMonitor = this.monitors.insertMonitor.bind(this.monitors);
     this.updateMonitor = this.monitors.updateMonitor.bind(this.monitors);
     this.updateMonitorTrigger = this.monitors.updateMonitorTrigger.bind(this.monitors);
+    this.setMonitorCategory = this.monitors.setMonitorCategory.bind(this.monitors);
+    this.recategoriseMonitors = this.monitors.recategoriseMonitors.bind(this.monitors);
     this.getMonitors = this.monitors.getMonitors.bind(this.monitors);
     this.getMonitorByTag = this.monitors.getMonitorByTag.bind(this.monitors);
     this.getMonitorBySlug = this.monitors.getMonitorBySlug.bind(this.monitors);

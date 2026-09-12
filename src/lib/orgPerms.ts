@@ -80,6 +80,16 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   // which already requires `settings.write`.
   getRetentionStatus: "settings.read",
 
+  // Monitor categories. A category is a value on a monitor, not an entity of its
+  // own, so these reuse the monitor permissions rather than minting a pair.
+  // Anyone who may edit a monitor may decide which section it appears in, and a
+  // separate permission would have to be granted to every existing org before it
+  // did anything (KENER-138).
+  getCategories: "monitors.read",
+  setMonitorCategory: "monitors.write",
+  renameCategory: "monitors.write",
+  deleteCategory: "monitors.write",
+
   // SLO targets (F1a).
   getSlaTargets: "slo.read",
   getSlaOverview: "slo.read",
@@ -265,6 +275,11 @@ export const ORG_ROUTE_PERMISSION_MAP: Record<string, string | null> = {
   // `/monitors/`, where a static segment would shadow a monitor whose tag
   // happened to be "dependencies".
   "/(manage)/manage/app/dependencies": "monitors.read",
+
+  // Monitor categories. `monitors.read` opens the screen because a category is a
+  // property of a monitor; every button on it is gated on `monitors.write` by
+  // its own action.
+  "/(manage)/manage/app/categories": "monitors.read",
 
   // SLO targets and their attainment (F1a). `slo.read` opens the screen; every
   // button on it is separately gated on `slo.write` by its own action, the same

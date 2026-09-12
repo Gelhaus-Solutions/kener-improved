@@ -117,6 +117,34 @@ export class MonitorsRepository extends BaseRepository {
     });
   }
 
+  /**
+   * Moves one monitor into a category, or out of every category.
+   *
+   * `null` means uncategorised, which the public page collects into a final
+   * "Other" section. An empty string is normalised to `null` by the caller, so
+   * that `""` and `"   "` and absent are one case by the time they are stored -
+   * otherwise a category named `""` appears in the grouping as a nameless
+   * section nobody can select.
+   */
+  async setMonitorCategory(tag: string, categoryName: string | null): Promise<number> {
+    return await this.table("monitors")
+      .where({ tag })
+      .update({ category_name: categoryName, updated_at: this.knexUnscoped.fn.now() });
+  }
+
+  /**
+   * Renames a category across every monitor holding it, or clears it.
+   *
+   * One statement rather than a read-then-loop: a rename that half-applied would
+   * split one section into two on the public page, and the two halves would look
+   * like a deliberate grouping rather than a failure.
+   */
+  async recategoriseMonitors(fromCategory: string, toCategory: string | null): Promise<number> {
+    return await this.table("monitors")
+      .where({ category_name: fromCategory })
+      .update({ category_name: toCategory, updated_at: this.knexUnscoped.fn.now() });
+  }
+
   async getMonitors(data: MonitorFilter): Promise<MonitorRecord[]> {
     let query = this.table("monitors").whereRaw("1=1");
     if (!!data.status) {
