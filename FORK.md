@@ -218,6 +218,7 @@ git push
 | `probe/`                                                                           | Fork-only: the standalone remote probe daemon, bundled from `src/lib/server/services/` so there is one copy of the check logic (B1c) |
 | `src/lib/server/services/secretTransport.ts`                                       | Fork-only: refuses to put a resolved `$SECRET` on an unencrypted transport, and the per-monitor opt-out (I6)                         |
 | `src/lib/server/controllers/siteDataScope.ts`                                      | Fork-only: which `site_data` keys the instance owns, and how the instance layer overlays an org's (I3g)                              |
+| `src/lib/server/inbound/`, `src/routes/(ext)/ext/alerts/`                           | Fork-only: inbound alert webhooks, so another stack's alerting opens Kener's incidents (H1)                                          |
 | `.github/workflows/publish-probe.yml`                                              | Fork-only: publishes the probe as its own GHCR image on a `probe-v*` tag, versioned independently of Kener (B1d)                     |
 | `.github/ISSUE_TEMPLATE/`                                                          | No upstream assignee                                                                                                                 |
 | `docs/agents/issue-tracker.md`                                                     | Points at the Plane project, not GitHub Issues                                                                                       |

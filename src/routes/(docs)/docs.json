@@ -166,6 +166,10 @@
                         {
                           "title": "Webhook Examples",
                           "content": "v4/alerting/webhook-examples"
+                        },
+                        {
+                          "title": "Inbound Alerts",
+                          "content": "v4/alerting/inbound-alerts"
                         }
                       ]
                     },
