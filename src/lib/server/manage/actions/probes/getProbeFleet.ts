@@ -3,6 +3,8 @@ import GC from "$lib/global-constants.js";
 import { MERGED_REGION_ID } from "$lib/server/db/regions.js";
 import { getConnection } from "$lib/server/probes/registry.js";
 import { configuredPort } from "$lib/server/probes/wsServer.js";
+import { GetSiteDataByKey } from "$lib/server/controllers/siteDataController.js";
+import { parseMergeDefaults, MERGE_POLICIES, SOURCE_MODES, LOCAL_REGION_ID } from "$lib/server/probes/merge.js";
 import type { ActionDefinition } from "../../types.js";
 
 /**
@@ -22,11 +24,13 @@ import type { ActionDefinition } from "../../types.js";
 export default {
   action: "getProbeFleet",
   handler: async () => {
-    const [agents, assignments, regions, monitors] = await Promise.all([
+    const [agents, assignments, regions, monitors, mergeRegions, storedPolicy] = await Promise.all([
       db.getProbeAgents(),
       db.getProbeAssignments(),
       db.getAssignableRegions(),
       db.getMonitors({ status: "ACTIVE" }),
+      db.getMergeRegions(),
+      GetSiteDataByKey("probeMergePolicy"),
     ]);
 
     // The web process only holds probe connections when it is also the scheduler,
@@ -49,11 +53,14 @@ export default {
           is_active: true,
           // Said here rather than in the component so the explanation lives with
           // the one fact that makes region 0 different from every other choice.
-          note: "An agent here replaces the local check and produces the authoritative status.",
+          note: "An agent here runs the local check remotely: Kener stops checking these monitors from its own server and this agent's answer takes local's place in the merge.",
         },
         ...regions
           .filter((region) => region.id !== MERGED_REGION_ID)
-          .map((region) => ({ ...region, note: "An agent here adds a regional sample alongside the local check." })),
+          .map((region) => ({
+            ...region,
+            note: "An agent here observes as its own region, alongside the local check. How much its answer counts is set below.",
+          })),
       ],
       agents: agents.map((agent) => ({
         id: agent.id,
@@ -68,6 +75,27 @@ export default {
         last_seen_at: agent.last_seen_at,
       })),
       assignments,
+
+      // B1d. The cascade's top two levels, so the screen can show what a source
+      // actually resolves to rather than only what it overrides.
+      merge_policy: parseMergeDefaults(storedPolicy),
+      merge_policies: MERGE_POLICIES,
+      source_modes: SOURCE_MODES,
+      local_region_id: LOCAL_REGION_ID,
+      merge_regions: mergeRegions.map((region) => ({
+        id: region.id,
+        code: region.code,
+        name: region.name,
+        is_active: !!region.is_active,
+        default_weight: region.default_weight,
+        default_trust_rank: region.default_trust_rank,
+        default_mode: region.default_mode,
+        // Region 0 is the computed answer, so nothing observes there and it has
+        // nothing to configure. Listed anyway, because an operator looking for
+        // it should find it explained rather than absent.
+        configurable: region.id !== MERGED_REGION_ID,
+      })),
+
       monitors: monitors
         // Only the types a probe could ever run. Offering the rest would invite
         // an operator to assign a GROUP monitor and then wonder why nothing

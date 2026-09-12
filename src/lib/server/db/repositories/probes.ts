@@ -1,5 +1,5 @@
 import { BaseRepository } from "./base.js";
-import { runAcrossOrgs } from "../orgContext.js";
+import { runAcrossOrgs, currentOrgIdOrDefault } from "../orgContext.js";
 
 /**
  * Remote probe agents and what they are assigned to check (B1b schema, B1c use).
@@ -57,8 +57,53 @@ export interface ProbeTarget {
   connection_state: string;
 }
 
+/**
+ * A `regions` row with B1d's cascade columns.
+ *
+ * The three defaults are nullable and null means "inherit the instance
+ * default". A weight of 0 is a real setting - "this region cannot carry a vote"
+ * - so absence cannot be spelled 0.
+ */
+export interface RegionDefaultsRecord {
+  id: number;
+  org_id: number | null;
+  code: string;
+  name: string;
+  is_active: boolean | number;
+  default_weight: number | null;
+  default_trust_rank: number | null;
+  default_mode: string | null;
+}
+
+/** One monitor's policy override. Every setting nullable: null means inherit. */
+export interface MonitorMergePolicyRecord {
+  id: number;
+  org_id: number;
+  monitor_tag: string;
+  policy: string | null;
+  quorum_threshold: number | null;
+  degraded_on_disagreement: boolean | number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+/** One monitor's override of one source. `region_id` is -1 for the local check. */
+export interface MonitorSourcePolicyRecord {
+  id: number;
+  org_id: number;
+  monitor_tag: string;
+  region_id: number;
+  weight: number | null;
+  trust_rank: number | null;
+  mode: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
 const AGENTS = "probe_agents";
 const ASSIGNMENTS = "monitor_probe_assignments";
+const MERGE_POLICIES = "monitor_merge_policies";
+const SOURCE_POLICIES = "monitor_source_policies";
 
 function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
@@ -310,5 +355,94 @@ export class ProbesRepository extends BaseRepository {
   /** Removes every assignment for a monitor. Called when the monitor itself goes. */
   async deleteProbeAssignmentsForMonitor(monitorTag: string): Promise<number> {
     return await this.table(ASSIGNMENTS).where({ monitor_tag: monitorTag }).delete();
+  }
+
+  // ---- B1d. The merge cascade -------------------------------------------
+
+  /**
+   * Every region this org can be told about, including the two instance rows.
+   *
+   * Unscoped on purpose, and this is the one place in B1d that needs saying out
+   * loud. `regions` is a tenant table, but ids 0 and -1 carry a null `org_id`
+   * because the merged verdict and the server's own check belong to the
+   * instance, not to a tenant - so a scoped read returns a tenant's own regions
+   * and silently omits `local`, which is the source the cascade most needs to
+   * configure. Reading across orgs here exposes nothing: a region row is a code,
+   * a name and three default numbers, and the samples that name it are still
+   * scoped everywhere they are read.
+   */
+  async getMergeRegions(): Promise<RegionDefaultsRecord[]> {
+    const orgId = currentOrgIdOrDefault();
+    return await runAcrossOrgs(() =>
+      this.knexUnscoped("regions")
+        .where("org_id", orgId)
+        .orWhereNull("org_id")
+        .orderBy("id", "asc")
+        .select("id", "org_id", "code", "name", "is_active", "default_weight", "default_trust_rank", "default_mode"),
+    );
+  }
+
+  async updateRegionDefaults(
+    regionId: number,
+    patch: { default_weight?: number | null; default_trust_rank?: number | null; default_mode?: string | null },
+  ): Promise<number> {
+    // Unscoped for the same reason as the read: the rows an operator most wants
+    // to configure are `local` and `merged`, and both carry a null org.
+    return await runAcrossOrgs(() => this.knexUnscoped("regions").where({ id: regionId }).update(patch));
+  }
+
+  /** One monitor's policy override, or undefined when it inherits everything. */
+  async getMonitorMergePolicy(monitorTag: string): Promise<MonitorMergePolicyRecord | undefined> {
+    return await this.table(MERGE_POLICIES).where({ monitor_tag: monitorTag }).first();
+  }
+
+  /**
+   * Writes one monitor's policy override.
+   *
+   * Upserts on `monitor_tag`, matching the unique index exactly. Naming the
+   * composite `["org_id", "monitor_tag"]` here would have no arbiter to resolve
+   * against on Postgres and would throw - the index is on the tag alone, because
+   * the tag is already globally unique.
+   */
+  async setMonitorMergePolicy(
+    monitorTag: string,
+    patch: { policy?: string | null; quorum_threshold?: number | null; degraded_on_disagreement?: boolean | null },
+  ): Promise<void> {
+    const ts = nowSeconds();
+    await this.table(MERGE_POLICIES)
+      .insert({ monitor_tag: monitorTag, ...patch, created_at: ts, updated_at: ts })
+      .onConflict("monitor_tag")
+      .merge({ ...patch, updated_at: ts });
+  }
+
+  async deleteMonitorMergePolicy(monitorTag: string): Promise<number> {
+    return await this.table(MERGE_POLICIES).where({ monitor_tag: monitorTag }).delete();
+  }
+
+  /** One monitor's per-source overrides. Usually empty. */
+  async getMonitorSourcePolicies(monitorTag: string): Promise<MonitorSourcePolicyRecord[]> {
+    return await this.table(SOURCE_POLICIES).where({ monitor_tag: monitorTag }).orderBy("region_id", "asc");
+  }
+
+  async setMonitorSourcePolicy(
+    monitorTag: string,
+    regionId: number,
+    patch: { weight?: number | null; trust_rank?: number | null; mode?: string | null },
+  ): Promise<void> {
+    const ts = nowSeconds();
+    await this.table(SOURCE_POLICIES)
+      .insert({ monitor_tag: monitorTag, region_id: regionId, ...patch, created_at: ts, updated_at: ts })
+      .onConflict(["monitor_tag", "region_id"])
+      .merge({ ...patch, updated_at: ts });
+  }
+
+  async deleteMonitorSourcePolicy(monitorTag: string, regionId: number): Promise<number> {
+    return await this.table(SOURCE_POLICIES).where({ monitor_tag: monitorTag, region_id: regionId }).delete();
+  }
+
+  /** Clears both override levels for a monitor. Called when the monitor itself goes. */
+  async deleteMergePoliciesForMonitor(monitorTag: string): Promise<void> {
+    await this.table(SOURCE_POLICIES).where({ monitor_tag: monitorTag }).delete();
+    await this.table(MERGE_POLICIES).where({ monitor_tag: monitorTag }).delete();
   }
 }

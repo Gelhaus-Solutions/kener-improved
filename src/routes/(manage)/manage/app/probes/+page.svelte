@@ -75,6 +75,105 @@
   let assignments = $state<Assignment[]>([]);
   let monitors = $state<PickableMonitor[]>([]);
 
+  // ---- B1d. The merge cascade ------------------------------------------
+  interface MergeRegion {
+    id: number;
+    code: string;
+    name: string;
+    is_active: boolean;
+    default_weight: number | null;
+    default_trust_rank: number | null;
+    default_mode: string | null;
+    configurable: boolean;
+  }
+  interface MergeDefaults {
+    policy: string;
+    quorumThreshold: number;
+    degradedOnDisagreement: boolean;
+    defaultWeight: number;
+    defaultTrustRank: number;
+    defaultMode: string;
+    localWeight: number;
+    localTrustRank: number;
+    localMode: string;
+  }
+  interface EffectiveSource {
+    region_id: number;
+    region_name: string;
+    weight: number;
+    trust_rank: number;
+    mode: string;
+  }
+
+  let mergePolicies = $state<string[]>([]);
+  let sourceModes = $state<string[]>([]);
+  let localRegionId = $state(-1);
+  let mergeRegions = $state<MergeRegion[]>([]);
+  /** The saved instance defaults, and the copy the form is editing. */
+  let mergeSaved = $state<MergeDefaults | null>(null);
+  let mergeForm = $state<MergeDefaults | null>(null);
+
+  /**
+   * Whether the policy form differs from what is stored.
+   *
+   * Compared by value rather than tracked with a dirty flag, so that editing a
+   * field and putting it back does not leave the screen claiming unsaved work.
+   */
+  let mergeDirty = $derived(
+    mergeSaved !== null && mergeForm !== null && JSON.stringify(mergeSaved) !== JSON.stringify(mergeForm)
+  );
+
+  /** Which of the three policies' extra fields are worth showing at all. */
+  let showsQuorum = $derived(mergeForm?.policy === "QUORUM_DOWN");
+  let showsWeights = $derived(mergeForm?.policy === "WEIGHTED_MAJORITY");
+  let showsTrust = $derived(mergeForm?.policy === "TRUST_ORDER");
+
+  /** The per-monitor override dialog. */
+  let policyMonitor = $state<string | null>(null);
+  let policyLoading = $state(false);
+  let policyOverride = $state<{
+    policy: string | null;
+    quorum_threshold: number | null;
+    degraded_on_disagreement: boolean | null;
+    sources: Array<{ region_id: number; weight: number | null; trust_rank: number | null; mode: string | null }>;
+  } | null>(null);
+  let policyEffective = $state<EffectiveSource[]>([]);
+  let policyEffectivePolicy = $state<string>("");
+
+  const POLICY_LABELS: Record<string, string> = {
+    TRUST_ORDER: "Trust order",
+    WEIGHTED_MAJORITY: "Weighted majority",
+    QUORUM_DOWN: "Quorum before down"
+  };
+  const MODE_LABELS: Record<string, string> = {
+    VOTE: "Counts",
+    DISPLAY_ONLY: "Shown only",
+    OFF: "Off"
+  };
+
+  function policyLabel(id: string): string {
+    return POLICY_LABELS[id] ?? id;
+  }
+  function modeLabel(id: string): string {
+    return MODE_LABELS[id] ?? id;
+  }
+
+  /**
+   * The override for one source in the open dialog, created on demand.
+   *
+   * Rows exist only once touched, which is what keeps the override tables empty
+   * on an install that configures nothing.
+   */
+  function overrideFor(regionId: number) {
+    if (!policyOverride) return null;
+    let row = policyOverride.sources.find((s) => s.region_id === regionId);
+    if (!row) {
+      row = { region_id: regionId, weight: null, trust_rank: null, mode: null };
+      policyOverride.sources.push(row);
+    }
+    return row;
+  }
+
   /** The sentinel the region picker uses for "make a new one". Not a region id. */
   const NEW_REGION = "__new__";
 
@@ -168,6 +267,13 @@
       agents = result.agents ?? [];
       assignments = result.assignments ?? [];
       monitors = result.monitors ?? [];
+      mergePolicies = result.merge_policies ?? [];
+      sourceModes = result.source_modes ?? [];
+      localRegionId = result.local_region_id ?? -1;
+      mergeRegions = result.merge_regions ?? [];
+      mergeSaved = result.merge_policy ?? null;
+      // A separate copy, so cancelling an edit means reloading nothing.
+      mergeForm = result.merge_policy ? { ...result.merge_policy } : null;
       error = null;
     } catch (e) {
       error = e instanceof Error ? e.message : "Could not load probe agents";
@@ -177,6 +283,81 @@
   }
 
   onMount(load);
+
+  async function saveMergePolicy() {
+    if (!mergeForm) return;
+    busy = true;
+    try {
+      const result = await call("setMergePolicy", { ...mergeForm });
+      mergeSaved = { ...result.settings };
+      mergeForm = { ...result.settings };
+      toast.success("Merge policy saved");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save the merge policy");
+    } finally {
+      busy = false;
+    }
+  }
+
+  function resetMergePolicy() {
+    if (mergeSaved) mergeForm = { ...mergeSaved };
+  }
+
+  /**
+   * Saves one region's defaults.
+   *
+   * An empty field is sent as null, not as 0: null means "inherit the instance
+   * default" and 0 is a real weight meaning "this region cannot carry a vote".
+   */
+  async function saveRegionDefaults(region: MergeRegion) {
+    busy = true;
+    try {
+      await call("setRegionDefaults", {
+        region_id: region.id,
+        default_weight: region.default_weight,
+        default_trust_rank: region.default_trust_rank,
+        default_mode: region.default_mode
+      });
+      toast.success(`${region.name} saved`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save the region");
+      await load();
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function openMonitorPolicy(monitorTag: string) {
+    policyMonitor = monitorTag;
+    policyLoading = true;
+    policyOverride = null;
+    policyEffective = [];
+    try {
+      const result = await call("getMonitorMergePolicy", { monitor_tag: monitorTag });
+      policyOverride = result.override;
+      policyEffective = result.effective.sources ?? [];
+      policyEffectivePolicy = result.effective.policy;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not load the monitor policy");
+      policyMonitor = null;
+    } finally {
+      policyLoading = false;
+    }
+  }
+
+  async function saveMonitorPolicy() {
+    if (!policyMonitor || !policyOverride) return;
+    busy = true;
+    try {
+      await call("setMonitorMergePolicy", { monitor_tag: policyMonitor, ...policyOverride });
+      toast.success("Monitor policy saved");
+      policyMonitor = null;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save the monitor policy");
+    } finally {
+      busy = false;
+    }
+  }
 
   function openCreate() {
     createName = "";
@@ -372,6 +553,196 @@
       </Card.Root>
     {/if}
 
+    {#if mergeForm}
+      <Card.Root>
+        <Card.Header>
+          <Card.Title>How several answers become one status</Card.Title>
+          <Card.Description>
+            When a monitor is checked from more than one place, this decides what the page publishes. It applies to
+            every monitor unless a region or a monitor below says otherwise.
+          </Card.Description>
+        </Card.Header>
+        <Card.Content class="flex flex-col gap-4">
+          <div class="flex flex-col gap-2">
+            <Label for="merge-policy">Policy</Label>
+            <Select.Root
+              type="single"
+              value={mergeForm.policy}
+              onValueChange={(v) => mergeForm && (mergeForm.policy = v ?? mergeForm.policy)}
+            >
+              <Select.Trigger id="merge-policy" class="w-full">{policyLabel(mergeForm.policy)}</Select.Trigger>
+              <Select.Content>
+                {#each mergePolicies as policy (policy)}
+                  <Select.Item value={policy}>{policyLabel(policy)}</Select.Item>
+                {/each}
+              </Select.Content>
+            </Select.Root>
+            <p class="text-muted-foreground text-xs">
+              {#if showsTrust}
+                The most trusted source that answered wins outright. Use this when one vantage point is simply right and
+                the others are noise, such as a provider that blocks datacenter ranges and answers a residential probe
+                normally.
+              {:else if showsQuorum}
+                A monitor is not called down until enough sources agree. Below the threshold the last published status
+                is held, so one flaky vantage point cannot raise an alert on its own.
+              {:else}
+                Each source carries a weight and the heaviest status wins. An exact tie resolves to the worse status.
+              {/if}
+            </p>
+          </div>
+
+          {#if showsQuorum}
+            <div class="flex flex-col gap-2">
+              <Label for="merge-quorum">Sources that must agree before down</Label>
+              <Input id="merge-quorum" type="number" min="1" bind:value={mergeForm.quorumThreshold} class="max-w-40" />
+            </div>
+          {/if}
+
+          {#if showsWeights}
+            <label class="flex items-start gap-2 text-sm">
+              <input type="checkbox" class="mt-1" bind:checked={mergeForm.degradedOnDisagreement} />
+              <span>
+                Publish <strong>degraded</strong> when sources disagree.
+                <span class="text-muted-foreground block text-xs">
+                  Only ever downwards: a winning up with a dissenting source becomes degraded, and a winning down is
+                  never softened. Has no effect under the other two policies, which resolve disagreement themselves.
+                </span>
+              </span>
+            </label>
+          {/if}
+
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div class="flex flex-col gap-2 rounded-md border p-3">
+              <p class="text-sm font-medium">The local check</p>
+              <p class="text-muted-foreground text-xs">Kener checking from its own server.</p>
+              <Label for="merge-local-mode" class="text-xs">Takes part</Label>
+              <Select.Root
+                type="single"
+                value={mergeForm.localMode}
+                onValueChange={(v) => mergeForm && (mergeForm.localMode = v ?? mergeForm.localMode)}
+              >
+                <Select.Trigger id="merge-local-mode" class="w-full">{modeLabel(mergeForm.localMode)}</Select.Trigger>
+                <Select.Content>
+                  {#each sourceModes as mode (mode)}
+                    <Select.Item value={mode}>{modeLabel(mode)}</Select.Item>
+                  {/each}
+                </Select.Content>
+              </Select.Root>
+              {#if mergeForm.localMode === "OFF"}
+                <p class="text-xs text-amber-600">
+                  Kener will not check these monitors itself at all. Only do this when every monitor is covered by a
+                  probe, or nothing will be checked.
+                </p>
+              {/if}
+              {#if showsWeights}
+                <Label for="merge-local-weight" class="text-xs">Weight</Label>
+                <Input id="merge-local-weight" type="number" min="0" bind:value={mergeForm.localWeight} />
+              {/if}
+              {#if showsTrust}
+                <Label for="merge-local-trust" class="text-xs">Trust rank (lower wins)</Label>
+                <Input id="merge-local-trust" type="number" min="0" bind:value={mergeForm.localTrustRank} />
+              {/if}
+            </div>
+
+            <div class="flex flex-col gap-2 rounded-md border p-3">
+              <p class="text-sm font-medium">Every probe region</p>
+              <p class="text-muted-foreground text-xs">The starting point for a region that sets nothing of its own.</p>
+              <Label for="merge-default-mode" class="text-xs">Takes part</Label>
+              <Select.Root
+                type="single"
+                value={mergeForm.defaultMode}
+                onValueChange={(v) => mergeForm && (mergeForm.defaultMode = v ?? mergeForm.defaultMode)}
+              >
+                <Select.Trigger id="merge-default-mode" class="w-full"
+                  >{modeLabel(mergeForm.defaultMode)}</Select.Trigger
+                >
+                <Select.Content>
+                  {#each sourceModes as mode (mode)}
+                    <Select.Item value={mode}>{modeLabel(mode)}</Select.Item>
+                  {/each}
+                </Select.Content>
+              </Select.Root>
+              {#if showsWeights}
+                <Label for="merge-default-weight" class="text-xs">Weight</Label>
+                <Input id="merge-default-weight" type="number" min="0" bind:value={mergeForm.defaultWeight} />
+              {/if}
+              {#if showsTrust}
+                <Label for="merge-default-trust" class="text-xs">Trust rank (lower wins)</Label>
+                <Input id="merge-default-trust" type="number" min="0" bind:value={mergeForm.defaultTrustRank} />
+              {/if}
+            </div>
+          </div>
+
+          {#if mergeRegions.some((r) => r.configurable && r.id !== localRegionId)}
+            <div class="flex flex-col gap-2">
+              <p class="text-sm font-medium">Per region</p>
+              <p class="text-muted-foreground text-xs">
+                Leave a field empty to inherit from above. A weight of 0 is not empty: it means the region is counted
+                and carries no weight.
+              </p>
+              {#each mergeRegions.filter((r) => r.configurable && r.id !== localRegionId) as region (region.id)}
+                <div class="flex flex-wrap items-end gap-2 rounded-md border p-2">
+                  <div class="min-w-32 flex-1">
+                    <p class="text-sm font-medium break-all">{region.name}</p>
+                    <p class="text-muted-foreground text-xs break-all">{region.code}</p>
+                  </div>
+                  <div class="flex flex-col gap-1">
+                    <Label for={`region-mode-${region.id}`} class="text-xs">Takes part</Label>
+                    <Select.Root
+                      type="single"
+                      value={region.default_mode ?? ""}
+                      onValueChange={(v) => (region.default_mode = v ? v : null)}
+                    >
+                      <Select.Trigger id={`region-mode-${region.id}`} class="w-36">
+                        {region.default_mode ? modeLabel(region.default_mode) : "Inherited"}
+                      </Select.Trigger>
+                      <Select.Content>
+                        <Select.Item value="">Inherited</Select.Item>
+                        {#each sourceModes as mode (mode)}
+                          <Select.Item value={mode}>{modeLabel(mode)}</Select.Item>
+                        {/each}
+                      </Select.Content>
+                    </Select.Root>
+                  </div>
+                  <div class="flex flex-col gap-1">
+                    <Label for={`region-weight-${region.id}`} class="text-xs">Weight</Label>
+                    <Input
+                      id={`region-weight-${region.id}`}
+                      type="number"
+                      min="0"
+                      class="w-24"
+                      placeholder="inherit"
+                      bind:value={region.default_weight}
+                    />
+                  </div>
+                  <div class="flex flex-col gap-1">
+                    <Label for={`region-trust-${region.id}`} class="text-xs">Trust</Label>
+                    <Input
+                      id={`region-trust-${region.id}`}
+                      type="number"
+                      min="0"
+                      class="w-24"
+                      placeholder="inherit"
+                      bind:value={region.default_trust_rank}
+                    />
+                  </div>
+                  <Button variant="outline" size="sm" disabled={busy} onclick={() => saveRegionDefaults(region)}>
+                    Save
+                  </Button>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </Card.Content>
+        <Card.Footer class="flex flex-wrap justify-end gap-2">
+          {#if mergeDirty}
+            <Button variant="ghost" disabled={busy} onclick={resetMergePolicy}>Discard</Button>
+          {/if}
+          <Button disabled={busy || !mergeDirty} onclick={saveMergePolicy}>Save policy</Button>
+        </Card.Footer>
+      </Card.Root>
+    {/if}
+
     {#each agents as agent (agent.id)}
       <Card.Root>
         <Card.Header>
@@ -424,7 +795,17 @@
                 <span class="font-medium">{assignment.monitor_tag}</span>
                 <span class="text-muted-foreground text-xs">&middot; {assignment.mode.toLowerCase()}</span>
               </div>
-              <Button variant="outline" size="sm" disabled={busy} onclick={() => unassign(assignment)}>Remove</Button>
+              <div class="flex shrink-0 gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busy}
+                  onclick={() => openMonitorPolicy(assignment.monitor_tag)}
+                >
+                  Weighting
+                </Button>
+                <Button variant="outline" size="sm" disabled={busy} onclick={() => unassign(assignment)}>Remove</Button>
+              </div>
             </div>
           {:else}
             <p class="text-muted-foreground text-sm">
@@ -621,6 +1002,129 @@
     <Dialog.Footer>
       <Button variant="outline" disabled={busy} onclick={() => (confirmingDelete = null)}>Cancel</Button>
       <Button disabled={busy} onclick={confirmDelete}>Remove</Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
+
+<!--
+  The per-monitor override.
+
+  Long monitor tags are wrapped with `break-all` rather than truncated. A single
+  `truncate` child inside `Dialog.Content`, which is a grid, sizes its track to
+  the whole string and pushes the panel past its own max width - which in turn
+  pushes the footer outside the panel and onto the overlay, where every click is
+  swallowed. It renders almost correctly, which is what makes it expensive.
+-->
+<Dialog.Root open={policyMonitor !== null} onOpenChange={(open) => (policyMonitor = open ? policyMonitor : null)}>
+  <Dialog.Content class="max-h-[85vh] overflow-y-auto">
+    <Dialog.Header>
+      <Dialog.Title>Weighting for this monitor</Dialog.Title>
+      <Dialog.Description class="break-all">
+        {policyMonitor}
+      </Dialog.Description>
+    </Dialog.Header>
+
+    {#if policyLoading}
+      <div class="flex justify-center p-6"><Spinner /></div>
+    {:else if policyOverride}
+      <div class="flex flex-col gap-4">
+        <div class="flex flex-col gap-2">
+          <Label for="monitor-policy">Policy</Label>
+          <Select.Root
+            type="single"
+            value={policyOverride.policy ?? ""}
+            onValueChange={(v) => policyOverride && (policyOverride.policy = v ? v : null)}
+          >
+            <Select.Trigger id="monitor-policy" class="w-full">
+              {policyOverride.policy
+                ? policyLabel(policyOverride.policy)
+                : `Inherited (${policyLabel(policyEffectivePolicy)})`}
+            </Select.Trigger>
+            <Select.Content>
+              <Select.Item value="">Inherited ({policyLabel(policyEffectivePolicy)})</Select.Item>
+              {#each mergePolicies as policy (policy)}
+                <Select.Item value={policy}>{policyLabel(policy)}</Select.Item>
+              {/each}
+            </Select.Content>
+          </Select.Root>
+        </div>
+
+        {#if (policyOverride.policy ?? policyEffectivePolicy) === "QUORUM_DOWN"}
+          <div class="flex flex-col gap-2">
+            <Label for="monitor-quorum">Sources that must agree before down</Label>
+            <Input
+              id="monitor-quorum"
+              type="number"
+              min="1"
+              class="max-w-40"
+              placeholder="inherit"
+              bind:value={policyOverride.quorum_threshold}
+            />
+          </div>
+        {/if}
+
+        <div class="flex flex-col gap-2">
+          <p class="text-sm font-medium">Sources</p>
+          <p class="text-muted-foreground text-xs">
+            Empty means inherited, and the inherited value is shown beside each field. To trust a probe over the local
+            check, give it a <em>lower</em> trust rank than the local check has.
+          </p>
+          {#each policyEffective as source (source.region_id)}
+            {@const row = overrideFor(source.region_id)}
+            <div class="flex flex-wrap items-end gap-2 rounded-md border p-2">
+              <div class="min-w-32 flex-1">
+                <p class="text-sm font-medium break-all">{source.region_name}</p>
+                <p class="text-muted-foreground text-xs">
+                  now: {modeLabel(source.mode)}, weight {source.weight}, trust {source.trust_rank}
+                </p>
+              </div>
+              {#if row}
+                <div class="flex flex-col gap-1">
+                  <Label for={`src-mode-${source.region_id}`} class="text-xs">Takes part</Label>
+                  <Select.Root type="single" value={row.mode ?? ""} onValueChange={(v) => (row.mode = v ? v : null)}>
+                    <Select.Trigger id={`src-mode-${source.region_id}`} class="w-32">
+                      {row.mode ? modeLabel(row.mode) : "Inherited"}
+                    </Select.Trigger>
+                    <Select.Content>
+                      <Select.Item value="">Inherited</Select.Item>
+                      {#each sourceModes as mode (mode)}
+                        <Select.Item value={mode}>{modeLabel(mode)}</Select.Item>
+                      {/each}
+                    </Select.Content>
+                  </Select.Root>
+                </div>
+                <div class="flex flex-col gap-1">
+                  <Label for={`src-weight-${source.region_id}`} class="text-xs">Weight</Label>
+                  <Input
+                    id={`src-weight-${source.region_id}`}
+                    type="number"
+                    min="0"
+                    class="w-20"
+                    placeholder="inherit"
+                    bind:value={row.weight}
+                  />
+                </div>
+                <div class="flex flex-col gap-1">
+                  <Label for={`src-trust-${source.region_id}`} class="text-xs">Trust</Label>
+                  <Input
+                    id={`src-trust-${source.region_id}`}
+                    type="number"
+                    min="0"
+                    class="w-20"
+                    placeholder="inherit"
+                    bind:value={row.trust_rank}
+                  />
+                </div>
+              {/if}
+            </div>
+          {/each}
+        </div>
+      </div>
+    {/if}
+
+    <Dialog.Footer class="gap-2 sm:justify-end">
+      <Button variant="outline" disabled={busy} onclick={() => (policyMonitor = null)}>Cancel</Button>
+      <Button disabled={busy || policyLoading} onclick={saveMonitorPolicy}>Save</Button>
     </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

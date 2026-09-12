@@ -727,6 +727,13 @@ export const DeleteMonitorCompletelyUsingTag = async (tag: string): Promise<numb
   await db.deleteMonitorAlertConfigsByMonitorTag(tag);
   await db.deletePageMonitorsByTag(tag);
   await db.deleteMaintenanceMonitorsByTag(tag);
+  // Probes (B1c) and the merge cascade (B1d). Neither was being cleaned up:
+  // `deleteProbeAssignmentsForMonitor` shipped with B1c and nothing ever called
+  // it, so a deleted monitor left its assignment behind and the probes screen
+  // listed a row pointing at a tag that no longer existed. Recreating a monitor
+  // with the same tag would then silently inherit the dead monitor's probes.
+  await db.deleteProbeAssignmentsForMonitor(tag);
+  await db.deleteMergePoliciesForMonitor(tag);
   await removeTagFromGroupMonitors(tag);
   await DeleteMonitorCaches(tag);
   return await db.deleteMonitorsByTag(tag);

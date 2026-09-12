@@ -10,6 +10,7 @@ import monitorResponseQueue from "./monitorResponseQueue";
 import GC from "../../global-constants.js";
 import { resolveConfirmedStatus } from "../services/confirmationThreshold.js";
 import { planProbeExecution, runOnProbe, dispatchSample } from "../probes/dispatch.js";
+import { mergeObservations, LOCAL_REGION_ID, type Observation } from "../probes/merge.js";
 
 let monitorExecuteQueue: Queue | null = null;
 let worker: Worker | null = null;
@@ -127,32 +128,102 @@ const addWorker = () => {
     const serviceClient = new Service(monitor as MonitorWithType);
 
     /**
-     * B1c. Where this check actually runs.
+     * B1c/B1d. Where this check runs, and how several answers become one.
      *
-     * The plan is empty for every monitor nobody has assigned to a probe and for
-     * every type that can never be remote, which is almost all of them, so the
-     * ordinary path below is unchanged and costs one map lookup.
+     * The plan is local-only for every monitor nobody has assigned to a probe
+     * and for every type that can never be remote, which is almost all of them,
+     * so the ordinary path below is unchanged and costs one map lookup.
      *
-     *   - Agents at region >= 1 are sent the check and not waited for. Their
-     *     results reach `monitorResponseQueue` at their own region, where B1b's
-     *     gate already confines them to writing a row.
-     *   - An agent at region 0 *is* the verdict, so its result replaces what the
-     *     local service call would have returned and flows through everything
-     *     below unchanged: latency escalation, the overlays, the confirmation
-     *     threshold and the merge all still apply.
+     * With probes in play the shape is: dispatch the display-only sources and
+     * forget them, await the voting ones in parallel, run locally unless an
+     * agent holds the local slot, then merge. `mergeObservations` produces the
+     * row that is written at region 0, and every source's own answer is written
+     * at its own region so the breakdown and the rollups have something to read.
      *
-     * `runOnProbe` resolves to null for every unhappy ending - rejected, timed
-     * out, disconnected mid-check - and the local check runs in the same tick.
-     * For a status page, checking the thing yourself is the safest thing to do
-     * when the fleet is unreliable.
+     * **Local fallback survives unchanged.** `runOnProbe` resolves to null for
+     * every unhappy ending - rejected, timed out, disconnected mid-check - and if
+     * the agent holding the local slot produces nothing, the server checks
+     * locally in the same tick. For a status page, checking the thing yourself is
+     * the safest thing to do when the fleet is unreliable.
      */
     const probePlan = await planProbeExecution(monitor);
-    for (const sampleAgent of probePlan.samples) {
-      dispatchSample(sampleAgent, monitor, ts);
+    for (const sample of probePlan.displayOnly) {
+      dispatchSample(sample.connection, monitor, ts);
     }
 
-    const remoteResult = probePlan.merged ? await runOnProbe(probePlan.merged, monitor, ts) : null;
-    const exeResult = remoteResult ?? (await serviceClient.execute(ts));
+    // In parallel: N probes each bounded by the monitor's own timeout plus
+    // slack, so the tick costs one timeout rather than N of them.
+    const probeAnswers = await Promise.all(
+      probePlan.voting.map(async (source) => ({
+        regionId: source.regionId,
+        result: await runOnProbe(source.connection, monitor, ts),
+      })),
+    );
+
+    const observations: Observation[] = [];
+    let localAnswered = false;
+    for (const answer of probeAnswers) {
+      if (!answer.result) continue;
+      if (answer.regionId === LOCAL_REGION_ID) localAnswered = true;
+      observations.push({ regionId: answer.regionId, result: answer.result });
+    }
+
+    // The server checks it itself unless an agent is standing in for it and
+    // actually answered. `OFF` is the one case where nobody checks locally at
+    // all, which is what it is for: a monitor only reachable from a probe.
+    const localMode = probePlan.config.sources.get(LOCAL_REGION_ID)?.mode ?? "VOTE";
+    const localIsCovered = probePlan.localSlot !== null && localAnswered;
+    if (!localIsCovered && localMode !== "OFF") {
+      const localResult = await serviceClient.execute(ts);
+      if (localResult) observations.push({ regionId: LOCAL_REGION_ID, result: localResult });
+    }
+
+    /**
+     * The verdict.
+     *
+     * A single observation merges to itself under every policy, so an install
+     * with no probes gets exactly what `serviceClient.execute` returned, with no
+     * behaviour change and no extra row. `mergeObservations` returns null only
+     * when nothing could decide, and then there is nothing to publish for this
+     * minute - which is what happened before B1d when a probe went silent and
+     * the local check was skipped.
+     */
+    let lastKnownStatus: string | undefined;
+    if (probePlan.config.policy === "QUORUM_DOWN" && observations.length > 0) {
+      // Only QUORUM_DOWN reads it, so only QUORUM_DOWN pays for the query.
+      try {
+        lastKnownStatus = (await db.getLastKnownStatus(monitor.tag))?.status ?? undefined;
+      } catch (error) {
+        // A held status that cannot find what it is holding falls to UP inside
+        // the merge, which is the conservative reading: the quorum explicitly
+        // refused to declare DOWN.
+        console.error(`Last known status lookup failed for ${monitor.tag}:`, error);
+      }
+    }
+
+    const exeResult =
+      observations.length > 1 || probePlan.localSlot !== null || probePlan.displayOnly.length > 0
+        ? mergeObservations(observations, probePlan.config, lastKnownStatus)
+        : (observations[0]?.result ?? null);
+
+    /**
+     * Each source's own row, at its own region.
+     *
+     * Written only when the monitor is actually probed. An unprobed monitor has
+     * one observation and one row at region 0, exactly as before - which is the
+     * whole reason this is conditional: `monitoring_data` is the largest table in
+     * the schema and doubling its write volume for every install that never uses
+     * a probe would be a real cost for no benefit.
+     *
+     * `monitorResponseQueue` already gates everything except the row itself on
+     * the region (B1b), so a source row drives no cache, no alert and no status
+     * change. Only region 0 does.
+     */
+    if (probePlan.localSlot !== null || probePlan.voting.length > 0 || probePlan.displayOnly.length > 0) {
+      for (const observation of observations) {
+        monitorResponseQueue.push(monitor.tag, ts, observation.result, observation.regionId);
+      }
+    }
 
     // B5. Before `raw_status` is assigned below, deliberately: escalating the
     // *observed* status is what lets the confirmation threshold damp a latency

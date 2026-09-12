@@ -8,6 +8,15 @@ import { encode, newMessageId, type AssignMessage } from "./protocol.js";
 import { getConnection, type AssignmentOutcome, type ProbeConnection } from "./registry.js";
 import { resolveTypeDataSecrets } from "./secrets.js";
 import type { ProbeTarget } from "../db/repositories/probes.js";
+import {
+  LOCAL_REGION_ID,
+  resolveMergeConfig,
+  parseMergeDefaults,
+  DEFAULT_MERGE_DEFAULTS,
+  type MergeConfig,
+  type SourceMode,
+} from "./merge.js";
+import { GetSiteDataByKey } from "../controllers/siteDataController.js";
 
 /**
  * Handing a check to a probe, and deciding when not to (B1c).
@@ -16,22 +25,28 @@ import type { ProbeTarget } from "../db/repositories/probes.js";
  * mean, and region 0 is the merged, authoritative verdict every read in Kener
  * goes through (`db/regions.ts`).
  *
- *   - An agent at **region 0** *replaces* the local check. Its result flows
- *     through the execute worker's whole overlay, threshold and merge path
- *     exactly as a local one does, because it is the verdict, not a sample. This
- *     is what moves checking off the Kener host, and it is what
- *     `REMOTE_PREFERRED` means.
- *   - An agent at **region >= 1** *adds* a sample and nothing else. It is
- *     dispatched fire-and-forget and its result goes straight to
- *     `monitorResponseQueue` at its own region, where B1b's gate already ensures
- *     it writes a row and drives no cache, no alert and no status change.
+ * **B1d changed who decides, not what a region means.** Region 0 is still the
+ * verdict every read goes through; it is now *computed* from the sources rather
+ * than written by whichever source happened to be authoritative. So this file
+ * stopped picking a winner and started building the list of observers, and the
+ * merge in `merge.ts` decides what they add up to.
+ *
+ *   - An agent at **region >= 1** is a source at that region. Whether it is
+ *     awaited and counted, merely recorded, or not dispatched at all is its
+ *     resolved `mode` - `VOTE`, `DISPLAY_ONLY` or `OFF`.
+ *   - An agent at **region 0** is *the local check, run remotely*. That is what
+ *     B1c's region 0 already meant ("replaces the local check"), and under B1d
+ *     nothing may observe at region 0 because region 0 is the computed answer.
+ *     Its samples are therefore recorded at `LOCAL_REGION_ID` and the server does
+ *     not also check locally. Existing agents keep working with no migration and
+ *     no change in behaviour.
  *
  * **Local fallback is the point, not a detail.** For a status page the safest
- * possible failure mode is to check the thing yourself, so a region-0 agent that
- * is not connected, rejects the work, disappears mid-check or simply does not
- * answer in time all end the same way: `runOnProbe` returns null and the worker
- * runs the check locally in the same tick. Nothing is skipped because a probe
- * was having a bad minute.
+ * possible failure mode is to check the thing yourself, so a probe holding the
+ * local slot that is not connected, rejects the work, disappears mid-check or
+ * simply does not answer in time all end the same way: `runOnProbe` returns null
+ * and the worker runs the check locally in the same tick. Nothing is skipped
+ * because a probe was having a bad minute.
  *
  * **Push-based, and explicitly throwaway.** The full suite pulls, which is what
  * makes quorum and multiple Kener instances possible. Everything here that knows
@@ -52,11 +67,29 @@ const DEFAULT_ASSIGNMENT_TIMEOUT_MS = 10_000;
  */
 const REMOTE_SLACK_MS = 5_000;
 
+/** One connected agent, with the region its samples mean and the mode it observes under. */
+export interface ProbeSource {
+  connection: ProbeConnection;
+  /** `LOCAL_REGION_ID` for an agent holding the local slot; otherwise its own region. */
+  regionId: number;
+  mode: SourceMode;
+}
+
 export interface ProbePlan {
-  /** The connected region-0 agent that will replace the local check, if there is one. */
-  merged: ProbeConnection | null;
-  /** Connected agents at region >= 1, each of which gets a fire-and-forget sample. */
-  samples: ProbeConnection[];
+  /** Dispatched, awaited, and counted by the merge. */
+  voting: ProbeSource[];
+  /** Dispatched and recorded at their own region; never awaited, never counted. */
+  displayOnly: ProbeSource[];
+  /**
+   * The agent standing in for the local check, if one is connected.
+   *
+   * Held separately from `voting` because it is the one source whose failure has
+   * a fallback: if it answers with nothing, the server runs the check itself in
+   * the same tick rather than publishing a minute of silence.
+   */
+  localSlot: ProbeSource | null;
+  /** The resolved cascade. Never null, so the caller never has to decide anything. */
+  config: MergeConfig;
 }
 
 /** Whether a monitor type may be handed to a probe at all. */
@@ -72,33 +105,55 @@ function timeoutForMonitor(monitor: MonitorRecordTyped): number {
 }
 
 /**
- * Which connected agents should be given this monitor's next check.
+ * An empty plan: nothing remote, local decides, shipped defaults.
  *
- * Returns an empty plan for an ineligible type without querying, so the
+ * Built rather than shared, because a caller holding the config could mutate the
+ * `sources` map of every other monitor's plan.
+ */
+function localOnlyPlan(): ProbePlan {
+  return {
+    voting: [],
+    displayOnly: [],
+    localSlot: null,
+    config: resolveMergeConfig({
+      instance: DEFAULT_MERGE_DEFAULTS,
+      regions: [],
+      participatingRegions: [LOCAL_REGION_ID],
+    }),
+  };
+}
+
+/**
+ * Which connected agents observe this monitor's next check, and under what rules.
+ *
+ * Returns a local-only plan for an ineligible type without querying, so the
  * overwhelming majority of checks - every monitor nobody has assigned, and every
  * GROUP, HEARTBEAT and SQL monitor, which can never be remote - cost nothing.
+ * **The cascade is only read for a monitor that actually has an assignment**,
+ * which is what keeps B1d off the hot path of an install that uses no probes.
  *
- * An assignment whose agent is not currently connected is simply absent from the
- * plan. That is the fallback: the caller sees no merged agent and runs the check
- * itself, with no waiting and nothing to time out.
+ * An assignment whose agent is not currently connected is simply absent. That is
+ * the fallback: it does not participate, the merge never waits for it, and if it
+ * held the local slot the server checks locally instead.
  */
 export async function planProbeExecution(monitor: MonitorRecordTyped): Promise<ProbePlan> {
-  const empty: ProbePlan = { merged: null, samples: [] };
-  if (!isProbeEligible(monitor.monitor_type)) return empty;
+  if (!isProbeEligible(monitor.monitor_type)) return localOnlyPlan();
 
   let targets: ProbeTarget[];
   try {
     targets = await db.getProbeTargetsForMonitor(monitor.tag);
   } catch (error) {
     // A failure to read the assignment table must never stop a check running.
-    // Falling through to an empty plan means the monitor is checked locally,
+    // Falling through to a local-only plan means the monitor is checked locally,
     // which is what it did before probes existed.
     console.error(`Probe assignment lookup failed for ${monitor.tag}, checking locally:`, error);
-    return empty;
+    return localOnlyPlan();
   }
-  if (targets.length === 0) return empty;
+  if (targets.length === 0) return localOnlyPlan();
 
-  const plan: ProbePlan = { merged: null, samples: [] };
+  // Connected, capable agents, with the region each one's samples actually mean.
+  const connected: Array<{ connection: ProbeConnection; regionId: number }> = [];
+  let localSlotTaken = false;
   for (const target of targets) {
     const connection = getConnection(target.agent_id);
     if (!connection) continue;
@@ -110,16 +165,77 @@ export async function planProbeExecution(monitor: MonitorRecordTyped): Promise<P
     // which case the server's list alone decides.
     if (!agentSupports(connection, monitor.monitor_type)) continue;
 
-    if (target.region_id === MERGED_REGION_ID) {
-      // One agent per region means there can only be one of these; if a hand
-      // inserted row produced two, the first wins and the rest are ignored
-      // rather than both being awaited.
-      if (!plan.merged) plan.merged = connection;
-    } else {
-      plan.samples.push(connection);
+    // An agent configured at region 0 is B1c's "replaces the local check". Under
+    // B1d region 0 is the computed answer and nothing may observe there, so it
+    // observes at the local region instead - which is what it always meant.
+    const isLocalSlot = target.region_id === MERGED_REGION_ID;
+    if (isLocalSlot) {
+      // One agent per region means there can only be one; a hand-inserted second
+      // row is ignored rather than both being awaited.
+      if (localSlotTaken) continue;
+      localSlotTaken = true;
     }
+    connected.push({ connection, regionId: isLocalSlot ? LOCAL_REGION_ID : target.region_id });
+  }
+
+  const config = await resolveConfigFor(
+    monitor.tag,
+    // The local region participates whether or not a probe holds its slot: either
+    // the server checks locally or an agent does it on the server's behalf, and
+    // in both cases the observation is local's.
+    [LOCAL_REGION_ID, ...connected.map((c) => c.regionId)],
+  );
+
+  const plan: ProbePlan = { voting: [], displayOnly: [], localSlot: null, config };
+  for (const { connection, regionId } of connected) {
+    const mode = config.sources.get(regionId)?.mode ?? "VOTE";
+    if (mode === "OFF") continue;
+    const source: ProbeSource = { connection, regionId, mode };
+    if (regionId === LOCAL_REGION_ID) {
+      plan.localSlot = source;
+      // The local slot still votes or not like anything else; it is listed here
+      // too so the merge sees it, and separately on `localSlot` so the worker
+      // knows which failure has a fallback.
+      if (mode === "VOTE") plan.voting.push(source);
+      else plan.displayOnly.push(source);
+      continue;
+    }
+    if (mode === "VOTE") plan.voting.push(source);
+    else plan.displayOnly.push(source);
   }
   return plan;
+}
+
+/**
+ * Reads the three levels and folds them into one config.
+ *
+ * Every read is individually non-fatal. A cascade that cannot be read must
+ * degrade to the shipped defaults and let the check run, never stop a monitor
+ * being checked: the defaults reproduce pre-B1d behaviour exactly, so the worst
+ * case of a failure here is that a configured weight is ignored for a tick.
+ */
+async function resolveConfigFor(monitorTag: string, participatingRegions: number[]): Promise<MergeConfig> {
+  let instance = DEFAULT_MERGE_DEFAULTS;
+  let regions: Awaited<ReturnType<typeof db.getMergeRegions>> = [];
+  let monitorPolicy = null;
+  let monitorSources: Awaited<ReturnType<typeof db.getMonitorSourcePolicies>> = [];
+
+  try {
+    const [stored, regionRows, policyRow, sourceRows] = await Promise.all([
+      GetSiteDataByKey("probeMergePolicy"),
+      db.getMergeRegions(),
+      db.getMonitorMergePolicy(monitorTag),
+      db.getMonitorSourcePolicies(monitorTag),
+    ]);
+    instance = parseMergeDefaults(stored);
+    regions = regionRows;
+    monitorPolicy = policyRow ?? null;
+    monitorSources = sourceRows;
+  } catch (error) {
+    console.error(`Merge policy lookup failed for ${monitorTag}, using the shipped defaults:`, error);
+  }
+
+  return resolveMergeConfig({ instance, regions, monitorPolicy, monitorSources, participatingRegions });
 }
 
 function agentSupports(connection: ProbeConnection, monitorType: string): boolean {

@@ -190,6 +190,26 @@ const seedSiteData = {
     },
     reminder_buffer_hours: 1,
   },
+  // B1d. How several observations of one monitor become one published verdict.
+  // These shipped values reproduce pre-B1d behaviour exactly: with a single
+  // source, a weighted majority of one is that source.
+  probeMergePolicy: {
+    policy: "WEIGHTED_MAJORITY",
+    quorumThreshold: 2,
+    // Off by default. Turning a disagreement between regions into a publicly
+    // visible DEGRADED changes what the page says about somebody's service, and
+    // an upgrade must never start doing that on its own.
+    degradedOnDisagreement: false,
+    defaultWeight: 1,
+    defaultTrustRank: 100,
+    defaultMode: "VOTE",
+    // Lower rank than a probe's, so switching to TRUST_ORDER and configuring
+    // nothing keeps the local check authoritative rather than silently handing
+    // the verdict to whichever probe happened to connect.
+    localWeight: 1,
+    localTrustRank: 50,
+    localMode: "VOTE",
+  },
   oidcSettings: {
     enabled: false,
     provider_name: "",

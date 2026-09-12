@@ -37,6 +37,11 @@ await esbuild.build({
     // `version.ts` reads this, and without it the bundle would carry an
     // unresolved `import.meta.env` that throws on the first API check.
     "import.meta.env.PACKAGE_VERSION": JSON.stringify(pkg.version),
+    // The probe's own version, reported to Kener on hello and shown beside the
+    // agent on the probes screen. Baked in from `probe/package.json` rather
+    // than hardcoded in the source, so the version an operator reads on the
+    // screen is the version of the image they are actually running.
+    __KENER_PROBE_VERSION__: JSON.stringify(pkg.version),
   },
   plugins: [
     {

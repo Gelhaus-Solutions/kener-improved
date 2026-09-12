@@ -87,6 +87,11 @@ export const TENANT_TABLES: ReadonlySet<string> = new Set([
   "probe_agents",
   "monitor_probe_assignments",
 
+  // B1d. The merge cascade's two override levels. Both exist only for a monitor
+  // that overrides something, so they are small and usually empty.
+  "monitor_merge_policies",
+  "monitor_source_policies",
+
   // The big one. Scoped like the rest even though `monitor_tag` is globally
   // unique, because "it is safe by accident" is not a property to rely on.
   "monitoring_data",

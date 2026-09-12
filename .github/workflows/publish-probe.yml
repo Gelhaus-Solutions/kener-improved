@@ -1,0 +1,151 @@
+name: Publish probe image
+
+# The standalone probe, published as its own image.
+#
+# **Its own tag line, deliberately.** The probe is versioned independently of
+# Kener because the thing that has to agree between them is the wire protocol,
+# not the release number: `probe/src/protocol.ts` carries `v: 1` and the server
+# checks it. Tying the two together would publish an identical probe image on
+# every Kener release that never touched `probe/`, and would imply a coupling
+# that does not exist - a v1 probe works against any server that speaks v1.
+#
+# Released by pushing a `probe-v*` tag:
+#
+#     git tag probe-v1.1.0 && git push origin probe-v1.1.0
+#
+# `workflow_dispatch` builds and pushes without a tag, for testing the pipeline
+# or cutting an image from the branch head.
+
+on:
+  push:
+    tags:
+      - "probe-v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g. 1.1.0). Pushes :latest as well."
+        required: true
+        type: string
+
+env:
+  GITHUB_REGISTRY: ghcr.io
+
+concurrency:
+  group: probe-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build and push the probe image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
+
+      # The tag is the source of truth for a tag push; the input is for a manual
+      # run. Validated rather than trusted: a malformed version would publish an
+      # image nobody could find by the name they expected.
+      - name: Resolve version
+        id: version
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION="$INPUT_VERSION"
+          else
+            VERSION="${REF_NAME#probe-v}"
+          fi
+
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::'$VERSION' is not a semver version (expected probe-v1.1.0 or 1.1.0-rc.1)"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          # A pre-release publishes its version tags and must not move :latest.
+          if [[ "$VERSION" == *-* ]]; then
+            echo "latest=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "latest=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The version the probe reports to Kener and shows on the probes screen
+      # comes from `probe/package.json` unless KENER_PROBE_VERSION overrides it.
+      # If they disagree, the screen would report a version that matches no
+      # published image, which is exactly the thing an operator uses it for.
+      - name: Verify probe/package.json matches the tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          PACKAGE_VERSION=$(node -p 'require("./probe/package.json").version')
+
+          if [ "$PACKAGE_VERSION" != "$VERSION" ]; then
+            echo "::error::probe/package.json is at ${PACKAGE_VERSION}, expected ${VERSION}"
+            echo "::error::Bump it and commit before tagging, so the version the probe reports matches its image."
+            exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3.8.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3.3.0
+        with:
+          registry: ${{ env.GITHUB_REGISTRY }}
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # GHCR rejects uppercase path segments and this org's name has them. The
+      # image sits beside the Kener one rather than under it, because it is a
+      # separate artefact with a separate lifecycle.
+      - name: Compute image name
+        id: image
+        run: |
+          OWNER=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          echo "name=${GITHUB_REGISTRY}/${OWNER}/kener-probe" >> "$GITHUB_OUTPUT"
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5.6.1
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=raw,value=latest,enable=${{ steps.version.outputs.latest == 'true' }}
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=v${{ steps.version.outputs.version }}
+
+      # Context is the repository root, not `probe/`: the probe imports Kener's
+      # own service classes by relative path so that there is exactly one copy of
+      # the check logic. See probe/Dockerfile.
+      - name: Build and push
+        uses: docker/build-push-action@v6.13.0
+        with:
+          context: .
+          file: probe/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64
+          cache-from: type=gha,scope=probe
+          cache-to: type=gha,mode=max,scope=probe
+
+      - name: Summarise
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          {
+            echo "### Probe ${VERSION}"
+            echo
+            echo '```'
+            echo "docker pull ${IMAGE}:${VERSION}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

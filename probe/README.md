@@ -21,10 +21,19 @@ run.
 ## Setting one up
 
 1. In Kener, go to **Operate → Probes** and create an agent. Pick its region:
-    - **Merged verdict**: this agent replaces the local check and produces the
-      authoritative status.
-    - **Any other region**: this agent adds that region's sample alongside a
-      status Kener still computes itself.
+    - **Merged verdict**: this agent runs the local check remotely. Kener stops
+      checking these monitors from its own server and this agent's answer takes
+      local's place.
+    - **Any other region**: this agent observes as its own region, alongside the
+      local check.
+
+    Kener publishes one status per monitor per minute. When more than one source
+    reports, the **merge policy** decides what that status is: a weighted
+    majority, a trust order where the most trusted source that answered wins, or
+    a quorum that will not call something down until enough sources agree. Set it
+    on the same screen, per region and per monitor. Trust order is the one for a
+    provider that blocks datacenter ranges: rank the probe above the local check
+    and the local 403 stops deciding.
 
 2. Copy the token. It is shown once and cannot be recovered; if it is lost,
    issue a new one with the key button.
@@ -39,12 +48,21 @@ run.
 ## Running it
 
 ```bash
-docker build -f probe/Dockerfile -t kener-probe .   # from the repository root
-
 docker run -d --name kener-probe-frankfurt \
   -e KENER_PROBE_URL=ws://kener.example.com:3390 \
   -e KENER_PROBE_TOKEN=kener_probe_... \
-  kener-probe
+  ghcr.io/gelhaus-solutions/kener-probe:latest
+```
+
+The image is versioned on its own tag line, not Kener's. What has to agree
+between a probe and a server is the wire protocol, which is versioned in the
+messages themselves, so a probe works against any Kener that speaks the same
+protocol version and does not need to be upgraded alongside it.
+
+To build it yourself, from the repository root:
+
+```bash
+docker build -f probe/Dockerfile -t kener-probe .
 ```
 
 Or without Docker, from a checkout:

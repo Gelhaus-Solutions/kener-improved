@@ -4,15 +4,29 @@ import type { ProbeAgentRecord, ProbeTarget } from "../db/repositories/probes.js
 
 const fake = {
   getProbeTargetsForMonitor: vi.fn<(tag: string) => Promise<ProbeTarget[]>>(),
+  getMergeRegions: vi.fn<() => Promise<unknown[]>>(),
+  getMonitorMergePolicy: vi.fn<() => Promise<unknown>>(),
+  getMonitorSourcePolicies: vi.fn<() => Promise<unknown[]>>(),
+  GetSiteDataByKey: vi.fn<() => Promise<unknown>>(),
 };
 
 vi.mock("../db/db.js", () => ({
   default: {
     getProbeTargetsForMonitor: (tag: string) => fake.getProbeTargetsForMonitor(tag),
+    // B1d's cascade. Empty everywhere means "inherit the shipped defaults",
+    // which is what an install that has configured nothing actually has.
+    getMergeRegions: () => fake.getMergeRegions(),
+    getMonitorMergePolicy: () => fake.getMonitorMergePolicy(),
+    getMonitorSourcePolicies: () => fake.getMonitorSourcePolicies(),
   },
 }));
 
+vi.mock("../controllers/siteDataController.js", () => ({
+  GetSiteDataByKey: () => fake.GetSiteDataByKey(),
+}));
+
 const { planProbeExecution, runOnProbe, dispatchSample, isProbeEligible } = await import("./dispatch.js");
+const { LOCAL_REGION_ID } = await import("./merge.js");
 const registry = await import("./registry.js");
 
 function agent(overrides: Partial<ProbeAgentRecord> = {}): ProbeAgentRecord {
@@ -59,8 +73,12 @@ function monitor(overrides: Partial<MonitorRecordTyped> = {}): MonitorRecordType
 
 beforeEach(() => {
   registry.clear("test reset");
-  fake.getProbeTargetsForMonitor.mockReset();
+  for (const spy of Object.values(fake)) spy.mockReset();
   fake.getProbeTargetsForMonitor.mockResolvedValue([]);
+  fake.getMergeRegions.mockResolvedValue([]);
+  fake.getMonitorMergePolicy.mockResolvedValue(undefined);
+  fake.getMonitorSourcePolicies.mockResolvedValue([]);
+  fake.GetSiteDataByKey.mockResolvedValue(null);
 });
 
 describe("isProbeEligible", () => {
@@ -77,33 +95,91 @@ describe("isProbeEligible", () => {
 describe("planProbeExecution", () => {
   it("does not even look up assignments for an ineligible type", async () => {
     const plan = await planProbeExecution(monitor({ monitor_type: "GROUP" }));
-    expect(plan).toEqual({ merged: null, samples: [] });
+    expect(plan.voting).toEqual([]);
+    expect(plan.displayOnly).toEqual([]);
+    expect(plan.localSlot).toBeNull();
     // The overwhelming majority of checks take this path, so it has to cost
     // nothing. A query here would be one per monitor per minute, forever.
     expect(fake.getProbeTargetsForMonitor).not.toHaveBeenCalled();
+    // And the cascade is not read either, which is what keeps B1d off the hot
+    // path of an install that uses no probes.
+    expect(fake.GetSiteDataByKey).not.toHaveBeenCalled();
   });
 
-  it("returns an empty plan when the assigned agent is not connected", async () => {
+  it("does not read the cascade for a monitor with no assignments", async () => {
+    const plan = await planProbeExecution(monitor());
+    expect(plan.voting).toEqual([]);
+    expect(fake.GetSiteDataByKey).not.toHaveBeenCalled();
+  });
+
+  it("returns a local-only plan when the assigned agent is not connected", async () => {
     fake.getProbeTargetsForMonitor.mockResolvedValue([target()]);
-    // Nothing registered: the agent has an assignment but no live socket.
+    // The agent has an assignment but no live socket.
     const plan = await planProbeExecution(monitor());
-    expect(plan).toEqual({ merged: null, samples: [] });
+    expect(plan.voting).toEqual([]);
+    expect(plan.localSlot).toBeNull();
   });
 
-  it("puts a region 0 agent in `merged` and a region >= 1 agent in `samples`", async () => {
+  it("treats a region 0 agent as the local slot, because that is what it always meant", async () => {
     registry.register(agent({ id: 1, region_id: 0 }), vi.fn(), vi.fn());
-    registry.register(agent({ id: 2, region_id: 3 }), vi.fn(), vi.fn());
-    fake.getProbeTargetsForMonitor.mockResolvedValue([
-      target({ agent_id: 1, region_id: 0 }),
-      target({ assignment_id: 2, agent_id: 2, region_id: 3 }),
-    ]);
+    fake.getProbeTargetsForMonitor.mockResolvedValue([target({ agent_id: 1, region_id: 0 })]);
 
     const plan = await planProbeExecution(monitor());
 
-    // This split is the whole rule: region 0 is the verdict and replaces the
-    // local check, everything else is an extra sample alongside it.
-    expect(plan.merged?.agent.id).toBe(1);
-    expect(plan.samples.map((c) => c.agent.id)).toEqual([2]);
+    // Nothing may observe at region 0 under B1d: region 0 is the computed
+    // answer. B1c's "replaces the local check" is exactly the local source.
+    expect(plan.localSlot?.connection.agent.id).toBe(1);
+    expect(plan.localSlot?.regionId).toBe(LOCAL_REGION_ID);
+    expect(plan.voting.map((s) => s.regionId)).toEqual([LOCAL_REGION_ID]);
+  });
+
+  it("puts a region >= 1 agent in voting at its own region", async () => {
+    registry.register(agent({ id: 2, region_id: 3 }), vi.fn(), vi.fn());
+    fake.getProbeTargetsForMonitor.mockResolvedValue([target({ agent_id: 2, region_id: 3 })]);
+
+    const plan = await planProbeExecution(monitor());
+    expect(plan.localSlot).toBeNull();
+    expect(plan.voting.map((s) => s.regionId)).toEqual([3]);
+  });
+
+  it("routes a DISPLAY_ONLY region away from the vote", async () => {
+    registry.register(agent({ id: 2, region_id: 3 }), vi.fn(), vi.fn());
+    fake.getProbeTargetsForMonitor.mockResolvedValue([target({ agent_id: 2, region_id: 3 })]);
+    fake.getMergeRegions.mockResolvedValue([{ id: 3, default_mode: "DISPLAY_ONLY" }]);
+
+    const plan = await planProbeExecution(monitor());
+    expect(plan.voting).toEqual([]);
+    expect(plan.displayOnly.map((s) => s.regionId)).toEqual([3]);
+  });
+
+  it("does not dispatch an OFF region at all", async () => {
+    registry.register(agent({ id: 2, region_id: 3 }), vi.fn(), vi.fn());
+    fake.getProbeTargetsForMonitor.mockResolvedValue([target({ agent_id: 2, region_id: 3 })]);
+    fake.getMergeRegions.mockResolvedValue([{ id: 3, default_mode: "OFF" }]);
+
+    const plan = await planProbeExecution(monitor());
+    expect(plan.voting).toEqual([]);
+    expect(plan.displayOnly).toEqual([]);
+  });
+
+  it("lets a per-monitor override beat the region default", async () => {
+    registry.register(agent({ id: 2, region_id: 3 }), vi.fn(), vi.fn());
+    fake.getProbeTargetsForMonitor.mockResolvedValue([target({ agent_id: 2, region_id: 3 })]);
+    fake.getMergeRegions.mockResolvedValue([{ id: 3, default_mode: "OFF" }]);
+    fake.getMonitorSourcePolicies.mockResolvedValue([{ region_id: 3, mode: "VOTE" }]);
+
+    const plan = await planProbeExecution(monitor());
+    expect(plan.voting.map((s) => s.regionId)).toEqual([3]);
+  });
+
+  it("always gives the local region a config entry, probe or no probe", async () => {
+    registry.register(agent({ id: 2, region_id: 3 }), vi.fn(), vi.fn());
+    fake.getProbeTargetsForMonitor.mockResolvedValue([target({ agent_id: 2, region_id: 3 })]);
+
+    const plan = await planProbeExecution(monitor());
+    // Either the server checks locally or an agent does it on the server's
+    // behalf. Local is a source in both cases, so it always needs a config.
+    expect(plan.config.sources.get(LOCAL_REGION_ID)).toBeDefined();
   });
 
   it("skips an agent whose reported capabilities do not include the type", async () => {
@@ -115,7 +191,7 @@ describe("planProbeExecution", () => {
     // An old agent must never be handed a check it does not implement. The
     // server's list alone would have allowed this one.
     const plan = await planProbeExecution(monitor({ monitor_type: "API" }));
-    expect(plan.merged).toBeNull();
+    expect(plan.localSlot).toBeNull();
   });
 
   it("falls back to the server's list when capabilities are absent or corrupt", async () => {
@@ -125,7 +201,7 @@ describe("planProbeExecution", () => {
     fake.getProbeTargetsForMonitor.mockResolvedValue([target({ agent_id: 1, region_id: 0 })]);
 
     const plan = await planProbeExecution(monitor());
-    expect(plan.merged?.agent.id).toBe(1);
+    expect(plan.localSlot?.connection.agent.id).toBe(1);
   });
 
   it("checks locally when the assignment lookup fails", async () => {
@@ -134,7 +210,20 @@ describe("planProbeExecution", () => {
 
     // A failure to read the assignment table must never stop a check running.
     const plan = await planProbeExecution(monitor());
-    expect(plan).toEqual({ merged: null, samples: [] });
+    expect(plan.voting).toEqual([]);
+    expect(plan.localSlot).toBeNull();
+  });
+
+  it("uses the shipped defaults when the cascade itself cannot be read", async () => {
+    registry.register(agent({ id: 2, region_id: 3 }), vi.fn(), vi.fn());
+    fake.getProbeTargetsForMonitor.mockResolvedValue([target({ agent_id: 2, region_id: 3 })]);
+    fake.getMergeRegions.mockRejectedValue(new Error("database is down"));
+
+    // Degrading to the defaults keeps the monitor checked. Refusing to plan
+    // would stop it being checked at all because a settings table was unwell.
+    const plan = await planProbeExecution(monitor());
+    expect(plan.config.policy).toBe("WEIGHTED_MAJORITY");
+    expect(plan.voting.map((s) => s.regionId)).toEqual([3]);
   });
 });
 

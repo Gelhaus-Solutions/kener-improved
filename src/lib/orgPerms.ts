@@ -111,6 +111,20 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   assignMonitorToProbe: "probes.write",
   unassignMonitorFromProbe: "probes.write",
 
+  // The merge cascade (B1d). Reading what a monitor's sources resolve to is a
+  // read of the probe configuration; every level that changes how observations
+  // become a published status is a write.
+  //
+  // `setMergePolicy` writes `site_data` and could have taken `settings.write`,
+  // and deliberately does not: it decides what the public page says when
+  // vantage points disagree, which is an operational judgement about monitoring
+  // rather than a site setting. Whoever may run the fleet may decide how its
+  // answers combine, and nobody gains that by being allowed to edit the footer.
+  getMonitorMergePolicy: "probes.read",
+  setMergePolicy: "probes.write",
+  setRegionDefaults: "probes.write",
+  setMonitorMergePolicy: "probes.write",
+
   // SLO targets (F1a).
   getSlaTargets: "slo.read",
   getSlaOverview: "slo.read",

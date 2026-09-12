@@ -89,6 +89,40 @@ function IsValidLatencyThreshold(value: string): boolean {
   return true;
 }
 
+/**
+ * The instance-wide probe merge defaults (B1d).
+ *
+ * The enum fields are the point of validating at all. `parseMergeDefaults`
+ * falls back field by field, so an unrecognised policy is silently replaced by
+ * the default at read time - which means a typo here would leave the screen
+ * showing what was saved while the merge ran on something else entirely.
+ */
+function IsValidProbeMergePolicy(value: string): boolean {
+  if (!IsValidJSONString(value)) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return false;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+  const config = parsed as Record<string, unknown>;
+  if (!["TRUST_ORDER", "WEIGHTED_MAJORITY", "QUORUM_DOWN"].includes(String(config.policy))) return false;
+  for (const key of ["defaultMode", "localMode"]) {
+    if (!["VOTE", "DISPLAY_ONLY", "OFF"].includes(String(config[key]))) return false;
+  }
+  if (typeof config.degradedOnDisagreement !== "boolean") return false;
+  const quorum = Number(config.quorumThreshold);
+  if (!Number.isFinite(quorum) || quorum < 1) return false;
+  // Weights may be 0 ("this source cannot carry a vote"); ranks may be 0 too,
+  // since lower is more trusted and 0 is simply the most trusted.
+  for (const key of ["defaultWeight", "localWeight", "defaultTrustRank", "localTrustRank"]) {
+    const n = Number(config[key]);
+    if (!Number.isFinite(n) || n < 0) return false;
+  }
+  return true;
+}
+
 export const siteDataKeys: SiteDataKey[] = [
   {
     key: "title",
@@ -433,6 +467,18 @@ export const siteDataKeys: SiteDataKey[] = [
     // lets the value be written did not.
     key: "latencyThresholdDefault",
     isValid: IsValidLatencyThreshold,
+    data_type: "object",
+  },
+  {
+    // B1d's instance-wide merge defaults: how several observations of one
+    // monitor become the one status the page publishes.
+    //
+    // Validated harder than a JSON-shaped key, on the same reasoning as
+    // `eventBusConsumers` above: an unrecognised policy written by hand would
+    // fall back to the default at read time and silently decide differently
+    // from what the operator wrote. See `probes/merge.ts`.
+    key: "probeMergePolicy",
+    isValid: IsValidProbeMergePolicy,
     data_type: "object",
   },
 ];

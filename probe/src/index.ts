@@ -44,7 +44,15 @@ import type {
 
 const WS_URL = process.env.KENER_PROBE_URL;
 const TOKEN = process.env.KENER_PROBE_TOKEN;
-const AGENT_VERSION = process.env.KENER_PROBE_VERSION ?? "1.0.0";
+/**
+ * Injected from `probe/package.json` at bundle time, overridable at runtime.
+ *
+ * Declared rather than imported so the bundle carries a literal: reading the
+ * package at runtime would need a file the image deliberately does not ship.
+ */
+declare const __KENER_PROBE_VERSION__: string;
+const BUILT_VERSION = typeof __KENER_PROBE_VERSION__ === "string" ? __KENER_PROBE_VERSION__ : "0.0.0-dev";
+const AGENT_VERSION = process.env.KENER_PROBE_VERSION ?? BUILT_VERSION;
 
 /**
  * Per-check logging, off by default.
