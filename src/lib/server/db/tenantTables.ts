@@ -82,6 +82,13 @@ export const TENANT_TABLES: ReadonlySet<string> = new Set([
   "report_schedules",
   "report_artifacts",
 
+  // H1. Inbound alert webhooks. The endpoint is one org's receiver, and every
+  // alert it has ever accepted belongs to that same org: a public route resolves
+  // the org *from* the presented token, so scoping these is what stops one
+  // tenant's alerting reaching another's status page.
+  "inbound_endpoints",
+  "inbound_alerts",
+
   // B1b. Remote probes. `probe_agents` holds one org's agents; the assignment
   // side table says which monitors are checked from each region.
   "probe_agents",
