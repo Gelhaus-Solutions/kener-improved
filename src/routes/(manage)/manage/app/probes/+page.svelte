@@ -255,7 +255,7 @@
    *
    * It used to be only regions with no agent, because a second agent in a region
    * would have been refused at connect time. A region may now be served by any
-   * number of agents, which are replicas reduced to one verdict before the merge,
+   * number of agents, whose answers are reduced to one verdict before the merge,
    * so there is nothing to filter out.
    */
   let selectableRegions = $derived(regions);

@@ -213,7 +213,7 @@ export async function planProbeExecution(monitor: MonitorRecordTyped): Promise<P
    * them compete for the one row `(monitor_tag, region_id, timestamp)` allows,
    * so the region's displayed sample would be whichever agent happened to land
    * last. One agent's view is the honest version of "this is what that region
-   * saw", and a replica adds nothing to a reading that nothing counts.
+   * saw", and a second agent adds nothing to a reading that nothing counts.
    */
   const displayOnlyRegions = new Set<number>();
 

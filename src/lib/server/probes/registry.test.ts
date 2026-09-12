@@ -49,7 +49,7 @@ describe("register", () => {
     registry.register(agent({ id: 2, region_id: 3 }), vi.fn(), vi.fn());
     const second = registry.register(agent({ id: 1, region_id: 3 }), vi.fn(), vi.fn());
 
-    // Agents in a region are replicas of one vantage point, so a second one is
+    // Agents in a region answer for one vantage point, so a second one is
     // redundancy rather than a collision. Both are dispatched and the merge
     // reduces their answers to the single verdict the region reports.
     expect(second.ok).toBe(true);

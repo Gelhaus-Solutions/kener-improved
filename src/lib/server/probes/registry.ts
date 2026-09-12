@@ -14,7 +14,7 @@ import { ERROR_CODES, type ErrorCode } from "./protocol.js";
  * is what makes quorum and multi-instance possible.
  *
  * B1c's third condition, one agent per region, is gone: a region may now be
- * served by any number of agents, which are replicas reduced to that region's
+ * served by any number of agents, whose answers are reduced to that region's
  * single verdict before the merge sees them. That changed this file from a slot
  * per region to a set per region, and it changed nothing about the other two.
  *
@@ -92,7 +92,7 @@ const byAgent = new Map<number, ProbeConnection>();
  * `org:region` -> the agent ids serving it.
  *
  * A set rather than a single id: a region may be served by any number of agents,
- * which are replicas of one vantage point rather than independent voters. The
+ * which answer for one vantage point rather than as independent voters. The
  * merge collapses them to one answer per region per minute
  * (`mergeRegionAgents`), which is also the only shape `monitoring_data`'s
  * `(monitor_tag, region_id, timestamp)` key can hold.
@@ -120,9 +120,9 @@ export type RegisterResult = { ok: true; connection: ProbeConnection } | { ok: f
  * once rather than waiting for a timeout.
  *
  * **A second agent for the same region is accepted, and joins it.** Agents in a
- * region are replicas of one vantage point: they are all dispatched, and their
+ * region answer for one vantage point: they are all dispatched, and their
  * answers are reduced to the single verdict that region reports before anything
- * else sees them. So there is no slot to take and nothing to refuse, and a
+ * else sees them, weighted against each other by `probe_agents.weight` (B1g). So there is no slot to take and nothing to refuse, and a
  * region with two agents keeps answering when one of them is down, which is the
  * entire reason to deploy the second.
  */

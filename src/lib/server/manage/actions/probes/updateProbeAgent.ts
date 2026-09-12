@@ -55,7 +55,7 @@ export default {
       const regionId = Number(data.region_id);
       if (!Number.isInteger(regionId) || regionId < 0) throw new ActionError(400, "That is not a region");
       // No check that the region is free: a region may be served by any number
-      // of agents, which are replicas reduced to one verdict before the merge.
+      // of agents, whose answers are reduced to one verdict before the merge.
       patch.region_id = regionId;
     }
 
