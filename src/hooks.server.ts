@@ -3,6 +3,7 @@ import { sequence } from "@sveltejs/kit/hooks";
 import { requestIdHandle } from "$lib/server/http/requestId";
 import { manageRedirectHandle } from "$lib/server/http/manageRedirects";
 import { orgResolveHandle } from "$lib/server/http/orgResolve";
+import { isForbiddenCrossSiteForm } from "$lib/server/http/csrf";
 import { sessionOrgHandle } from "$lib/server/http/sessionOrg";
 import { eventContextHandle } from "$lib/server/http/eventContext";
 import { auditApiKeyAuthFailure, auditApiKeyScopeDenied } from "$lib/server/audit/events";
@@ -72,32 +73,52 @@ function extractPagePath(pathname: string): string | null {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-// Content types that indicate a form submission (mirrors SvelteKit's internal CSRF check scope)
-const FORM_CONTENT_TYPES = ["application/x-www-form-urlencoded", "multipart/form-data", "text/plain"];
-
-function isFormContentType(request: Request): boolean {
-  const type = request.headers.get("content-type")?.split(";", 1)[0].trim()?.toLowerCase() ?? "";
-  return FORM_CONTENT_TYPES.includes(type);
-}
-
-// Custom CSRF handler: validates Origin when present, allows requests when absent.
-// When Origin is absent (e.g. Referrer-Policy: no-referrer), security relies on
-// SameSite=Lax cookies which prevent cross-site POST from carrying auth cookies.
+/**
+ * The CSRF origin check, made custom-domain aware (G4).
+ *
+ * **This replaces SvelteKit's built-in check rather than supplementing it**, and
+ * `svelte.config.js` turns that one off. SvelteKit compares `Origin` against
+ * `url.origin`, and under `adapter-node` `url.origin` is pinned by the `ORIGIN`
+ * environment variable to one hostname for the whole process. That is right for
+ * a single-domain install and wrong here: a tenant reaching its own
+ * `org_domains` or `page_domains` hostname sends `Origin: https://status.acme.com`
+ * while `url.origin` still reads the main domain, so **every form POST on a
+ * custom domain was refused, sign-in included**. `csrf.trustedOrigins` could not
+ * fix it either - it is an exact-match list fixed when the app is built, and
+ * custom domains are rows an operator adds at runtime.
+ *
+ * So the comparison is against the host the request actually arrived on. That is
+ * the same `Host` header `orgResolveHandle` already trusts to decide *which
+ * tenant's data to serve*, so relying on it here asks less of it than the
+ * request already does a few handlers later.
+ *
+ * **The check is no weaker than the one it replaces.** A cross-site POST from
+ * `evil.com` carries `Origin: https://evil.com` and a `Host` of whichever Kener
+ * hostname it is aimed at, so the two still disagree and it is still refused. A
+ * missing or opaque `Origin` is refused too, exactly as SvelteKit refused it -
+ * the comment this replaces claimed such requests were allowed, but SvelteKit's
+ * check was rejecting them anyway, so accepting them now would be a real loosening
+ * rather than a restoration.
+ *
+ * The port comes off both sides before comparing, because a proxy terminating TLS
+ * commonly forwards `Host: example.com:3000` while the browser's `Origin` carries
+ * no port at all. `orgResolveHandle` strips it for the same reason.
+ */
 const csrfHandle: Handle = async ({ event, resolve }) => {
   const { request } = event;
 
-  if (
-    isFormContentType(request) &&
-    (request.method === "POST" || request.method === "PUT" || request.method === "PATCH" || request.method === "DELETE")
-  ) {
-    const requestOrigin = request.headers.get("origin");
-    if (requestOrigin && requestOrigin !== "null") {
-      const requestHost = new URL(requestOrigin).host;
-      const expectedHost = event.url.host;
-      if (requestHost !== expectedHost) {
-        return new Response(`Cross-site ${request.method} form submissions are forbidden`, { status: 403 });
-      }
-    }
+  const forbidden = isForbiddenCrossSiteForm({
+    method: request.method,
+    contentType: request.headers.get("content-type"),
+    origin: request.headers.get("origin"),
+    // `event.url.host` only as a fallback: HTTP/1.1 requires a Host header and
+    // Node synthesises one from `:authority` on HTTP/2, so a request with none
+    // is the case that should not arise rather than one that is supported.
+    host: request.headers.get("host") ?? event.url.host,
+  });
+
+  if (forbidden) {
+    return new Response(`Cross-site ${request.method} form submissions are forbidden`, { status: 403 });
   }
 
   return resolve(event);
