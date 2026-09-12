@@ -394,6 +394,64 @@ export function mergeObservations(
 }
 
 /**
+ * Several agents in one region, reduced to the single answer that region gives.
+ *
+ * **Why a region votes once however many agents it has.** A region is a vantage
+ * point: "what does Frankfurt see". Two agents in Frankfurt are two machines
+ * answering that one question, not two opinions the verdict should weigh
+ * separately. Letting each vote in the outer merge would mean a region's
+ * influence depended on how many boxes happened to be deployed there, so adding
+ * a second agent for redundancy would silently double that region's say and
+ * could outvote every other region. Redundancy must not be indistinguishable
+ * from authority.
+ *
+ * It is also what the storage requires. `monitoring_data` is keyed
+ * `(monitor_tag, region_id, timestamp)`, so N agents in one region writing one
+ * minute are N rows competing for one primary key, and the upsert would keep
+ * whichever landed last. One answer per region per minute is the only shape that
+ * key can hold.
+ *
+ * **The agents are peers, and the region's own policy settles them.** Each is
+ * given equal weight and a trust rank following the order the registry lists
+ * them, which is by agent id and therefore stable. Nothing here is configurable
+ * per agent, deliberately: an agent is a replica, and a replica that has to be
+ * weighted against its own siblings is really a separate region.
+ *
+ * Returns null when nothing could decide, exactly as `mergeObservations` does,
+ * so a region whose agents all went silent simply does not participate.
+ */
+export function mergeRegionAgents(
+  results: MonitoringResult[],
+  config: MergeConfig,
+  lastKnownStatus?: string,
+): MonitoringResult | null {
+  if (results.length === 0) return null;
+  // Not merely an optimisation: it keeps the single-agent path byte-for-byte
+  // what it was before multi-agent regions existed.
+  if (results.length === 1) return results[0];
+
+  const sources = new Map<number, SourceConfig>(
+    results.map((_, index) => [index, { regionId: index, mode: "VOTE" as SourceMode, weight: 1, trustRank: index }]),
+  );
+
+  // The region's policy, applied among its own agents. `sources` is replaced
+  // rather than reused: the outer map is keyed by real region id and would not
+  // match the synthetic per-agent ids used here.
+  const innerConfig: MergeConfig = {
+    policy: config.policy,
+    quorumThreshold: config.quorumThreshold,
+    degradedOnDisagreement: config.degradedOnDisagreement,
+    sources,
+  };
+
+  return mergeObservations(
+    results.map((result, index) => ({ regionId: index, result })),
+    innerConfig,
+    lastKnownStatus,
+  );
+}
+
+/**
  * The most trusted source that spoke wins, outright.
  *
  * No averaging and no blending: the point of ranking sources is that the

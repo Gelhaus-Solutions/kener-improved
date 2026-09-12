@@ -81,13 +81,17 @@ export interface ProbePlan {
   /** Dispatched and recorded at their own region; never awaited, never counted. */
   displayOnly: ProbeSource[];
   /**
-   * The agent standing in for the local check, if one is connected.
+   * The agents standing in for the local check, if any are connected.
    *
-   * Held separately from `voting` because it is the one source whose failure has
-   * a fallback: if it answers with nothing, the server runs the check itself in
+   * Held separately from `voting` because these are the sources whose failure
+   * has a fallback: if none of them answers, the server runs the check itself in
    * the same tick rather than publishing a minute of silence.
+   *
+   * A list because the local slot is a region like any other and may be served
+   * by several agents; they are reduced to one local answer before the verdict
+   * is decided.
    */
-  localSlot: ProbeSource | null;
+  localSlots: ProbeSource[];
   /** The resolved cascade. Never null, so the caller never has to decide anything. */
   config: MergeConfig;
 }
@@ -114,7 +118,7 @@ function localOnlyPlan(): ProbePlan {
   return {
     voting: [],
     displayOnly: [],
-    localSlot: null,
+    localSlots: [],
     config: resolveMergeConfig({
       instance: DEFAULT_MERGE_DEFAULTS,
       regions: [],
@@ -165,7 +169,6 @@ export async function planProbeExecution(monitor: MonitorRecordTyped): Promise<P
 
   // Connected, capable agents, with the region each one's samples actually mean.
   const connected: Array<{ connection: ProbeConnection; regionId: number }> = [];
-  let localSlotTaken = false;
   for (const target of targets) {
     const connection = getConnection(target.agent_id);
     if (!connection) continue;
@@ -188,12 +191,6 @@ export async function planProbeExecution(monitor: MonitorRecordTyped): Promise<P
     // B1d region 0 is the computed answer and nothing may observe there, so it
     // observes at the local region instead - which is what it always meant.
     const isLocalSlot = target.region_id === MERGED_REGION_ID;
-    if (isLocalSlot) {
-      // One agent per region means there can only be one; a hand-inserted second
-      // row is ignored rather than both being awaited.
-      if (localSlotTaken) continue;
-      localSlotTaken = true;
-    }
     connected.push({ connection, regionId: isLocalSlot ? LOCAL_REGION_ID : target.region_id });
   }
 
@@ -205,15 +202,15 @@ export async function planProbeExecution(monitor: MonitorRecordTyped): Promise<P
     [LOCAL_REGION_ID, ...connected.map((c) => c.regionId)],
   );
 
-  const plan: ProbePlan = { voting: [], displayOnly: [], localSlot: null, config };
+  const plan: ProbePlan = { voting: [], displayOnly: [], localSlots: [], config };
   for (const { connection, regionId } of connected) {
     const mode = config.sources.get(regionId)?.mode ?? "VOTE";
     if (mode === "OFF") continue;
     const source: ProbeSource = { connection, regionId, mode };
     if (regionId === LOCAL_REGION_ID) {
-      plan.localSlot = source;
+      plan.localSlots.push(source);
       // The local slot still votes or not like anything else; it is listed here
-      // too so the merge sees it, and separately on `localSlot` so the worker
+      // too so the merge sees it, and separately on `localSlots` so the worker
       // knows which failure has a fallback.
       if (mode === "VOTE") plan.voting.push(source);
       else plan.displayOnly.push(source);

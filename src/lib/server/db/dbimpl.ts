@@ -544,6 +544,7 @@ class DbImpl {
   getResolvedAssignments!: ProbesRepository["getResolvedAssignments"];
   applyAssignmentDiff!: ProbesRepository["applyAssignmentDiff"];
   getMergeRegions!: ProbesRepository["getMergeRegions"];
+  updateRegion!: ProbesRepository["updateRegion"];
   updateRegionDefaults!: ProbesRepository["updateRegionDefaults"];
   getMonitorMergePolicy!: ProbesRepository["getMonitorMergePolicy"];
   setMonitorMergePolicy!: ProbesRepository["setMonitorMergePolicy"];
@@ -1464,6 +1465,7 @@ class DbImpl {
     this.getResolvedAssignments = this.probes.getResolvedAssignments.bind(this.probes);
     this.applyAssignmentDiff = this.probes.applyAssignmentDiff.bind(this.probes);
     this.getMergeRegions = this.probes.getMergeRegions.bind(this.probes);
+    this.updateRegion = this.probes.updateRegion.bind(this.probes);
     this.updateRegionDefaults = this.probes.updateRegionDefaults.bind(this.probes);
     this.getMonitorMergePolicy = this.probes.getMonitorMergePolicy.bind(this.probes);
     this.setMonitorMergePolicy = this.probes.setMonitorMergePolicy.bind(this.probes);

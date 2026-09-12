@@ -1,5 +1,6 @@
 import db from "$lib/server/db/db.js";
 import { generateProbeToken, hashProbeToken, tokenHintOf } from "$lib/server/probes/auth.js";
+import { normalizeRegionCode } from "$lib/server/db/regions.js";
 import { ActionError } from "../../types.js";
 import type { ActionDefinition } from "../../types.js";
 
@@ -27,11 +28,11 @@ interface Payload {
  * screen is built around this - it shows the token in a dialog that says it will
  * not be shown again, and rotation is how a lost one is replaced.
  *
- * **One agent per region, refused here rather than at connect time.** B1c's
- * registry serves one agent per region, so a second one would authenticate and
- * then be closed with REGION_TAKEN - a probe that looks correctly configured and
- * silently never works. Refusing the form is the same rule where somebody can
- * still read the reason.
+ * **A region may have any number of agents.** They are replicas of one vantage
+ * point, not independent voters: all of them are dispatched, and their answers
+ * are reduced to the single verdict that region reports before anything else
+ * sees them. So a second agent in a region is redundancy, and adding it changes
+ * how reliably that region answers rather than how much say it has.
  */
 export default {
   action: "createProbeAgent",
@@ -43,13 +44,6 @@ export default {
     const regionId = data.new_region ? await createRegionFor(data.new_region) : Number(data.region_id);
     if (!Number.isInteger(regionId) || regionId < 0) {
       throw new ActionError(400, "A region is required");
-    }
-
-    if (await db.regionHasAgent(regionId)) {
-      throw new ActionError(
-        409,
-        "That region already has an agent. One agent per region is a limit of this phase, so retire the existing one first.",
-      );
     }
 
     const token = generateProbeToken();
@@ -77,11 +71,7 @@ async function createRegionFor(input: { code?: string; name?: string }): Promise
   const name = String(input.name ?? "").trim();
   if (!name) throw new ActionError(400, "A region name is required");
 
-  const code = String(input.code ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+  const code = normalizeRegionCode(input.code);
   if (!code) throw new ActionError(400, "A region code is required, using letters, numbers and hyphens");
 
   if (await db.regionCodeExists(code)) {

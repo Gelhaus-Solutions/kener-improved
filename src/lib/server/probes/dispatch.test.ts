@@ -97,7 +97,7 @@ describe("planProbeExecution", () => {
     const plan = await planProbeExecution(monitor({ monitor_type: "GROUP" }));
     expect(plan.voting).toEqual([]);
     expect(plan.displayOnly).toEqual([]);
-    expect(plan.localSlot).toBeNull();
+    expect(plan.localSlots).toEqual([]);
     // The overwhelming majority of checks take this path, so it has to cost
     // nothing. A query here would be one per monitor per minute, forever.
     expect(fake.getProbeTargetsForMonitor).not.toHaveBeenCalled();
@@ -117,7 +117,7 @@ describe("planProbeExecution", () => {
     // The agent has an assignment but no live socket.
     const plan = await planProbeExecution(monitor());
     expect(plan.voting).toEqual([]);
-    expect(plan.localSlot).toBeNull();
+    expect(plan.localSlots).toEqual([]);
   });
 
   it("treats a region 0 agent as the local slot, because that is what it always meant", async () => {
@@ -128,8 +128,8 @@ describe("planProbeExecution", () => {
 
     // Nothing may observe at region 0 under B1d: region 0 is the computed
     // answer. B1c's "replaces the local check" is exactly the local source.
-    expect(plan.localSlot?.connection.agent.id).toBe(1);
-    expect(plan.localSlot?.regionId).toBe(LOCAL_REGION_ID);
+    expect(plan.localSlots.map((s) => s.connection.agent.id)).toEqual([1]);
+    expect(plan.localSlots.map((s) => s.regionId)).toEqual([LOCAL_REGION_ID]);
     expect(plan.voting.map((s) => s.regionId)).toEqual([LOCAL_REGION_ID]);
   });
 
@@ -138,7 +138,7 @@ describe("planProbeExecution", () => {
     fake.getProbeTargetsForMonitor.mockResolvedValue([target({ agent_id: 2, region_id: 3 })]);
 
     const plan = await planProbeExecution(monitor());
-    expect(plan.localSlot).toBeNull();
+    expect(plan.localSlots).toEqual([]);
     expect(plan.voting.map((s) => s.regionId)).toEqual([3]);
   });
 
@@ -191,7 +191,7 @@ describe("planProbeExecution", () => {
     // An old agent must never be handed a check it does not implement. The
     // server's list alone would have allowed this one.
     const plan = await planProbeExecution(monitor({ monitor_type: "API" }));
-    expect(plan.localSlot).toBeNull();
+    expect(plan.localSlots).toEqual([]);
   });
 
   it("falls back to the server's list when capabilities are absent or corrupt", async () => {
@@ -201,7 +201,7 @@ describe("planProbeExecution", () => {
     fake.getProbeTargetsForMonitor.mockResolvedValue([target({ agent_id: 1, region_id: 0 })]);
 
     const plan = await planProbeExecution(monitor());
-    expect(plan.localSlot?.connection.agent.id).toBe(1);
+    expect(plan.localSlots.map((s) => s.connection.agent.id)).toEqual([1]);
   });
 
   it("checks locally when the assignment lookup fails", async () => {
@@ -211,7 +211,7 @@ describe("planProbeExecution", () => {
     // A failure to read the assignment table must never stop a check running.
     const plan = await planProbeExecution(monitor());
     expect(plan.voting).toEqual([]);
-    expect(plan.localSlot).toBeNull();
+    expect(plan.localSlots).toEqual([]);
   });
 
   it("uses the shipped defaults when the cascade itself cannot be read", async () => {
@@ -366,7 +366,7 @@ describe("I6: secrets are not handed to a plaintext probe", () => {
     const plan = await planProbeExecution(secretMonitor());
     expect(plan.voting).toEqual([]);
     expect(plan.displayOnly).toEqual([]);
-    expect(plan.localSlot).toBeNull();
+    expect(plan.localSlots).toEqual([]);
   });
 
   it("dispatches it when the monitor has opted out", async () => {
@@ -395,7 +395,7 @@ describe("I6: secrets are not handed to a plaintext probe", () => {
     fake.getProbeTargetsForMonitor.mockResolvedValue([target({ agent_id: 1, region_id: 0 })]);
 
     const plan = await planProbeExecution(secretMonitor());
-    expect(plan.localSlot).toBeNull();
+    expect(plan.localSlots).toEqual([]);
   });
 
   it("leaves a monitor with no secrets alone", async () => {

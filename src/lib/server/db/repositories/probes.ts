@@ -497,6 +497,34 @@ export class ProbesRepository extends BaseRepository {
     );
   }
 
+  /**
+   * Renames a region: its code, its display name, or its description.
+   *
+   * Separate from `updateRegionDefaults` rather than one wider patch, because
+   * the two carry different risk. The defaults are numbers the merge reads;
+   * `code` is an identifier under a global unique index, and a caller that can
+   * write one has no business writing the other by passing an extra key.
+   *
+   * Scoped, unlike the defaults update. That one is unscoped so an operator can
+   * configure `local` and `merged`, which carry a null org. Nothing here needs
+   * that: a renameable region always belongs to somebody, and the reserved rows
+   * are refused at the action before they reach this method. So the `org_id`
+   * predicate stays on, and one tenant cannot rename another's region even if
+   * the id is guessed.
+   */
+  async updateRegion(
+    regionId: number,
+    patch: { code?: string; name?: string; description?: string | null },
+  ): Promise<number> {
+    if (Object.keys(patch).length === 0) return 0;
+    // `regions.created_at`/`updated_at` are real timestamp columns, not the
+    // integer seconds most of this schema uses, so `nowSeconds()` would write a
+    // small integer into a timestamp here.
+    return await this.table("regions")
+      .where({ id: regionId })
+      .update({ ...patch, updated_at: this.knexUnscoped.fn.now() });
+  }
+
   async updateRegionDefaults(
     regionId: number,
     patch: { default_weight?: number | null; default_trust_rank?: number | null; default_mode?: string | null },

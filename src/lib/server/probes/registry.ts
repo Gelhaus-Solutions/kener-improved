@@ -67,8 +67,16 @@ export interface ProbeConnection {
 /** agent id -> connection. One connection per agent. */
 const byAgent = new Map<number, ProbeConnection>();
 
-/** `org:region` -> agent id. B1c allows one agent per region, and this is what enforces it. */
-const byRegion = new Map<string, number>();
+/**
+ * `org:region` -> the agent ids serving it.
+ *
+ * A set rather than a single id: a region may be served by any number of agents,
+ * which are replicas of one vantage point rather than independent voters. The
+ * merge collapses them to one answer per region per minute
+ * (`mergeRegionAgents`), which is also the only shape `monitoring_data`'s
+ * `(monitor_tag, region_id, timestamp)` key can hold.
+ */
+const byRegion = new Map<string, Set<number>>();
 
 function regionKey(orgId: number, regionId: number): string {
   return `${orgId}:${regionId}`;
@@ -90,12 +98,12 @@ export type RegisterResult = { ok: true; connection: ProbeConnection } | { ok: f
  * closed and its pending work failed, so the worker awaiting it falls back at
  * once rather than waiting for a timeout.
  *
- * **A second agent for the same region is refused.** That is not a transient
- * state to resolve in favour of the newcomer: it is two differently-named agents
- * configured for one region, which B1c does not support, and silently preferring
- * whichever reconnected last would make the fleet's behaviour depend on network
- * luck. The screen already refuses to create the second one; this is the same
- * rule where a row inserted by hand would otherwise slip past.
+ * **A second agent for the same region is accepted, and joins it.** Agents in a
+ * region are replicas of one vantage point: they are all dispatched, and their
+ * answers are reduced to the single verdict that region reports before anything
+ * else sees them. So there is no slot to take and nothing to refuse, and a
+ * region with two agents keeps answering when one of them is down, which is the
+ * entire reason to deploy the second.
  */
 export function register(
   agent: ProbeAgentRecord,
@@ -109,14 +117,6 @@ export function register(
   }
 
   const key = regionKey(agent.org_id, agent.region_id);
-  const holder = byRegion.get(key);
-  if (holder !== undefined && holder !== agent.id) {
-    return {
-      ok: false,
-      code: ERROR_CODES.REGION_TAKEN,
-      reason: `region ${agent.region_id} is already served by agent ${holder}`,
-    };
-  }
 
   const connection: ProbeConnection = {
     agent,
@@ -129,7 +129,9 @@ export function register(
   };
 
   byAgent.set(agent.id, connection);
-  byRegion.set(key, agent.id);
+  const serving = byRegion.get(key) ?? new Set<number>();
+  serving.add(agent.id);
+  byRegion.set(key, serving);
   return { ok: true, connection };
 }
 
@@ -145,10 +147,14 @@ export function unregister(agentId: number, reason: string): ProbeConnection | u
 
   byAgent.delete(agentId);
   const key = regionKey(connection.agent.org_id, connection.agent.region_id);
-  // Only if this agent is still the one holding the region. A replaced
-  // connection has already handed the slot to its successor, and deleting the
-  // key here would free a region that is in fact occupied.
-  if (byRegion.get(key) === agentId) byRegion.delete(key);
+  // Only this agent's own membership. Its siblings keep serving the region, and
+  // the key is dropped only once the last of them has gone, so an empty set
+  // never lingers to make a region look occupied.
+  const serving = byRegion.get(key);
+  if (serving) {
+    serving.delete(agentId);
+    if (serving.size === 0) byRegion.delete(key);
+  }
 
   for (const pending of connection.pending.values()) {
     pending.resolve({ kind: "gone", reason });
@@ -162,10 +168,21 @@ export function getConnection(agentId: number): ProbeConnection | undefined {
   return byAgent.get(agentId);
 }
 
-/** The connection serving one region of one org, if any. */
-export function connectionForRegion(orgId: number, regionId: number): ProbeConnection | undefined {
-  const agentId = byRegion.get(regionKey(orgId, regionId));
-  return agentId === undefined ? undefined : byAgent.get(agentId);
+/**
+ * Every connection serving one region of one org, in agent id order.
+ *
+ * Ordered rather than returned in insertion order, because the intra-region
+ * merge ranks agents by their position in this list under `TRUST_ORDER`. A list
+ * whose order depended on who reconnected last would make that policy's answer
+ * depend on network luck.
+ */
+export function connectionsForRegion(orgId: number, regionId: number): ProbeConnection[] {
+  const serving = byRegion.get(regionKey(orgId, regionId));
+  if (!serving) return [];
+  return [...serving]
+    .sort((a, b) => a - b)
+    .map((agentId) => byAgent.get(agentId))
+    .filter((connection): connection is ProbeConnection => connection !== undefined);
 }
 
 export function allConnections(): ProbeConnection[] {

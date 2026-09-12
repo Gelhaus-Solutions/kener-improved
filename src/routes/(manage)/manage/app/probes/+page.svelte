@@ -230,13 +230,34 @@
   let editName = $state("");
   let editRegion = $state<string>("");
 
+  let editingRegion = $state<Region | null>(null);
+  let editRegionName = $state("");
+  let editRegionCode = $state("");
+
+  /**
+   * The built-in regions, which are named by what they mean rather than by an
+   * operator: `merged` (0) is the computed verdict and `local` (-1) is the
+   * server's own check. The action refuses to rename either, and hiding the
+   * button is the same rule where somebody can see it before clicking.
+   */
+  function isReservedRegion(id: number): boolean {
+    return id === mergedRegionId || id === localRegionId;
+  }
+
   let assigning = $state<Region | null>(null);
   let assignTag = $state<string>("");
 
   let confirmingDelete = $state<Agent | null>(null);
 
-  /** Regions with no agent yet, which is the only thing the create form may offer. */
-  let freeRegions = $derived(regions.filter((region) => !agents.some((agent) => agent.region_id === region.id)));
+  /**
+   * Every region the create form may offer, which is now all of them.
+   *
+   * It used to be only regions with no agent, because a second agent in a region
+   * would have been refused at connect time. A region may now be served by any
+   * number of agents, which are replicas reduced to one verdict before the merge,
+   * so there is nothing to filter out.
+   */
+  let selectableRegions = $derived(regions);
 
   /** What the open assign dialog may offer, or nothing when no dialog is open. */
   let assignOptions = $derived(assigning ? assignableFor(assigning.id) : []);
@@ -259,9 +280,9 @@
     return assignments.filter((assignment) => assignment.region_id === regionId);
   }
 
-  /** The agent serving a region, or null when nothing is. */
-  function agentFor(regionId: number): Agent | null {
-    return agents.find((agent) => agent.region_id === regionId) ?? null;
+  /** The agents serving a region, in the order the fleet lists them. */
+  function agentsFor(regionId: number): Agent[] {
+    return agents.filter((agent) => agent.region_id === regionId);
   }
 
   /** A region with no rule row checks nothing, which is what the resolver believes too. */
@@ -422,10 +443,9 @@
 
   function openCreate() {
     createName = "";
-    // Default to making a new region when every existing one is taken, which is
-    // the ordinary case: Kener seeds only the merged verdict, so the second
-    // agent an operator creates always needs a region that does not exist yet.
-    createRegion = freeRegions.length > 0 ? String(freeRegions[0].id) : NEW_REGION;
+    // The first existing region, so adding a second agent to a region somebody
+    // already made is the default rather than something to go looking for.
+    createRegion = selectableRegions.length > 0 ? String(selectableRegions[0].id) : NEW_REGION;
     createRegionCode = "";
     createRegionName = "";
     agentDialog = { mode: "form" };
@@ -446,6 +466,31 @@
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not create that agent");
+    } finally {
+      busy = false;
+    }
+  }
+
+  function openRegionEdit(region: Region) {
+    editingRegion = region;
+    editRegionName = region.name;
+    editRegionCode = region.code;
+  }
+
+  async function confirmRegionEdit() {
+    if (!editingRegion) return;
+    busy = true;
+    try {
+      await call("renameRegion", {
+        region_id: editingRegion.id,
+        name: editRegionName.trim(),
+        code: editRegionCode.trim()
+      });
+      toast.success(`${editRegionName.trim()} renamed`);
+      editingRegion = null;
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not rename that region");
     } finally {
       busy = false;
     }
@@ -861,7 +906,7 @@
          and nothing is serving it" is exactly the state that used to be
          invisible, because the assignments vanished with the agent. -->
     {#each regions as region (region.id)}
-      {@const agent = agentFor(region.id)}
+      {@const regionAgents = agentsFor(region.id)}
       {@const covered = assignmentsFor(region.id)}
       {@const excluded = excludedFor(region.id)}
       <Card.Root>
@@ -869,21 +914,37 @@
           <Card.Title class="flex flex-wrap items-center gap-2">
             {regionLabel(region.id)}
             <Badge variant="outline">{covered.length} monitor{covered.length === 1 ? "" : "s"}</Badge>
-            {#if !agent}
+            {#if regionAgents.length === 0}
               <Badge variant="destructive">no agent</Badge>
+            {:else if regionAgents.length > 1}
+              <Badge variant="secondary">{regionAgents.length} agents</Badge>
+            {/if}
+            {#if !isReservedRegion(region.id)}
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={busy}
+                onclick={() => openRegionEdit(region)}
+                title="Rename this region"
+              >
+                <PencilIcon class="size-4" />
+              </Button>
             {/if}
           </Card.Title>
           <Card.Description>
-            {#if agent}
-              {region.note}
-            {:else}
+            {#if regionAgents.length === 0}
               Nothing is serving this region, so none of these monitors is being checked from it right now. The list is
               kept: create an agent here and it picks them straight back up.
+            {:else if regionAgents.length > 1}
+              {region.note} These {regionAgents.length} agents are replicas of one vantage point: all of them run each
+              check, and their answers are reduced to the single verdict this region reports.
+            {:else}
+              {region.note}
             {/if}
           </Card.Description>
         </Card.Header>
         <Card.Content class="flex flex-col gap-3">
-          {#if agent}
+          {#each regionAgents as agent (agent.id)}
             <div class="flex flex-wrap items-start justify-between gap-3 rounded-md border p-2">
               <div class="min-w-0">
                 <p class="flex flex-wrap items-center gap-2 text-sm font-medium">
@@ -924,7 +985,7 @@
                 </Button>
               </div>
             </div>
-          {/if}
+          {/each}
 
           <div class="flex flex-wrap items-center gap-2">
             <span class="text-sm font-medium">This region checks</span>
@@ -1041,7 +1102,7 @@
                   : "Pick a region"}
             </Select.Trigger>
             <Select.Content>
-              {#each freeRegions as region (region.id)}
+              {#each selectableRegions as region (region.id)}
                 <Select.Item value={String(region.id)}>{regionLabel(region.id)}</Select.Item>
               {/each}
               <Select.Item value={NEW_REGION}>A new region&hellip;</Select.Item>
@@ -1125,10 +1186,7 @@
           </Select.Trigger>
           <Select.Content>
             {#each regions as region (region.id)}
-              <Select.Item
-                value={String(region.id)}
-                disabled={region.id !== editing?.region_id && agents.some((a) => a.region_id === region.id)}
-              >
+              <Select.Item value={String(region.id)}>
                 {regionLabel(region.id)}
               </Select.Item>
             {/each}
@@ -1142,6 +1200,38 @@
     <Dialog.Footer>
       <Button variant="outline" disabled={busy} onclick={() => (editing = null)}>Cancel</Button>
       <Button disabled={busy || editName.trim().length === 0} onclick={confirmEdit}>Save</Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root open={editingRegion !== null} onOpenChange={(open) => (editingRegion = open ? editingRegion : null)}>
+  <Dialog.Content>
+    <Dialog.Header>
+      <Dialog.Title>Rename {editingRegion?.name}</Dialog.Title>
+      <Dialog.Description>
+        Renaming is safe: the region keeps its identity, so its agents, its monitor list and every sample already
+        recorded from it stay exactly where they are. Only what this screen and the public breakdown call it changes.
+      </Dialog.Description>
+    </Dialog.Header>
+    <div class="flex flex-col gap-4">
+      <div class="flex flex-col gap-2">
+        <Label for="region-edit-name">Name</Label>
+        <Input id="region-edit-name" bind:value={editRegionName} />
+      </div>
+      <div class="flex flex-col gap-2">
+        <Label for="region-edit-code">Slug</Label>
+        <Input id="region-edit-code" bind:value={editRegionCode} />
+        <p class="text-muted-foreground text-xs">
+          Letters, numbers and hyphens; anything else becomes a hyphen. It has to be unique across the instance.
+        </p>
+      </div>
+    </div>
+    <Dialog.Footer>
+      <Button variant="outline" disabled={busy} onclick={() => (editingRegion = null)}>Cancel</Button>
+      <Button
+        disabled={busy || editRegionName.trim().length === 0 || editRegionCode.trim().length === 0}
+        onclick={confirmRegionEdit}>Save</Button
+      >
     </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

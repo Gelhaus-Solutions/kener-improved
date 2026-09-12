@@ -11,7 +11,7 @@ import monitorResponseQueue from "./monitorResponseQueue";
 import GC from "../../global-constants.js";
 import { resolveConfirmedStatus } from "../services/confirmationThreshold.js";
 import { planProbeExecution, runOnProbe, dispatchSample } from "../probes/dispatch.js";
-import { mergeObservations, LOCAL_REGION_ID, type Observation } from "../probes/merge.js";
+import { mergeObservations, mergeRegionAgents, LOCAL_REGION_ID, type Observation } from "../probes/merge.js";
 
 let monitorExecuteQueue: Queue | null = null;
 let worker: Worker | null = null;
@@ -161,19 +161,39 @@ const addWorker = () => {
       })),
     );
 
-    const observations: Observation[] = [];
-    let localAnswered = false;
+    /**
+     * One answer per region, however many agents that region has.
+     *
+     * Agents in a region are replicas of a single vantage point, so they are
+     * gathered by region and reduced to the one verdict that region reports
+     * (`mergeRegionAgents`). Two things depend on it: the outer merge must not
+     * give a region extra say for having extra hardware, and `monitoring_data`
+     * is keyed `(monitor_tag, region_id, timestamp)`, so two rows for one region
+     * and one minute would collide on the primary key and the upsert would keep
+     * whichever landed last.
+     */
+    const answersByRegion = new Map<number, MonitoringResult[]>();
     for (const answer of probeAnswers) {
       if (!answer.result) continue;
-      if (answer.regionId === LOCAL_REGION_ID) localAnswered = true;
-      observations.push({ regionId: answer.regionId, result: answer.result });
+      const forRegion = answersByRegion.get(answer.regionId) ?? [];
+      forRegion.push(answer.result);
+      answersByRegion.set(answer.regionId, forRegion);
+    }
+
+    const observations: Observation[] = [];
+    let localAnswered = false;
+    for (const [regionId, results] of answersByRegion) {
+      const merged = mergeRegionAgents(results, probePlan.config);
+      if (!merged) continue;
+      if (regionId === LOCAL_REGION_ID) localAnswered = true;
+      observations.push({ regionId, result: merged });
     }
 
     // The server checks it itself unless an agent is standing in for it and
     // actually answered. `OFF` is the one case where nobody checks locally at
     // all, which is what it is for: a monitor only reachable from a probe.
     const localMode = probePlan.config.sources.get(LOCAL_REGION_ID)?.mode ?? "VOTE";
-    const localIsCovered = probePlan.localSlot !== null && localAnswered;
+    const localIsCovered = probePlan.localSlots.length > 0 && localAnswered;
     if (!localIsCovered && localMode !== "OFF") {
       const localResult = await serviceClient.execute(ts);
       if (localResult) observations.push({ regionId: LOCAL_REGION_ID, result: localResult });
@@ -203,7 +223,7 @@ const addWorker = () => {
     }
 
     const exeResult =
-      observations.length > 1 || probePlan.localSlot !== null || probePlan.displayOnly.length > 0
+      observations.length > 1 || probePlan.localSlots.length > 0 || probePlan.displayOnly.length > 0
         ? mergeObservations(observations, probePlan.config, lastKnownStatus)
         : (observations[0]?.result ?? null);
 
@@ -220,7 +240,7 @@ const addWorker = () => {
      * the region (B1b), so a source row drives no cache, no alert and no status
      * change. Only region 0 does.
      */
-    if (probePlan.localSlot !== null || probePlan.voting.length > 0 || probePlan.displayOnly.length > 0) {
+    if (probePlan.localSlots.length > 0 || probePlan.voting.length > 0 || probePlan.displayOnly.length > 0) {
       for (const observation of observations) {
         monitorResponseQueue.push(monitor.tag, ts, observation.result, observation.regionId);
       }

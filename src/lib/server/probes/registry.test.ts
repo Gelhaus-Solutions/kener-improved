@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import * as registry from "./registry.js";
-import { ERROR_CODES } from "./protocol.js";
 import type { ProbeAgentRecord } from "../db/repositories/probes.js";
 
 function agent(overrides: Partial<ProbeAgentRecord> = {}): ProbeAgentRecord {
@@ -31,7 +30,7 @@ describe("register", () => {
     const result = registry.register(agent(), vi.fn(), vi.fn());
     expect(result.ok).toBe(true);
     expect(registry.getConnection(1)).toBeDefined();
-    expect(registry.connectionForRegion(1, 3)?.agent.id).toBe(1);
+    expect(registry.connectionsForRegion(1, 3).map((c) => c.agent.id)).toEqual([1]);
   });
 
   it("keeps regions separate per org", () => {
@@ -41,18 +40,22 @@ describe("register", () => {
     // Two tenants each having "their Frankfurt probe" is the ordinary case, not
     // a collision. Keyed on the region alone, the second would be refused.
     expect(other.ok).toBe(true);
-    expect(registry.connectionForRegion(1, 3)?.agent.id).toBe(1);
-    expect(registry.connectionForRegion(2, 3)?.agent.id).toBe(2);
+    expect(registry.connectionsForRegion(1, 3).map((c) => c.agent.id)).toEqual([1]);
+    expect(registry.connectionsForRegion(2, 3).map((c) => c.agent.id)).toEqual([2]);
   });
 
-  it("refuses a second agent claiming one region", () => {
-    registry.register(agent({ id: 1, region_id: 3 }), vi.fn(), vi.fn());
-    const second = registry.register(agent({ id: 2, region_id: 3 }), vi.fn(), vi.fn());
+  it("accepts a second agent for one region, and serves both", () => {
+    registry.register(agent({ id: 2, region_id: 3 }), vi.fn(), vi.fn());
+    const second = registry.register(agent({ id: 1, region_id: 3 }), vi.fn(), vi.fn());
 
-    expect(second).toMatchObject({ ok: false, code: ERROR_CODES.REGION_TAKEN });
-    // The incumbent keeps the region. Preferring the newcomer would make the
-    // fleet's behaviour depend on which agent reconnected last.
-    expect(registry.connectionForRegion(1, 3)?.agent.id).toBe(1);
+    // Agents in a region are replicas of one vantage point, so a second one is
+    // redundancy rather than a collision. Both are dispatched and the merge
+    // reduces their answers to the single verdict the region reports.
+    expect(second.ok).toBe(true);
+    // Sorted by agent id, not by who connected first: TRUST_ORDER ranks agents
+    // by their position in this list, so the order must not depend on network
+    // luck.
+    expect(registry.connectionsForRegion(1, 3).map((c) => c.agent.id)).toEqual([1, 2]);
   });
 
   it("replaces the same agent's previous connection and closes the old socket", () => {
@@ -74,7 +77,18 @@ describe("register", () => {
 
     // The replacement path unregisters the old connection, which must not free a
     // region that is in fact still occupied by its successor.
-    expect(registry.connectionForRegion(1, 3)?.agent.id).toBe(1);
+    expect(registry.connectionsForRegion(1, 3).map((c) => c.agent.id)).toEqual([1]);
+  });
+
+  it("keeps a region served while one of its several agents goes", () => {
+    registry.register(agent({ id: 1, region_id: 3 }), vi.fn(), vi.fn());
+    registry.register(agent({ id: 2, region_id: 3 }), vi.fn(), vi.fn());
+
+    registry.unregister(1, "socket closed");
+
+    // The whole point of a second agent: losing one leaves the region answering
+    // rather than falling back to a local check.
+    expect(registry.connectionsForRegion(1, 3).map((c) => c.agent.id)).toEqual([2]);
   });
 });
 
@@ -93,7 +107,7 @@ describe("unregister", () => {
     // probe that has just gone would sit until its timeout expired.
     expect(resolve).toHaveBeenCalledWith({ kind: "gone", reason: "socket closed" });
     expect(registry.getConnection(1)).toBeUndefined();
-    expect(registry.connectionForRegion(1, 3)).toBeUndefined();
+    expect(registry.connectionsForRegion(1, 3)).toEqual([]);
   });
 
   it("is harmless for an agent that is not connected", () => {
@@ -124,7 +138,7 @@ describe("clear", () => {
     registry.clear("shutting down");
 
     expect(registry.allConnections()).toEqual([]);
-    expect(registry.connectionForRegion(1, 1)).toBeUndefined();
-    expect(registry.connectionForRegion(1, 2)).toBeUndefined();
+    expect(registry.connectionsForRegion(1, 1)).toEqual([]);
+    expect(registry.connectionsForRegion(1, 2)).toEqual([]);
   });
 });

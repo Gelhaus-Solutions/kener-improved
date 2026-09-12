@@ -126,6 +126,7 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   getMonitorMergePolicy: "probes.read",
   setMergePolicy: "probes.write",
   setRegionDefaults: "probes.write",
+  renameRegion: "probes.write",
   setMonitorMergePolicy: "probes.write",
 
   // SLO targets (F1a).

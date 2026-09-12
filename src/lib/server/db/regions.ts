@@ -49,3 +49,27 @@ export interface Region {
   description: string | null;
   is_active: boolean;
 }
+
+/**
+ * A region code, normalised into the identifier it has to be.
+ *
+ * `regions.code` carries a unique index across the whole table, so "eu-west"
+ * and "EU West " arriving as two rows would be two regions nobody meant to
+ * have. Normalising rather than merely trimming is what makes that unique index
+ * mean what an operator thinks it means.
+ *
+ * Shared by the create path and the rename path deliberately. They were separate
+ * copies of the same four replacements, which is exactly the arrangement where a
+ * code that cannot be created can still be renamed into.
+ *
+ * Returns the empty string when nothing survives normalisation; the caller
+ * decides whether that is an error, because the rename path treats an absent
+ * code as "leave it alone" rather than as a mistake.
+ */
+export function normalizeRegionCode(raw: unknown): string {
+  return String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
