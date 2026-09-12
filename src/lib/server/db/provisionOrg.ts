@@ -2,6 +2,11 @@ import type { Knex } from "knex";
 import monitorSeed from "./seedMonitorData.ts";
 import seedPagesData from "./seedPagesData.ts";
 import seedSiteData from "./seedSiteData.ts";
+// `.ts`, not `.js`, like `seedSiteData.ts` above and for the same reason: this
+// module is loaded by `knex seed:run`, which runs raw Node ESM with no TypeScript
+// resolution, so a `.js` specifier has to name a file that actually exists.
+// Getting this wrong fails only at boot, inside the seed, with ERR_MODULE_NOT_FOUND.
+import { INSTANCE_ORG_ID } from "../controllers/siteDataScope.ts";
 import subscriptionAccountCodeTemplate from "../templates/general/subscription_account_code_template.ts";
 import subscriptionUpdateTemplate from "../templates/general/subscription_update_template.ts";
 import forgotPasswordTemplate from "../templates/general/forgot_password_template.ts";
@@ -219,21 +224,18 @@ export async function provisionOrgPages(knex: Knex, orgId: number): Promise<void
  * Settings that a migration introduced rather than `seedSiteData`, and their defaults.
  *
  * Both were seeded by a one-off migration into whatever org existed at the time,
- * so a newly provisioned org would not have them - and neither code fallback is
- * the value the default org actually got:
+ * and neither code fallback is the value the default org actually got:
  *
  *   - `mfaPolicy` falls back to `local_only`, which would silently make a second
- *     factor **mandatory** for every password user in the new org. A2b changed
- *     the seeded default to `none` precisely to avoid forcing enrolment on
- *     people who had not asked for it, and a new org must inherit that decision
- *     rather than the pre-A2b one.
+ *     factor **mandatory** for every password user. A2b changed the seeded
+ *     default to `none` precisely to avoid forcing enrolment on people who had
+ *     not asked for it.
  *   - `eventBusConsumers` falls back to an empty map, so every consumer would
  *     take its built-in declared mode instead of the instance's chosen ones.
  *
- * These are arguably instance-level rather than per-org, and I3g is where that
- * gets decided properly (instance defaults with per-org overrides). Until then a
- * new org gets its own copy of the same defaults, which is the behaviour that
- * matches the default org.
+ * Both are instance-scoped as of I3g, so these now reach the instance layer
+ * rather than each org. They are kept here, beside the rest of the defaults,
+ * because the question they answer is still "what does a fresh install need".
  */
 const MIGRATION_SEEDED_DEFAULTS: Record<string, { value: string; data_type: string }> = {
   mfaPolicy: { value: "none", data_type: "string" },
@@ -244,32 +246,66 @@ const MIGRATION_SEEDED_DEFAULTS: Record<string, { value: string; data_type: stri
 };
 
 /**
- * Creates this org's settings from the shipped defaults.
+ * Fills the instance layer from the shipped defaults (I3g).
  *
- * Scoped per key rather than "is the table empty", so an org that gained a
- * setting in a later release picks up the new default without losing the values
- * it has already changed. The lookup includes `org_id`: without it a second org
- * finds the default org's row, decides the key is present and provisions
- * nothing, which is exactly what the seed did before I3b made the key per-org.
+ * **Every key, even the ones no org will ever override.** A hole in the instance
+ * layer would make "inherited" and "configured nowhere" indistinguishable: a
+ * reader finding no row could not tell whether the setting had a default at all.
+ *
+ * Only missing keys are written, so an operator's edited default survives every
+ * boot. This is also what delivers a *newly added* key to an existing install -
+ * the seeds re-run on every boot, and this is the only thing that reaches the
+ * instance layer afterwards.
+ *
+ * **Not every registered key has a default here, and that is correct.**
+ * `siteDataKeys` registers more keys than `seedSiteData` ships values for -
+ * `monitorSort`, `incidentGroupView`, the captcha and analytics providers - and
+ * those legitimately have no row until somebody sets one. The set this function
+ * writes is the set `check-org-provisioning` asserts, which is why it is
+ * exported rather than rebuilt there: a second copy of the list would be a way
+ * to be out of date about exactly the thing being checked.
  */
-export async function provisionOrgSiteData(knex: Knex, orgId: number): Promise<void> {
-  for (const [key, entry] of Object.entries(MIGRATION_SEEDED_DEFAULTS)) {
-    const existing = await knex("site_data").where({ key, org_id: orgId }).first();
-    if (existing) continue;
-    await knex("site_data").insert({ key, value: entry.value, data_type: entry.data_type, org_id: orgId });
-  }
+export function instanceSiteDataDefaults(): Record<string, { value: string; data_type: string }> {
+  const defaults: Record<string, { value: string; data_type: string }> = { ...MIGRATION_SEEDED_DEFAULTS };
 
-  const defaults = seedSiteData as Record<string, unknown>;
-  for (const key of Object.keys(defaults)) {
-    const existing = await knex("site_data").where({ key, org_id: orgId }).first();
-    if (existing) continue;
-
-    let value = defaults[key];
+  const seeded = seedSiteData as Record<string, unknown>;
+  for (const key of Object.keys(seeded)) {
+    const value = seeded[key];
     const data_type = typeof value;
-    if (data_type === "object") value = JSON.stringify(value);
-
-    await knex("site_data").insert({ key, value, data_type, org_id: orgId });
+    defaults[key] = { value: data_type === "object" ? JSON.stringify(value) : String(value), data_type };
   }
+  return defaults;
+}
+
+export async function provisionInstanceSiteData(knex: Knex): Promise<void> {
+  for (const [key, entry] of Object.entries(instanceSiteDataDefaults())) {
+    const existing = await knex("site_data").where({ key, org_id: INSTANCE_ORG_ID }).first();
+    if (existing) continue;
+    await knex("site_data").insert({
+      key,
+      value: entry.value,
+      data_type: entry.data_type,
+      org_id: INSTANCE_ORG_ID,
+    });
+  }
+}
+
+/**
+ * An org's own `site_data` rows: deliberately none (I3g).
+ *
+ * **This used to write a full copy of every key into every org, and that is
+ * exactly what I3g removes.** A copy meant the overlay could never do anything:
+ * an org's own row always won, so an instance default was invisible the moment
+ * an org existed, and changing one reached nobody. A new org now starts with no
+ * rows at all and inherits everything, storing a row only for a setting somebody
+ * actually changes.
+ *
+ * Kept as a named no-op rather than deleted from `provisionOrg`, because "a new
+ * org gets no site data, on purpose" is a fact worth being able to read at the
+ * place somebody will look for it.
+ */
+export async function provisionOrgSiteData(_knex: Knex, _orgId: number): Promise<void> {
+  // Nothing. See above.
 }
 
 /** The templates every org starts with, in the order the seed created them. */
@@ -341,7 +377,10 @@ export async function provisionableOrgIds(knex: Knex): Promise<number[]> {
   if (await knex.schema.hasTable("orgs")) {
     // Suspended orgs included deliberately: skipping them only defers the same
     // gap to whenever one is reactivated.
-    const rows: Array<{ id: number }> = await knex("orgs").select("id");
+    // The instance sentinel is not an org: it holds the defaults every real org
+    // inherits, and provisioning it with roles, monitors and pages would create
+    // a phantom tenant nothing can reach.
+    const rows: Array<{ id: number }> = await knex("orgs").whereNot({ id: INSTANCE_ORG_ID }).select("id");
     for (const row of rows) ids.add(Number(row.id));
   }
   return [...ids];

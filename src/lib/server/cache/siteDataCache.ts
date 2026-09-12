@@ -1,6 +1,7 @@
 import type { SiteDataTransformed } from "../controllers/siteDataController.js";
 import { getCache, setCache, deleteCache } from "./cache.js";
-import { currentOrgIdOrDefault } from "../db/orgContext.js";
+import { currentOrgIdOrDefault, runAcrossOrgs } from "../db/orgContext.js";
+import db from "../db/db.js";
 
 // Cache for the whole transformed site_data table.
 //
@@ -124,6 +125,36 @@ export async function InvalidateSiteDataCache(): Promise<void> {
     await withDeadline(deleteCache(siteDataCacheKey(orgId)));
   } catch (err) {
     console.warn("site data cache: invalidation failed, config may be stale until the TTL expires:", err);
+  }
+}
+
+/**
+ * Drops every organisation's entry after an instance-level write (I3g).
+ *
+ * An instance-scoped key is read by *every* org through the overlay, so
+ * invalidating the writer's own org would leave every other tenant serving the
+ * old value for up to the Redis TTL. The org list comes from the table rather
+ * than from a version counter stamped into the cache key: a counter would put a
+ * Redis read on the hot path of every page load and need its own fallback for
+ * when Redis is down, which is precisely what this cache is built to survive.
+ * Instance writes are rare and the org list is a short indexed query.
+ *
+ * Never throws, for the same reason `InvalidateSiteDataCache` does not: a failed
+ * invalidation means stale config until the TTL, which must not turn a settings
+ * save into an error response.
+ */
+export async function InvalidateInstanceSiteDataCache(): Promise<void> {
+  memo.clear();
+  try {
+    const orgIds = await runAcrossOrgs(() => db.getActiveOrgIds());
+    // The instance layer's own entry is never populated - `GetSiteDataCached`
+    // resolves through `currentOrgIdOrDefault`, which never returns 0 - so the
+    // active orgs are the whole set that can be holding a stale overlay.
+    for (const orgId of orgIds) {
+      await withDeadline(deleteCache(siteDataCacheKey(orgId)));
+    }
+  } catch (err) {
+    console.warn("site data cache: instance invalidation failed, config may be stale until the TTL expires:", err);
   }
 }
 

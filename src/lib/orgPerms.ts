@@ -239,6 +239,12 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   getInstanceOrgDetail: null,
   setInstanceOrgStatus: null,
 
+  // The instance `site_data` layer (I3g), on the same gate and for a sharper
+  // version of the same reason: these are the defaults every tenant inherits,
+  // and `mfaPolicy` and `oidcSettings` decide how people log in to all of them.
+  getInstanceDefaults: null,
+  setInstanceDefault: null,
+
   // Event bus consumers (H8c). The diff is a read of what would have been sent;
   // the mode is the switch that decides whether anything is sent at all.
   getEventConsumers: "eventbus.read",

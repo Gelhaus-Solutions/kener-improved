@@ -174,6 +174,11 @@ COPY --chown=node:node --from=builder /app/src/lib/server/db/provisionOrg.ts    
 # Imported by provisionOrg.ts for the tag/slug invariant, so it ships for the
 # same reason provisionOrg.ts does.
 COPY --chown=node:node --from=builder /app/src/lib/server/db/monitorSlug.ts      ./src/lib/server/db/monitorSlug.ts
+# I3g. provisionOrg.ts needs INSTANCE_ORG_ID to fill the instance layer, and
+# siteDataScope.ts pulls the SiteData type in with it. Without both, the boot
+# seed throws and a fresh deployment comes up with no site settings at all.
+COPY --chown=node:node --from=builder /app/src/lib/server/controllers/siteDataScope.ts ./src/lib/server/controllers/siteDataScope.ts
+COPY --chown=node:node --from=builder /app/src/lib/server/types/db.ts            ./src/lib/server/types/db.ts
 COPY --chown=node:node --from=builder /app/src/lib/server/templates/general       ./src/lib/server/templates/general
 
 # Locale JSON files (read at runtime by server-side i18n)

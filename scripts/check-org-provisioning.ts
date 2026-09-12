@@ -35,7 +35,13 @@
 import knexLib from "knex";
 import type { Knex } from "knex";
 import knexOb from "../knexfile.js";
-import { DEFAULT_ORG_ID, ROLE_PERMISSIONS, roleIdFor } from "../src/lib/server/db/provisionOrg.js";
+import {
+  DEFAULT_ORG_ID,
+  ROLE_PERMISSIONS,
+  roleIdFor,
+  instanceSiteDataDefaults,
+} from "../src/lib/server/db/provisionOrg.js";
+import { INSTANCE_ORG_ID, INSTANCE_SCOPED_KEYS } from "../src/lib/server/controllers/siteDataScope.js";
 
 let failures = 0;
 
@@ -71,7 +77,11 @@ async function main(): Promise<void> {
       process.exit(0);
     }
 
+    // The instance sentinel (I3g) holds the defaults every org inherits. It has
+    // no roles, no monitors and no templates by design, so checking it against
+    // the default org would report every one of them as a gap.
     const orgs: Array<{ id: number; slug: string; status: string }> = await knex("orgs")
+      .whereNot({ id: INSTANCE_ORG_ID })
       .select("id", "slug", "status")
       .orderBy("id");
     console.log(`  ${orgs.length} org(s)\n`);
@@ -102,7 +112,6 @@ async function main(): Promise<void> {
     for (const roleKey of roleKeys) {
       referenceGrants.set(roleKey, await grantsFor(knex, roleIdFor(DEFAULT_ORG_ID, roleKey)));
     }
-    const referenceSiteData = await keysFor(knex, "site_data", "key", DEFAULT_ORG_ID);
     const referenceTemplates = await keysFor(knex, "general_email_templates", "template_id", DEFAULT_ORG_ID);
 
     for (const org of orgs) {
@@ -122,14 +131,44 @@ async function main(): Promise<void> {
         ]);
       }
 
-      const siteData = await keysFor(knex, "site_data", "key", Number(org.id));
-      report(label, "site_data keys the default org has and this one does not", [
-        ...[...referenceSiteData].filter((key) => !siteData.has(key)),
-      ]);
-
       const templates = await keysFor(knex, "general_email_templates", "template_id", Number(org.id));
       report(label, "email templates the default org has and this one does not", [
         ...[...referenceTemplates].filter((id) => !templates.has(id)),
+      ]);
+    }
+
+    // ---- the instance layer (I3g) ------------------------------------------
+    //
+    // This replaces the old per-org `site_data` comparison, which compared every
+    // org against the default org's copy. Under I3g neither carries a copy: both
+    // inherit, and an org's rows are only its overrides. So comparing them is
+    // now trivially true and says nothing.
+    //
+    // The invariant that matters instead is that the instance layer is
+    // **complete** - it holds a row for every key the registry declares. A hole
+    // there is the real failure: the setting falls back to whatever the reading
+    // code happens to default to, silently and for every tenant at once, which
+    // is precisely the class of bug this script exists to catch.
+    // Against the defaults provisioning actually writes, not against the key
+    // registry. `siteDataKeys` registers more keys than `seedSiteData` ships
+    // values for - `monitorSort`, `incidentGroupView`, the captcha providers -
+    // and those legitimately have no row until somebody sets one. Imported from
+    // `provisionOrg` rather than restated, so the check cannot disagree with the
+    // thing it checks.
+    const instanceKeys = await keysFor(knex, "site_data", "key", INSTANCE_ORG_ID);
+    report("instance layer", "site_data defaults missing from the instance layer", [
+      ...Object.keys(instanceSiteDataDefaults()).filter((key) => !instanceKeys.has(key)),
+    ]);
+
+    // And nothing may hold an org-level row for a key the instance owns: such a
+    // row is not an override, it is a value nothing reads.
+    for (const key of INSTANCE_SCOPED_KEYS) {
+      const strays: Array<{ org_id: number }> = await knex("site_data")
+        .where({ key })
+        .whereNot({ org_id: INSTANCE_ORG_ID })
+        .select("org_id");
+      report("instance layer", `org-level rows for the instance-scoped key "${key}"`, [
+        ...strays.map((row) => `org ${row.org_id}`),
       ]);
     }
 

@@ -1,6 +1,7 @@
 import { json, type RequestHandler } from "@sveltejs/kit";
 import db from "$lib/server/db/db";
-import { InvalidateSiteDataCache } from "$lib/server/cache/siteDataCache";
+import { InvalidateSiteDataCache, InvalidateInstanceSiteDataCache } from "$lib/server/cache/siteDataCache";
+import { isInstanceScoped } from "$lib/server/controllers/siteDataScope";
 import { siteDataKeys } from "$lib/server/controllers/siteDataKeys";
 import type {
   GetSiteDataKeyResponse,
@@ -120,8 +121,11 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
   // Insert or update the value
   await db.insertOrUpdateSiteData(configKey, valueToStore, keyConfig.data_type);
   // This route validates for itself instead of going through InsertKeyValue, so
-  // it has to invalidate the site data cache for itself too.
-  await InvalidateSiteDataCache();
+  // it has to invalidate the site data cache for itself too - including I3g's
+  // instance-wide case, where the write landed in the instance layer that every
+  // org reads through.
+  if (isInstanceScoped(configKey)) await InvalidateInstanceSiteDataCache();
+  else await InvalidateSiteDataCache();
 
   const response: UpdateSiteDataKeyResponse = {
     key: configKey,

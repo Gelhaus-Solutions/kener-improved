@@ -1,5 +1,6 @@
 import { BaseRepository } from "./base.js";
 import { provisionOrg } from "../provisionOrg.js";
+import { INSTANCE_ORG_ID } from "../../controllers/siteDataScope.js";
 
 /**
  * The organisation tables themselves.
@@ -54,8 +55,18 @@ export class OrgsRepository extends BaseRepository {
     return await this.table("orgs").where({ slug }).first();
   }
 
+  /**
+   * Every real organisation.
+   *
+   * **Excludes the instance sentinel (I3g).** `orgs` carries a row at id 0 so
+   * that `site_data.org_id`'s foreign key holds for the instance layer. It is
+   * not an organisation: it has no members, no monitors and no pages, and a
+   * console that listed it would invite an operator to suspend the thing that
+   * holds every default. Filtered here rather than at each call site, because
+   * "every org" is asked in a dozen places and each one would have to remember.
+   */
   async getAllOrgs(): Promise<OrgRecord[]> {
-    return await this.table("orgs").orderBy("id", "asc");
+    return await this.table("orgs").whereNot({ id: INSTANCE_ORG_ID }).orderBy("id", "asc");
   }
 
   /**
@@ -110,7 +121,14 @@ export class OrgsRepository extends BaseRepository {
 
   /** Every active org id, for the schedulers that genuinely fan out across tenants. */
   async getActiveOrgIds(): Promise<number[]> {
-    const rows = await this.table("orgs").where({ status: "ACTIVE" }).orderBy("id", "asc").select("id");
+    // The instance sentinel's status is deliberately not ACTIVE, so it is
+    // already absent here. Named anyway: a future status change must not
+    // quietly enrol it in every scheduler fan-out.
+    const rows = await this.table("orgs")
+      .where({ status: "ACTIVE" })
+      .whereNot({ id: INSTANCE_ORG_ID })
+      .orderBy("id", "asc")
+      .select("id");
     return rows.map((r: { id: number }) => r.id);
   }
 

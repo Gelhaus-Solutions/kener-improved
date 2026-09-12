@@ -160,6 +160,14 @@ export interface MonitorAlertInsert {
 // ============ site_data table ============
 export interface SiteData {
   id: number;
+  /**
+   * The layer this row belongs to (I3b, I3g).
+   *
+   * `0` is the instance layer, which every org reads through; anything else is
+   * that org's own override. The column arrived with I3b and the type never
+   * gained it, so the overlay could not be written without a cast.
+   */
+  org_id: number;
   key: string;
   value: string;
   data_type: string;

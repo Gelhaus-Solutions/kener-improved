@@ -92,6 +92,79 @@
     }
   }
 
+  // ---- I3g. The instance `site_data` layer ------------------------------
+  //
+  // These are the defaults every organisation inherits. A tenant overriding one
+  // stores a row of its own; the rest read straight through to here, so editing
+  // a value on this screen reaches every org that has not changed it.
+  interface DefaultKey {
+    key: string;
+    data_type: string;
+    value: string | null;
+    instance_scoped: boolean;
+  }
+
+  let defaults = $state<DefaultKey[]>([]);
+  let defaultsLoading = $state(false);
+  let defaultsOpen = $state(false);
+  let editingKey = $state<DefaultKey | null>(null);
+  let editingValue = $state("");
+  let filter = $state("");
+
+  /**
+   * Instance-scoped keys first, then the rest alphabetically.
+   *
+   * The two halves do genuinely different things - one changes a setting
+   * outright, the other changes a default a tenant may override - and the ones
+   * that cannot be overridden are the ones worth finding first.
+   */
+  let visibleDefaults = $derived(
+    defaults
+      .filter((entry) => entry.key.toLowerCase().includes(filter.trim().toLowerCase()))
+      .slice()
+      .sort((a, b) => {
+        if (a.instance_scoped !== b.instance_scoped) return a.instance_scoped ? -1 : 1;
+        return a.key.localeCompare(b.key);
+      })
+  );
+
+  async function loadDefaults() {
+    defaultsLoading = true;
+    try {
+      const resp = await call("getInstanceDefaults");
+      defaults = resp?.keys ?? [];
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not load the instance defaults");
+    } finally {
+      defaultsLoading = false;
+    }
+  }
+
+  function openDefaults() {
+    defaultsOpen = !defaultsOpen;
+    if (defaultsOpen && defaults.length === 0) loadDefaults();
+  }
+
+  function editDefault(entry: DefaultKey) {
+    editingKey = entry;
+    editingValue = entry.value ?? "";
+  }
+
+  async function saveDefault() {
+    if (!editingKey) return;
+    saving = true;
+    try {
+      await call("setInstanceDefault", { key: editingKey.key, value: editingValue });
+      toast.success(`${editingKey.key} saved`);
+      editingKey = null;
+      await loadDefaults();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save that value");
+    } finally {
+      saving = false;
+    }
+  }
+
   async function openDetail(org: OrgSummary) {
     detailLoading = true;
     detail = null;
@@ -223,6 +296,78 @@
       {/if}
     </Card.Content>
   </Card.Root>
+
+  <Card.Root>
+    <Card.Header>
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div class="min-w-0">
+          <Card.Title>Instance defaults</Card.Title>
+          <Card.Description>
+            The settings every organisation starts from. An organisation that changes one keeps its own value; the rest
+            read straight through to here, so editing a value reaches every tenant that has not overridden it. A handful
+            are marked <strong>instance only</strong>: those cannot be overridden at all, because they decide how people
+            log in and how long data is kept.
+          </Card.Description>
+        </div>
+        <Button variant="outline" size="sm" onclick={openDefaults}>
+          {defaultsOpen ? "Hide" : "Show"}
+        </Button>
+      </div>
+    </Card.Header>
+    {#if defaultsOpen}
+      <Card.Content class="flex flex-col gap-3">
+        <input
+          class="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring w-full max-w-sm rounded-md border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:outline-none"
+          placeholder="Filter settings"
+          bind:value={filter}
+        />
+        {#if defaultsLoading}
+          <div class="flex justify-center p-6"><Spinner /></div>
+        {:else}
+          <div class="overflow-x-auto">
+            <Table.Root>
+              <Table.Header>
+                <Table.Row>
+                  <Table.Head>Setting</Table.Head>
+                  <Table.Head>Value</Table.Head>
+                  <Table.Head class="w-24"></Table.Head>
+                </Table.Row>
+              </Table.Header>
+              <Table.Body>
+                {#each visibleDefaults as entry (entry.key)}
+                  <Table.Row>
+                    <Table.Cell class="align-top">
+                      <div class="flex flex-col gap-1">
+                        <span class="font-medium break-all">{entry.key}</span>
+                        {#if entry.instance_scoped}
+                          <span><Badge variant="secondary">instance only</Badge></span>
+                        {/if}
+                      </div>
+                    </Table.Cell>
+                    <Table.Cell class="text-muted-foreground align-top font-mono text-xs break-all whitespace-normal">
+                      {entry.value === null ? "not set" : entry.value.slice(0, 200)}
+                      {#if entry.value && entry.value.length > 200}&hellip;{/if}
+                    </Table.Cell>
+                    <Table.Cell class="align-top">
+                      <Button variant="outline" size="sm" disabled={saving} onclick={() => editDefault(entry)}>
+                        Edit
+                      </Button>
+                    </Table.Cell>
+                  </Table.Row>
+                {:else}
+                  <Table.Row>
+                    <Table.Cell colspan={3} class="text-muted-foreground text-center text-sm">
+                      Nothing matches that filter.
+                    </Table.Cell>
+                  </Table.Row>
+                {/each}
+              </Table.Body>
+            </Table.Root>
+          </div>
+        {/if}
+      </Card.Content>
+    {/if}
+  </Card.Root>
 </div>
 
 <Dialog.Root open={detail !== null} onOpenChange={(open) => !open && (detail = null)}>
@@ -343,3 +488,46 @@
     </AlertDialog.Footer>
   </AlertDialog.Content>
 </AlertDialog.Root>
+
+<!--
+  Editing one default.
+
+  The value is a raw string because that is what `site_data` stores and what the
+  key's own validator checks - an object-typed key holds JSON text. Rendering a
+  typed form per key would mean reimplementing every validator in the browser and
+  drifting from the server's, which is the one copy that decides.
+
+  `break-all` rather than `truncate` on the key: a single truncating child inside
+  a grid dialog sizes its track to the whole string and pushes the footer out of
+  the panel onto the overlay, where clicks are swallowed.
+-->
+<Dialog.Root open={editingKey !== null} onOpenChange={(open) => !open && (editingKey = null)}>
+  <Dialog.Content class="max-h-[85vh] overflow-y-auto">
+    <Dialog.Header>
+      <Dialog.Title class="break-all">{editingKey?.key}</Dialog.Title>
+      <Dialog.Description>
+        {#if editingKey?.instance_scoped}
+          Instance only. Every organisation uses this value and none can override it.
+        {:else}
+          The default for every organisation that has not set its own. Organisations that already changed this keep
+          their value.
+        {/if}
+      </Dialog.Description>
+    </Dialog.Header>
+
+    <textarea
+      class="border-input bg-background ring-offset-background focus-visible:ring-ring min-h-40 w-full rounded-md border p-3 font-mono text-xs focus-visible:ring-2 focus-visible:outline-none"
+      bind:value={editingValue}
+      spellcheck="false"
+    ></textarea>
+    <p class="text-muted-foreground text-xs">
+      Stored as {editingKey?.data_type}. Rejected by the same validator the settings screens use, so an invalid value
+      fails here rather than reaching a tenant.
+    </p>
+
+    <Dialog.Footer class="gap-2 sm:justify-end">
+      <Button variant="outline" disabled={saving} onclick={() => (editingKey = null)}>Cancel</Button>
+      <Button disabled={saving} onclick={saveDefault}>Save</Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>

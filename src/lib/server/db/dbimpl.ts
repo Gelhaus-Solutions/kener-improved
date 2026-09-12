@@ -290,6 +290,10 @@ class DbImpl {
   getSiteDataByKey!: SiteDataRepository["getSiteDataByKey"];
   getAllSiteDataAnalytics!: SiteDataRepository["getAllSiteDataAnalytics"];
   getAllSiteDataByPrefix!: SiteDataRepository["getAllSiteDataByPrefix"];
+  getInstanceSiteData!: SiteDataRepository["getInstanceSiteData"];
+  setInstanceSiteData!: SiteDataRepository["setInstanceSiteData"];
+  clearSiteDataOverride!: SiteDataRepository["clearSiteDataOverride"];
+  getOverriddenKeys!: SiteDataRepository["getOverriddenKeys"];
 
   // ============ Incidents ============
   getIncidentsPaginated!: IncidentsRepository["getIncidentsPaginated"];
@@ -927,6 +931,10 @@ class DbImpl {
     this.getSiteDataByKey = this.siteData.getSiteDataByKey.bind(this.siteData);
     this.getAllSiteDataAnalytics = this.siteData.getAllSiteDataAnalytics.bind(this.siteData);
     this.getAllSiteDataByPrefix = this.siteData.getAllSiteDataByPrefix.bind(this.siteData);
+    this.getInstanceSiteData = this.siteData.getInstanceSiteData.bind(this.siteData);
+    this.setInstanceSiteData = this.siteData.setInstanceSiteData.bind(this.siteData);
+    this.clearSiteDataOverride = this.siteData.clearSiteDataOverride.bind(this.siteData);
+    this.getOverriddenKeys = this.siteData.getOverriddenKeys.bind(this.siteData);
   }
 
   private bindIncidentsMethods(): void {

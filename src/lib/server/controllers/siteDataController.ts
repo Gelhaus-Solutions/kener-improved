@@ -1,5 +1,6 @@
 import db from "../db/db.js";
-import { GetSiteDataCached, InvalidateSiteDataCache } from "../cache/siteDataCache.js";
+import { GetSiteDataCached, InvalidateSiteDataCache, InvalidateInstanceSiteDataCache } from "../cache/siteDataCache.js";
+import { isInstanceScoped } from "./siteDataScope.js";
 import { siteDataKeys } from "./siteDataKeys.js";
 import type { Cookies } from "@sveltejs/kit";
 import type {
@@ -84,7 +85,12 @@ export async function InsertKeyValue(key: string, value: string): Promise<number
   const result = await db.insertOrUpdateSiteData(key, value, f.data_type);
   // Not the only writer: the v4 config API validates differently and calls
   // db.insertOrUpdateSiteData directly, so it invalidates for itself.
-  await InvalidateSiteDataCache();
+  //
+  // I3g: an instance-scoped key was written into the instance layer, which every
+  // org reads through the overlay. Invalidating only this org would leave every
+  // other tenant serving the old value until the Redis TTL expired.
+  if (isInstanceScoped(key)) await InvalidateInstanceSiteDataCache();
+  else await InvalidateSiteDataCache();
   return result;
 }
 
