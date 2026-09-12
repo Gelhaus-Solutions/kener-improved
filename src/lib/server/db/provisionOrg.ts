@@ -317,6 +317,36 @@ export async function provisionOrgTemplates(knex: Knex, orgId: number): Promise<
  * and roles come first because everything else is meaningless without somebody
  * able to administer it.
  */
+/**
+ * Every org a boot-time seed should top up, always including the default.
+ *
+ * **The seeds are the only thing that reaches an org after it is created.** An
+ * org gets what `provisionOrg` gave it on the day it was made, and the three
+ * seeds that re-run on every boot are what deliver anything added afterwards -
+ * a new permission, a new `site_data` key, a new email template. All three used
+ * to top up `DEFAULT_ORG_ID` alone, which made every tenant except the first one
+ * a snapshot of whatever the product looked like on its creation date.
+ *
+ * The visible version of that was `slo.read` and `reports.read`: added after the
+ * second org existed, granted to org 1 on the next boot, granted to nobody else
+ * ever, and the SLOs and Reports entries simply absent from that tenant's
+ * sidebar because `canReachRoute` fails closed and an unreachable nav item is
+ * filtered out rather than disabled.
+ *
+ * The default org is included explicitly rather than read from the table,
+ * because a fresh install seeds before any `orgs` row exists.
+ */
+export async function provisionableOrgIds(knex: Knex): Promise<number[]> {
+  const ids = new Set<number>([DEFAULT_ORG_ID]);
+  if (await knex.schema.hasTable("orgs")) {
+    // Suspended orgs included deliberately: skipping them only defers the same
+    // gap to whenever one is reactivated.
+    const rows: Array<{ id: number }> = await knex("orgs").select("id");
+    for (const row of rows) ids.add(Number(row.id));
+  }
+  return [...ids];
+}
+
 export async function provisionOrg(knex: Knex, orgId: number): Promise<void> {
   await provisionOrgRoles(knex, orgId);
   await provisionOrgMonitors(knex, orgId);

@@ -1,7 +1,12 @@
 import type { Knex } from "knex";
 import { permissions } from "../src/lib/allPerms.ts";
 import { orgPermissions, orgPermissionIds } from "../src/lib/orgPerms.ts";
-import { provisionOrgRoles, roleIdFor, DEFAULT_ORG_ID } from "../src/lib/server/db/provisionOrg.ts";
+import {
+  provisionOrgRoles,
+  provisionableOrgIds,
+  roleIdFor,
+  DEFAULT_ORG_ID,
+} from "../src/lib/server/db/provisionOrg.ts";
 
 /**
  * Seeds the three readonly roles (admin, editor, member),
@@ -38,14 +43,40 @@ const rolePermissions: Record<string, string[]> = {
 };
 
 export async function seed(knex: Knex): Promise<void> {
-  // 1. The default org's roles and grants. Shared with org creation (I3f) so a
-  //    new org is provisioned by the same code a fresh install runs, rather than
-  //    a second copy of it that drifts.
-  await provisionOrgRoles(knex, DEFAULT_ORG_ID);
+  // 1. Every org's roles and grants. Shared with org creation (I3f) so a new org
+  //    is provisioned by the same code a fresh install runs, rather than a
+  //    second copy of it that drifts.
+  //
+  //    **Every org, not just the default one.** This used to pass
+  //    `DEFAULT_ORG_ID` alone, which made org provisioning a one-time event: an
+  //    org got the permissions that existed on the day it was created and never
+  //    another one. Every fork permission added afterwards - `slo.read`,
+  //    `reports.read`, and whatever comes next - reached org 1 on the next boot
+  //    and reached no other tenant ever. The visible symptom is a nav entry that
+  //    is simply absent for that tenant, because `canReachRoute` fails closed and
+  //    an unreachable item is filtered out of the sidebar rather than disabled.
+  //    Nothing errors, nothing logs, and the screen looks like it was never built.
+  //
+  //    Safe to run for every org on every boot, on two counts. `provisionOrgRoles`
+  //    only ever inserts: it adds the role if it is missing and adds grants that
+  //    are not already held, and deletes nothing. And these three roles carry
+  //    `readonly = 1`, which `UpdateRolePermissions` refuses to modify, so there
+  //    is no operator customisation here for a top-up to overwrite.
+  for (const orgId of await provisionableOrgIds(knex)) {
+    await provisionOrgRoles(knex, orgId);
+  }
 
-  // 2. Reconcile removals for the default org. Granting is `provisionOrgRoles`'
-  //    job; this is the half that takes a permission away again when the seed
-  //    mapping drops it.
+  // 2. Reconcile removals, for the default org only. Granting is
+  //    `provisionOrgRoles`' job; this is the half that takes a permission away
+  //    again when the seed mapping drops it.
+  //
+  //    **Deliberately not fanned out over every org the way granting now is**,
+  //    because the two are not symmetric. Adding a grant that the role is
+  //    defined to have restores an intended state; removing one destroys
+  //    whatever an instance has that this mapping does not know about, and doing
+  //    that across every tenant on every boot is a much bigger promise than
+  //    fixing a missing sidebar entry. The default org keeps the behaviour it
+  //    has always had.
   const existingPermRows: Array<{ id: string }> = await knex("permissions").select("id");
   const existingPermIds = new Set(existingPermRows.map((p) => p.id));
 
