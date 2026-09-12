@@ -18,6 +18,19 @@ reads Redis for its members' statuses, `HEARTBEAT` reads the database,
 server-side reachability. The probes screen only offers monitors it can actually
 run.
 
+## Releasing a new image
+
+Push a tag; the workflow does the rest, including bumping `probe/package.json`
+to match and committing that back to the default branch.
+
+```bash
+git tag probe-v1.0.1 && git push origin probe-v1.0.1
+```
+
+The version is baked into the bundle at build time, so the version the probes
+screen reports is always the version of the image that is running. You do not
+need to bump the file by hand first.
+
 ## Setting one up
 
 1. In Kener, go to **Operate → Probes** and create an agent. Pick its region:

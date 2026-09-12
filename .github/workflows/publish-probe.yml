@@ -39,14 +39,19 @@ jobs:
     name: Build and push the probe image
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      # `write` because the version bump is pushed back to the default branch.
+      # If that branch is protected, allow github-actions[bot] to bypass, or the
+      # final step fails after the image has already been published.
+      contents: write
       packages: write
 
     steps:
       - name: Check out
         uses: actions/checkout@v4.2.2
         with:
-          persist-credentials: false
+          # Credentials kept: the version bump below is pushed to the default
+          # branch, so the repository stops disagreeing with the image.
+          fetch-depth: 0
 
       # The tag is the source of truth for a tag push; the input is for a manual
       # run. Validated rather than trusted: a malformed version would publish an
@@ -77,21 +82,27 @@ jobs:
             echo "latest=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # The version the probe reports to Kener and shows on the probes screen
-      # comes from `probe/package.json` unless KENER_PROBE_VERSION overrides it.
-      # If they disagree, the screen would report a version that matches no
-      # published image, which is exactly the thing an operator uses it for.
-      - name: Verify probe/package.json matches the tag
+      # The version the probe reports to Kener and shows on the probes screen is
+      # baked in from `probe/package.json` at bundle time, so it has to match the
+      # tag or the screen names a version that matches no published image.
+      #
+      # **This used to refuse and tell the operator to go and bump it by hand.**
+      # That was the wrong call: `publish-release.yml` already bumps Kener's own
+      # `package.json` from the tag and commits it, so the probe demanding the
+      # opposite was an inconsistency that only ever showed up as a failed
+      # release. The tag is the intent; the file follows it.
+      - name: Set the probe version from the tag
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          PACKAGE_VERSION=$(node -p 'require("./probe/package.json").version')
-
-          if [ "$PACKAGE_VERSION" != "$VERSION" ]; then
-            echo "::error::probe/package.json is at ${PACKAGE_VERSION}, expected ${VERSION}"
-            echo "::error::Bump it and commit before tagging, so the version the probe reports matches its image."
-            exit 1
-          fi
+          node -e '
+            const fs = require("fs");
+            const path = "probe/package.json";
+            const pkg = JSON.parse(fs.readFileSync(path, "utf8"));
+            pkg.version = process.env.VERSION;
+            fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + "\n");
+          '
+          echo "probe/package.json set to $(node -p 'require("./probe/package.json").version')"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3.8.0
@@ -136,6 +147,45 @@ jobs:
           platforms: linux/amd64
           cache-from: type=gha,scope=probe
           cache-to: type=gha,mode=max,scope=probe
+
+      # After the image is published, not before: a bump commit for a release that
+      # then failed to build would leave the repository claiming a version that
+      # does not exist anywhere.
+      #
+      # The tag is deliberately **not** moved onto this commit, unlike
+      # `publish-release.yml`. That workflow moves it because the release notes,
+      # the version and the image all have to describe one commit; here the only
+      # thing that has to agree is the version string the image reports, and
+      # force-moving a tag is a good deal more dangerous than a file being one
+      # commit behind.
+      - name: Record the version on the default branch
+        if: success()
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin "$DEFAULT_BRANCH"
+          git checkout -B probe-version-bump "origin/${DEFAULT_BRANCH}"
+
+          node -e '
+            const fs = require("fs");
+            const path = "probe/package.json";
+            const pkg = JSON.parse(fs.readFileSync(path, "utf8"));
+            pkg.version = process.env.VERSION;
+            fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + "\n");
+          '
+
+          git add probe/package.json
+          if git diff --cached --quiet; then
+            echo "probe/package.json is already at ${VERSION}; nothing to record"
+            exit 0
+          fi
+
+          git commit -m "chore(probe): v${VERSION}"
+          git push origin "HEAD:${DEFAULT_BRANCH}"
 
       - name: Summarise
         env:
