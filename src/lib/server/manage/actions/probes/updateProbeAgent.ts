@@ -1,11 +1,14 @@
 import db from "$lib/server/db/db.js";
 import { ActionError } from "../../types.js";
 import type { ActionDefinition } from "../../types.js";
+import { parseWeight } from "./createProbeAgent.js";
 
 interface Payload {
   id?: number;
   name?: string;
   region_id?: number;
+  /** B1g. This agent's say among the others in its region. */
+  weight?: number;
   status?: string;
 }
 
@@ -21,10 +24,14 @@ interface Payload {
  * since a disabled agent's daemon has no way of knowing it should stop trying.
  *
  * Moving an agent into a region that already has agents is allowed, for the same
- * reason creating a second one there is: they are replicas of one vantage point,
- * all dispatched, and reduced to that region's single verdict before the merge
- * sees them. What moving an agent changes is what its results *mean*, never
- * where it runs.
+ * reason creating a second one there is: they answer for one vantage point, all
+ * dispatched, and reduced to that region's single verdict before the merge sees
+ * them. What moving an agent changes is what its results *mean*, never where it
+ * runs.
+ *
+ * B1g. `weight` changes how much that agent counts in its region's own
+ * reduction. It is not a way to give a region more say: the region still casts
+ * exactly one vote whatever its agents weigh.
  */
 export default {
   action: "updateProbeAgent",
@@ -36,7 +43,7 @@ export default {
     const agent = await db.getProbeAgentById(id);
     if (!agent) throw new ActionError(404, "That probe agent does not exist");
 
-    const patch: { name?: string; region_id?: number; status?: string } = {};
+    const patch: { name?: string; region_id?: number; weight?: number; status?: string } = {};
 
     if (data.name !== undefined) {
       const name = String(data.name).trim();
@@ -50,6 +57,10 @@ export default {
       // No check that the region is free: a region may be served by any number
       // of agents, which are replicas reduced to one verdict before the merge.
       patch.region_id = regionId;
+    }
+
+    if (data.weight !== undefined) {
+      patch.weight = parseWeight(data.weight);
     }
 
     if (data.status !== undefined) {

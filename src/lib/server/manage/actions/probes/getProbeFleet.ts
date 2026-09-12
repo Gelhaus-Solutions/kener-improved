@@ -70,6 +70,9 @@ export default {
         id: agent.id,
         name: agent.name,
         region_id: agent.region_id,
+        // B1g. This projection is an allowlist, so a column left out of it
+        // reaches the screen as undefined rather than as a missing field.
+        weight: agent.weight ?? 1,
         status: agent.status,
         connection_state: agent.connection_state,
         live: canSeeConnections ? !!getConnection(agent.id) : null,

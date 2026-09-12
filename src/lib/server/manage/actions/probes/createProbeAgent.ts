@@ -7,6 +7,8 @@ import type { ActionDefinition } from "../../types.js";
 interface Payload {
   name?: string;
   region_id?: number;
+  /** B1g. This agent's say among the others in its region. Defaults to 1. */
+  weight?: number;
   /**
    * A region to create and put this agent in, instead of picking an existing one.
    *
@@ -28,11 +30,15 @@ interface Payload {
  * screen is built around this - it shows the token in a dialog that says it will
  * not be shown again, and rotation is how a lost one is replaced.
  *
- * **A region may have any number of agents.** They are replicas of one vantage
- * point, not independent voters: all of them are dispatched, and their answers
- * are reduced to the single verdict that region reports before anything else
- * sees them. So a second agent in a region is redundancy, and adding it changes
- * how reliably that region answers rather than how much say it has.
+ * **A region may have any number of agents.** They answer for one vantage
+ * point, not as independent voters: all of them are dispatched, and their
+ * answers are reduced to the single verdict that region reports before anything
+ * else sees them. So a second agent in a region is redundancy, and adding it
+ * changes how reliably that region answers rather than how much say it has.
+ *
+ * B1g. Siblings need not count equally: `weight` settles them among themselves
+ * and stops at the region boundary, so weighting one agent up still cannot buy
+ * its region more influence over the others.
  */
 export default {
   action: "createProbeAgent",
@@ -46,10 +52,13 @@ export default {
       throw new ActionError(400, "A region is required");
     }
 
+    const weight = parseWeight(data.weight);
+
     const token = generateProbeToken();
     const id = await db.createProbeAgent({
       name,
       region_id: regionId,
+      weight,
       token_hash: hashProbeToken(token),
       token_hint: tokenHintOf(token),
     });
@@ -79,4 +88,21 @@ async function createRegionFor(input: { code?: string; name?: string }): Promise
   }
 
   return await db.createRegion({ code, name });
+}
+
+/**
+ * B1g. Validates an agent weight, defaulting to 1 when none was given.
+ *
+ * Zero is allowed and means "recorded, but carries no vote among its siblings".
+ * There is no upper bound, matching `probe_region_rules.default_weight`: a large
+ * weight is a deliberate statement that this agent decides, and capping it would
+ * silently mean something other than what the operator typed.
+ */
+export function parseWeight(value: unknown): number {
+  if (value === undefined || value === null || value === "") return 1;
+  const weight = Number(value);
+  if (!Number.isInteger(weight) || weight < 0) {
+    throw new ActionError(400, "Weight must be a whole number of 0 or more");
+  }
+  return weight;
 }

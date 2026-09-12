@@ -38,6 +38,8 @@
     id: number;
     name: string;
     region_id: number;
+    /** B1g. This agent's say among the others in its region. */
+    weight: number;
     status: string;
     connection_state: string;
     live: boolean | null;
@@ -219,12 +221,14 @@
 
   let agentDialog = $state<AgentDialog | null>(null);
   let createName = $state("");
+  let createWeight = $state("1");
   let createRegion = $state<string>("");
   let createRegionCode = $state("");
   let createRegionName = $state("");
 
   let editing = $state<Agent | null>(null);
   let editName = $state("");
+  let editWeight = $state("1");
   let editRegion = $state<string>("");
 
   let editingRegion = $state<Region | null>(null);
@@ -440,6 +444,7 @@
 
   function openCreate() {
     createName = "";
+    createWeight = "1";
     // The first existing region, so adding a second agent to a region somebody
     // already made is the default rather than something to go looking for.
     createRegion = selectableRegions.length > 0 ? String(selectableRegions[0].id) : NEW_REGION;
@@ -453,6 +458,7 @@
     try {
       const result = await call("createProbeAgent", {
         name: createName.trim(),
+        weight: Number(createWeight),
         ...(createRegion === NEW_REGION
           ? { new_region: { code: createRegionCode.trim(), name: createRegionName.trim() } }
           : { region_id: Number(createRegion) })
@@ -496,6 +502,7 @@
   function openEdit(agent: Agent) {
     editing = agent;
     editName = agent.name;
+    editWeight = String(agent.weight ?? 1);
     editRegion = String(agent.region_id);
   }
 
@@ -506,6 +513,7 @@
       await call("updateProbeAgent", {
         id: editing.id,
         name: editName.trim(),
+        weight: Number(editWeight),
         region_id: Number(editRegion)
       });
       toast.success(`${editName.trim()} updated`);
@@ -933,8 +941,9 @@
               Nothing is serving this region, so none of these monitors is being checked from it right now. The list is
               kept: create an agent here and it picks them straight back up.
             {:else if regionAgents.length > 1}
-              {region.note} These {regionAgents.length} agents are replicas of one vantage point: all of them run each
-              check, and their answers are reduced to the single verdict this region reports.
+              {region.note} These {regionAgents.length} agents all answer for one vantage point: each runs every check, and
+              their answers are reduced to the single verdict this region reports. Give one a higher weight to let it settle
+              a disagreement; the region still casts one vote either way.
             {:else}
               {region.note}
             {/if}
@@ -946,6 +955,11 @@
               <div class="min-w-0">
                 <p class="flex flex-wrap items-center gap-2 text-sm font-medium">
                   {agent.name}
+                  {#if agent.weight !== 1}
+                    <Badge variant="outline" title="Say among the other agents in this region">
+                      {agent.weight === 0 ? "no vote" : `weight ${agent.weight}`}
+                    </Badge>
+                  {/if}
                   {#if agent.status !== "ACTIVE"}
                     <Badge variant="outline">Disabled</Badge>
                   {:else if agent.live === true}
@@ -1089,6 +1103,15 @@
           <Input id="probe-name" bind:value={createName} placeholder="Frankfurt" />
         </div>
         <div class="flex flex-col gap-2">
+          <Label for="probe-weight">Weight</Label>
+          <Input id="probe-weight" type="number" min="0" step="1" bind:value={createWeight} placeholder="1" />
+          <p class="text-muted-foreground text-xs">
+            How much this agent counts against the others in its region. Leave it at 1 unless one of them should settle
+            a disagreement. 0 records its result without giving it a vote. This never changes how much say the region
+            has over other regions.
+          </p>
+        </div>
+        <div class="flex flex-col gap-2">
           <Label for="probe-region">Region</Label>
           <Select.Root type="single" value={createRegion} onValueChange={(v) => (createRegion = v ?? "")}>
             <Select.Trigger id="probe-region" class="w-full">
@@ -1174,6 +1197,14 @@
       <div class="flex flex-col gap-2">
         <Label for="probe-edit-name">Name</Label>
         <Input id="probe-edit-name" bind:value={editName} />
+      </div>
+      <div class="flex flex-col gap-2">
+        <Label for="probe-edit-weight">Weight</Label>
+        <Input id="probe-edit-weight" type="number" min="0" step="1" bind:value={editWeight} />
+        <p class="text-muted-foreground text-xs">
+          Its say against the other agents in this region. 0 records the result without giving it a vote. The region
+          still casts exactly one vote whatever its agents weigh.
+        </p>
       </div>
       <div class="flex flex-col gap-2">
         <Label for="probe-edit-region">Region</Label>
