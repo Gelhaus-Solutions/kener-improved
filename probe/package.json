@@ -1,6 +1,6 @@
 {
   "name": "kener-probe",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Standalone remote probe for Kener. Runs checks from another network and reports them back over a WebSocket.",
   "type": "module",
   "private": true,
