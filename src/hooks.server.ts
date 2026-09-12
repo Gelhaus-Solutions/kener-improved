@@ -76,8 +76,10 @@ function extractPagePath(pathname: string): string | null {
 /**
  * The CSRF origin check, made custom-domain aware (G4).
  *
- * **This replaces SvelteKit's built-in check rather than supplementing it**, and
- * `svelte.config.js` turns that one off. SvelteKit compares `Origin` against
+ * **This is the only origin check the app runs.** SvelteKit's built-in one is
+ * off, and has been since `csrf.trustedOrigins: ["*"]` was set in
+ * `svelte.config.js` - SvelteKit expands that wildcard at build time rather than
+ * matching it per request. SvelteKit compares `Origin` against
  * `url.origin`, and under `adapter-node` `url.origin` is pinned by the `ORIGIN`
  * environment variable to one hostname for the whole process. That is right for
  * a single-domain install and wrong here: a tenant reaching its own
@@ -95,10 +97,9 @@ function extractPagePath(pathname: string): string | null {
  * **The check is no weaker than the one it replaces.** A cross-site POST from
  * `evil.com` carries `Origin: https://evil.com` and a `Host` of whichever Kener
  * hostname it is aimed at, so the two still disagree and it is still refused. A
- * missing or opaque `Origin` is refused too, exactly as SvelteKit refused it -
- * the comment this replaces claimed such requests were allowed, but SvelteKit's
- * check was rejecting them anyway, so accepting them now would be a real loosening
- * rather than a restoration.
+ * A missing or opaque `Origin` is refused too. The comment this replaces claimed
+ * such requests were allowed; since this handler is the only check, "allowed"
+ * meant genuinely allowed, and refusing them is a deliberate tightening.
  *
  * The port comes off both sides before comparing, because a proxy terminating TLS
  * commonly forwards `Host: example.com:3000` while the browser's `Origin` carries

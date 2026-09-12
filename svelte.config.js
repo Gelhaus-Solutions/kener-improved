@@ -30,26 +30,26 @@ const config = {
       relative: false,
     },
     csrf: {
-      // The origin check moves to `csrfHandle` in src/hooks.server.ts. It is not
-      // removed: that handler runs before any form action resolves and applies
-      // the same rule, against the host the request actually arrived on.
+      // **SvelteKit's own origin check is already off, and this is what turns it
+      // off.** `write_server.js` computes
+      // `csrf_check_origin: checkOrigin && !trustedOrigins.includes("*")` at
+      // build time, so the wildcard is expanded there rather than matched
+      // per-request. `checkOrigin: false` is the deprecated spelling of exactly
+      // this and warns on every build.
       //
-      // SvelteKit compares `Origin` against `url.origin`, which `adapter-node`
-      // pins to the `ORIGIN` environment variable for the whole process. A tenant
-      // on its own G4 hostname therefore failed every form POST, sign-in
-      // included, because its `Origin` is its own domain while `url.origin` is
-      // the main one. `trustedOrigins: ["*"]` was set here to escape that and
-      // never worked: SvelteKit matches that list with `includes`, so `"*"` is a
-      // literal origin rather than a wildcard and matched nothing. The check has
-      // been fully on this whole time.
+      // It has to be off, because SvelteKit compares `Origin` against
+      // `url.origin`, which `adapter-node` pins to the `ORIGIN` environment
+      // variable for the whole process. On a tenant's own G4 hostname that names
+      // the main domain, so every form POST there would be refused. No list of
+      // trusted origins could fix it either: custom domains are rows an operator
+      // adds at runtime, not values known when the app is built.
       //
-      // No static list could work, because custom domains are rows an operator
-      // adds at runtime, not values known when the app is built. `csrfHandle`
-      // covers the same four form content types, refuses a missing or opaque
-      // `Origin` exactly as this did, and refuses a genuine cross-origin POST
-      // exactly as this did - it just asks the right question about which host
-      // the request came in on.
-      checkOrigin: false,
+      // **So `csrfHandle` in src/hooks.server.ts is the only origin check this
+      // app runs**, and it is not weaker than the one it replaces - it compares
+      // `Origin` against the `Host` the request actually arrived on, refuses a
+      // missing or opaque `Origin`, and covers the same form content types. See
+      // src/lib/server/http/csrf.ts.
+      trustedOrigins: ["*"],
     },
   },
 

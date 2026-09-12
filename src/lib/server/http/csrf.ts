@@ -5,9 +5,10 @@ import { normalizeHostname } from "./hostname.js";
  *
  * Split out of `hooks.server.ts` so it can be tested directly. The handler there
  * is the only origin check the app runs - `svelte.config.js` sets
- * `csrf.checkOrigin: false` - so this being right is load-bearing, and a
- * security rule that can only be exercised by booting the whole hooks module,
- * with its database and proxy imports, is a rule nobody writes tests for.
+ * `csrf.trustedOrigins: ["*"]`, which SvelteKit expands at build time into
+ * "do not check" - so this being right is load-bearing, and a security rule that
+ * can only be exercised by booting the whole hooks module, with its database and
+ * proxy imports, is a rule nobody writes tests for.
  */
 
 /**
