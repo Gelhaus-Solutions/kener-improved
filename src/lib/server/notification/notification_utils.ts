@@ -2,7 +2,7 @@ import type { MaintenanceEventRecordDetailed, MonitorAlertConfigRecord, MonitorA
 import type { AlertVariableMap, SiteDataForNotification, SubscriptionVariableMap } from "./types.js";
 import GC from "../../global-constants.js";
 import type { SiteDataTransformed } from "../controllers/siteDataController.js";
-import { format } from "date-fns";
+import { formatInTimeZone } from "date-fns-tz";
 import mdToHTML from "../..//marked.js";
 import serverResolver from "../resolver.js";
 import { parseDbTimestamp } from "../tool.js";
@@ -49,12 +49,32 @@ export function siteDataToVariables(siteData: SiteDataTransformed): SiteDataForN
   };
 }
 
+/**
+ * D5. The maintenance window as it appears in a notification.
+ *
+ * **Times are rendered in UTC and say so.** They used to use date-fns `format`,
+ * which renders in whatever zone the host is in, and printed no zone at all. The
+ * result was the bug this fixes: the worker forces `TZ=UTC` so the mail said
+ * "2:00 PM", while the page renders in the reader's own zone and said "4:00 PM"
+ * to someone in Berlin, with neither surface stating which zone it meant. Two
+ * unlabelled numbers for one instant is indistinguishable from a wrong time.
+ *
+ * A mail has no reader to detect a zone from, so it needs a fixed one, and the
+ * only defensible fixed choice is the one the timestamps are already stored in.
+ * `formatInTimeZone` also removes the dependency on the ambient `TZ`, which
+ * `startup.ts` happens to set for this process and not for the web one.
+ *
+ * The RSS feed already did this correctly via `toUTCString`; this brings the
+ * mail in line with it.
+ */
 function formatMaintenanceMarkdown(
   monitorNames: string,
   event: MaintenanceEventRecordDetailed,
   statusMessage: string,
 ): string {
-  const dateFormat = "PPpp";
+  // The quoted 'UTC' is a literal, not a format token, so the label cannot drift
+  // away from the zone actually used above it.
+  const dateFormat = "PPpp 'UTC'";
   let update = `Maintenance **${event.title}** ${statusMessage}\n\n`;
   if (!!event.description) {
     update = update + `${event.description}\n\n`;
@@ -63,8 +83,8 @@ function formatMaintenanceMarkdown(
   update = update + `| Setting | Value |\n`;
   update = update + `| :--- | :--- |\n`;
   update = update + `| **Monitors** | ${monitorNames} |\n`;
-  update = update + `| **Start Time** | ${format(new Date(event.start_date_time * 1000), dateFormat)} |\n`;
-  update = update + `| **End Time** | ${format(new Date(event.end_date_time * 1000), dateFormat)} |\n`;
+  update = update + `| **Start Time** | ${formatInTimeZone(event.start_date_time * 1000, "UTC", dateFormat)} |\n`;
+  update = update + `| **End Time** | ${formatInTimeZone(event.end_date_time * 1000, "UTC", dateFormat)} |\n`;
   return mdToHTML(update);
 }
 

@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import Mustache from "mustache";
-import { alertToVariables, describeError } from "./notification_utils.js";
+import { alertToVariables, describeError, maintenanceToVariables } from "./notification_utils.js";
 import emailTemplate from "../templates/email_alert_template.js";
 import discordTemplate from "../templates/discord_alert_template.js";
 import slackTemplate from "../templates/slack_alert_template.js";
@@ -95,5 +95,49 @@ describe("describeError", () => {
     expect(describeError(new Error("boom"))).toBe("boom");
     expect(describeError("nope")).toBe("nope");
     expect(describeError({ cause: 1 })).toBe("[object Object]");
+  });
+});
+
+/**
+ * D5. A maintenance mail has no reader to detect a timezone from, so it has to
+ * name the one it used. These pin both halves of the bug: the label, and the
+ * independence from whatever zone the sending process happens to run in.
+ */
+describe("maintenanceToVariables renders times unambiguously", () => {
+  const ORIGINAL_TZ = process.env.TZ;
+  afterEach(() => {
+    process.env.TZ = ORIGINAL_TZ;
+  });
+
+  // 2026-01-15T14:00:00Z to 2026-01-15T16:30:00Z.
+  const event = {
+    id: 7,
+    maintenance_id: 3,
+    start_date_time: 1768485600,
+    end_date_time: 1768494600,
+    status: "SCHEDULED" as const,
+    created_at: "2026-01-01 00:00:00",
+    updated_at: "2026-01-01 00:00:00",
+    title: "Database upgrade",
+    description: null,
+  };
+
+  const render = () => String(maintenanceToVariables(event, "API", "is scheduled", "s", "Scheduled").update_text);
+
+  it("names the timezone instead of printing a bare wall clock", () => {
+    const text = render();
+    expect(text).toContain("2:00:00 PM UTC");
+    expect(text).toContain("4:30:00 PM UTC");
+  });
+
+  it("renders the same times whatever zone the sending process runs in", () => {
+    // The worker forces TZ=UTC and the web process does not, so a formatter that
+    // reads the ambient zone makes these two disagree about one instant.
+    const seen = new Set<string>();
+    for (const zone of ["UTC", "Europe/Berlin", "America/New_York", "Asia/Kolkata"]) {
+      process.env.TZ = zone;
+      seen.add(render());
+    }
+    expect(seen.size).toBe(1);
   });
 });
