@@ -10,6 +10,7 @@ import {
 import { getCache, setCache } from "../cache/cache.js";
 import { getUptimeBucketsCached } from "../cache/rollupCache.js";
 import { pickGrain, rollupsUsable } from "../services/uptimeAggregator.js";
+import { slugFromTag } from "../db/monitorSlug.js";
 import { MERGED_REGION_ID } from "../db/regions.js";
 import { currentOrgIdOrDefault } from "../db/orgContext.js";
 import type {
@@ -347,8 +348,7 @@ export const CreateUpdateMonitor = async (monitor: MonitorInput): Promise<number
 async function slugForTag(tag: string): Promise<string> {
   try {
     const org = await db.getOrgById(currentOrgIdOrDefault());
-    const prefix = org?.tag_prefix ?? "";
-    return prefix && tag.startsWith(`${prefix}_`) ? tag.slice(prefix.length + 1) : tag;
+    return slugFromTag(tag, org?.tag_prefix);
   } catch {
     // No org context, or the org row is unreadable. The tag is always a legal
     // slug, and a monitor with a usable-but-prefixed slug is far better than one

@@ -49,9 +49,16 @@ export const GET: RequestHandler = async ({ request, locals }) => {
   }
 
   // Add active, visible monitors
+  //
+  // **The slug, not the tag** (I3e). A public URL carries the per-org slug so a
+  // tenant's visitors never see another tenant's prefix, and a sitemap is the
+  // one place where getting that wrong is durable: these are the URLs search
+  // engines index and then keep serving. The tag remains the fallback for a row
+  // whose slug was never filled in, which is what `ResolvePublicMonitor` accepts
+  // anyway. A no-op on the default org, whose slug and tag are identical.
   const monitors = await GetMonitors({ status: "ACTIVE", is_hidden: "NO" });
   for (const monitor of monitors) {
-    locs.push(siteURL + serverResolver(`/monitors/${monitor.tag}`));
+    locs.push(siteURL + serverResolver(`/monitors/${monitor.slug || monitor.tag}`));
   }
 
   // Add current and previous month events pages
