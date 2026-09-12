@@ -31,6 +31,10 @@ export class MaintenancesRepository extends BaseRepository {
       duration_seconds: data.duration_seconds,
       status: data.status || GC.ACTIVE,
       is_global: data.is_global || "YES",
+      // D4. Named explicitly like every other column here: this insert is a
+      // whitelist, so a field the caller passes but this object does not name is
+      // silently dropped and the row takes the column default instead.
+      suppress_alerts: data.suppress_alerts || "YES",
       created_at: this.knexUnscoped.fn.now(),
       updated_at: this.knexUnscoped.fn.now(),
     };
@@ -319,6 +323,51 @@ export class MaintenancesRepository extends BaseRepository {
       .andWhere("maintenances_events.start_date_time", "<=", end)
       .andWhere("maintenances_events.end_date_time", ">=", start)
       .select("maintenances_events.*");
+  }
+
+  /**
+   * The same question as `getMaintenancesByMonitorTagRealtime`, asked for many
+   * monitors at once.
+   *
+   * Exists for D4's cascade: a monitor is in maintenance when it is attached to
+   * a window *or* when any component it depends on is, and asking per dependency
+   * would be a query per edge per monitor per tick. `monitor_tag` is selected so
+   * the caller can tell which of the tags it asked about actually matched, which
+   * is what the screen needs to say "suppressed because the database is down for
+   * work".
+   */
+  async getMaintenancesByMonitorTagsRealtime(
+    monitorTags: string[],
+    timestamp: number,
+  ): Promise<
+    Array<{
+      id: number;
+      monitor_tag: string;
+      start_date_time: number;
+      end_date_time: number | null;
+      monitor_impact: string | null;
+      suppress_alerts: string;
+      title: string;
+    }>
+  > {
+    if (monitorTags.length === 0) return [];
+    return await this.table("maintenances_events as me")
+      .select(
+        "me.id as id",
+        "mm.monitor_tag as monitor_tag",
+        "me.start_date_time as start_date_time",
+        "me.end_date_time as end_date_time",
+        "mm.monitor_impact",
+        "m.suppress_alerts",
+        "m.title",
+      )
+      .innerJoin("maintenance_monitors as mm", "me.maintenance_id", "mm.maintenance_id")
+      .innerJoin("maintenances as m", "me.maintenance_id", "m.id")
+      .whereIn("mm.monitor_tag", monitorTags)
+      .andWhere("me.start_date_time", "<=", timestamp)
+      .andWhere("me.end_date_time", ">=", timestamp)
+      .whereIn("me.status", [GC.SCHEDULED, GC.READY, GC.ONGOING])
+      .andWhere("m.status", GC.ACTIVE);
   }
 
   async getMaintenancesByMonitorTagRealtime(

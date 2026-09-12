@@ -119,6 +119,8 @@ export interface CreateMaintenanceInput {
 }
 
 export interface UpdateMaintenanceInput {
+  /** D4. YES silences alerting for the window, NO keeps paging through it. */
+  suppress_alerts?: string;
   title?: string;
   description?: string | null;
   start_date_time?: number;

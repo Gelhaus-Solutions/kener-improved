@@ -11,6 +11,7 @@ import monitorResponseQueue from "./monitorResponseQueue";
 import GC from "../../global-constants.js";
 import { resolveConfirmedStatus } from "../services/confirmationThreshold.js";
 import { planProbeExecution, runOnProbe, dispatchSample } from "../probes/dispatch.js";
+import { windowsAffecting, suppressesAlerts } from "../maintenance/cascade.js";
 import { mergeObservations, mergeRegionAgents, LOCAL_REGION_ID, type Observation } from "../probes/merge.js";
 
 let monitorExecuteQueue: Queue | null = null;
@@ -37,7 +38,11 @@ async function manualMaintenance(
   // Key by the job's `ts` (already a minute-start) so the overlay aligns with the realtime/default
   // rows and the freeze gate; fall back to "now" only when called without a ts.
   let startTs = ts !== undefined ? ts : GetMinuteStartNowTimestampUTC();
-  let maintenanceArr = await db.getMaintenancesByMonitorTagRealtime(monitor.tag, startTs);
+  // D4. Windows attached to this monitor *and* to anything it depends on. A
+  // database taken down for work makes the API in front of it fail, and that API
+  // announcing an outage in the middle of planned maintenance is the failure this
+  // cascade exists to stop.
+  let maintenanceArr = await windowsAffecting(monitor.tag, startTs);
 
   let impact = "";
   if (maintenanceArr.length == 0) {

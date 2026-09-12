@@ -422,6 +422,7 @@ class DbImpl {
   getOngoingMaintenanceEventsByMonitorTags!: MaintenancesRepository["getOngoingMaintenanceEventsByMonitorTags"];
   getUpcomingMaintenanceEventsByMonitorTags!: MaintenancesRepository["getUpcomingMaintenanceEventsByMonitorTags"];
   getMaintenancesByMonitorTagRealtime!: MaintenancesRepository["getMaintenancesByMonitorTagRealtime"];
+  getMaintenancesByMonitorTagsRealtime!: MaintenancesRepository["getMaintenancesByMonitorTagsRealtime"];
   getScheduledEventsStartingSoon!: MaintenancesRepository["getScheduledEventsStartingSoon"];
   getScheduledEventsAlreadyStarted!: MaintenancesRepository["getScheduledEventsAlreadyStarted"];
   getReadyEventsInProgress!: MaintenancesRepository["getReadyEventsInProgress"];
@@ -1097,6 +1098,9 @@ class DbImpl {
     this.getMaintenanceEvents = this.maintenances.getMaintenanceEvents.bind(this.maintenances);
     this.getActiveMaintenanceEvents = this.maintenances.getActiveMaintenanceEvents.bind(this.maintenances);
     this.getMaintenancesByMonitorTagRealtime = this.maintenances.getMaintenancesByMonitorTagRealtime.bind(
+      this.maintenances,
+    );
+    this.getMaintenancesByMonitorTagsRealtime = this.maintenances.getMaintenancesByMonitorTagsRealtime.bind(
       this.maintenances,
     );
     this.getMaintenanceEventsForMonitor = this.maintenances.getMaintenanceEventsForMonitor.bind(this.maintenances);

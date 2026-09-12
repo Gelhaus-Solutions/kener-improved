@@ -21,8 +21,12 @@ const fake = {
   getInboundAlert: vi.fn<() => Promise<InboundAlertRecord | undefined>>(),
   insertInboundAlert: vi.fn<(data: Record<string, unknown>) => Promise<number>>(),
   updateInboundAlert: vi.fn(),
-  getMaintenancesByMonitorTagRealtime: vi.fn<() => Promise<unknown[]>>(),
   getIncidentById: vi.fn<() => Promise<{ status: string; state: string } | undefined>>(),
+};
+
+const maintenance = {
+  windowsAffecting: vi.fn<() => Promise<unknown[]>>(),
+  suppressesAlerts: vi.fn<(windows: unknown[]) => boolean>(),
 };
 
 const incidents = {
@@ -38,9 +42,19 @@ vi.mock("../db/db.js", () => ({
     getInboundAlert: () => fake.getInboundAlert(),
     insertInboundAlert: (data: Record<string, unknown>) => fake.insertInboundAlert(data),
     updateInboundAlert: (...args: unknown[]) => fake.updateInboundAlert(...args),
-    getMaintenancesByMonitorTagRealtime: () => fake.getMaintenancesByMonitorTagRealtime(),
     getIncidentById: () => fake.getIncidentById(),
   },
+}));
+
+/**
+ * The cascade is mocked at its own boundary rather than through the tables it
+ * reads. What is under test here is what the receiver does with the answer; how
+ * that answer is reached, including the dependency walk and the per-window
+ * opt-out, is `cascade.test.ts`'s job.
+ */
+vi.mock("../maintenance/cascade.js", () => ({
+  windowsAffecting: () => maintenance.windowsAffecting(),
+  suppressesAlerts: (windows: unknown[]) => maintenance.suppressesAlerts(windows),
 }));
 
 vi.mock("../controllers/incidentController.js", () => ({
@@ -113,7 +127,8 @@ beforeEach(() => {
   fake.getInboundAlert.mockResolvedValue(undefined);
   fake.insertInboundAlert.mockResolvedValue(11);
   fake.updateInboundAlert.mockResolvedValue(1);
-  fake.getMaintenancesByMonitorTagRealtime.mockResolvedValue([]);
+  maintenance.windowsAffecting.mockResolvedValue([]);
+  maintenance.suppressesAlerts.mockImplementation((windows) => windows.length > 0);
   fake.getIncidentById.mockResolvedValue({ status: "OPEN", state: "INVESTIGATING" });
   incidents.CreateIncident.mockResolvedValue({ incident_id: 500 });
 });
@@ -171,21 +186,21 @@ describe("planned maintenance", () => {
     // D4. Kener's own alerting is already frozen during maintenance by the
     // overlay; an inbound alert bypasses that path entirely, so without this it
     // would announce an outage in the middle of planned work.
-    fake.getMaintenancesByMonitorTagRealtime.mockResolvedValue([{ id: 1 }]);
+    maintenance.windowsAffecting.mockResolvedValue([{ id: 1 }]);
     const result = await receiveInboundAlert(TOKEN, firing, AT);
     expect(result).toMatchObject({ ok: true, opened: 0, suppressed: 1 });
     expect(incidents.CreateIncident).not.toHaveBeenCalled();
   });
 
   it("leaves no incident on the row, so the window ending is not amnesia", async () => {
-    fake.getMaintenancesByMonitorTagRealtime.mockResolvedValue([{ id: 1 }]);
+    maintenance.windowsAffecting.mockResolvedValue([{ id: 1 }]);
     await receiveInboundAlert(TOKEN, firing, AT);
     expect(fake.insertInboundAlert).toHaveBeenCalledWith(expect.objectContaining({ incident_id: null }));
   });
 
   it("opens an incident on the next notification once the window has passed", async () => {
     fake.getInboundAlert.mockResolvedValue(existingAlert({ incident_id: null, status: "FIRING" }));
-    fake.getMaintenancesByMonitorTagRealtime.mockResolvedValue([]);
+    maintenance.windowsAffecting.mockResolvedValue([]);
     const result = await receiveInboundAlert(TOKEN, firing, AT);
     expect(result).toMatchObject({ ok: true, opened: 1 });
   });
@@ -193,7 +208,7 @@ describe("planned maintenance", () => {
   it("still closes an incident that was already open when the window started", async () => {
     // Closing is never the harmful direction, so maintenance does not block it.
     fake.getInboundAlert.mockResolvedValue(existingAlert());
-    fake.getMaintenancesByMonitorTagRealtime.mockResolvedValue([{ id: 1 }]);
+    maintenance.windowsAffecting.mockResolvedValue([{ id: 1 }]);
     const result = await receiveInboundAlert(TOKEN, resolved, AT);
     expect(result).toMatchObject({ ok: true, resolved: 1 });
   });

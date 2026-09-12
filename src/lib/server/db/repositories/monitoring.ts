@@ -336,20 +336,47 @@ export class MonitoringRepository extends BaseRepository {
     return await this.table("monitoring_data").where("timestamp", "<", cutoffTimestamp).del();
   }
 
-  async consecutivelyStatusFor(monitor_tag: string, status: string, lastX: number): Promise<boolean> {
+  /**
+   * Whether the last `lastX` alert-visible samples all read `status`.
+   *
+   * **`unmaskMaintenance` is D4's per-window opt-out.** Normally a MAINTENANCE
+   * overlay is invisible here, which is what freezes the alert window during
+   * planned work and is the right default. A window whose `suppress_alerts` is
+   * NO wants the opposite: the operator is watching a risky migration and the
+   * one thing they must be told is that the site went down. Those overlay rows
+   * are then included and read through `raw_status`, which the overlay has
+   * preserved since the confirmation threshold landed and which holds what the
+   * monitor's own check actually observed.
+   *
+   * Passed per call rather than stored per row, because whether a window
+   * suppresses is a property of the window and an operator may change it while
+   * the window is open. A flag baked into the sample at write time would answer
+   * with yesterday's setting.
+   */
+  async consecutivelyStatusFor(
+    monitor_tag: string,
+    status: string,
+    lastX: number,
+    unmaskMaintenance = false,
+  ): Promise<boolean> {
+    const types = unmaskMaintenance ? [...ALERT_VISIBLE_TYPES, GC.MAINTENANCE] : ALERT_VISIBLE_TYPES;
+    // `raw_status` is null on rows that were never overlaid, so the fallback to
+    // `status` is what keeps an ordinary sample reading the same either way.
+    const statusExpr = unmaskMaintenance ? "COALESCE(raw_status, status)" : "status";
+
     const result = await this.knexUnscoped
       .with("last_records", (qb: KnexType.QueryBuilder) => {
         qb.select("*")
           .from("monitoring_data")
           .where("monitor_tag", monitor_tag)
           .where("region_id", MERGED_REGION_ID)
-          .whereIn("type", ALERT_VISIBLE_TYPES)
+          .whereIn("type", types)
           .orderBy("timestamp", "desc")
           .limit(lastX);
       })
       .select(
         this.knexUnscoped.raw(
-          "CASE WHEN COUNT(*) <= SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) THEN 1 ELSE 0 END as is_affected",
+          `CASE WHEN COUNT(*) <= SUM(CASE WHEN ${statusExpr} = ? THEN 1 ELSE 0 END) THEN 1 ELSE 0 END as is_affected`,
           [status],
         ),
       )
@@ -363,14 +390,18 @@ export class MonitoringRepository extends BaseRepository {
     monitor_tag: string,
     latencyThreshold: number,
     lastX: number,
+    unmaskMaintenance = false,
   ): Promise<boolean> {
+    // No `raw_status` equivalent is needed: the overlay replaces the status but
+    // deliberately keeps the latency the check actually measured.
+    const types = unmaskMaintenance ? [...ALERT_VISIBLE_TYPES, GC.MAINTENANCE] : ALERT_VISIBLE_TYPES;
     const result = await this.knexUnscoped
       .with("last_records", (qb: KnexType.QueryBuilder) => {
         qb.select("*")
           .from("monitoring_data")
           .where("monitor_tag", monitor_tag)
           .where("region_id", MERGED_REGION_ID)
-          .whereIn("type", ALERT_VISIBLE_TYPES)
+          .whereIn("type", types)
           .orderBy("timestamp", "desc")
           .limit(lastX);
       })
@@ -386,14 +417,22 @@ export class MonitoringRepository extends BaseRepository {
     return result.is_affected === 1;
   }
 
-  async consecutivelyLatencyLessThan(monitor_tag: string, latencyThreshold: number, lastX: number): Promise<boolean> {
+  async consecutivelyLatencyLessThan(
+    monitor_tag: string,
+    latencyThreshold: number,
+    lastX: number,
+    unmaskMaintenance = false,
+  ): Promise<boolean> {
+    // No `raw_status` equivalent is needed: the overlay replaces the status but
+    // deliberately keeps the latency the check actually measured.
+    const types = unmaskMaintenance ? [...ALERT_VISIBLE_TYPES, GC.MAINTENANCE] : ALERT_VISIBLE_TYPES;
     const result = await this.knexUnscoped
       .with("last_records", (qb: KnexType.QueryBuilder) => {
         qb.select("*")
           .from("monitoring_data")
           .where("monitor_tag", monitor_tag)
           .where("region_id", MERGED_REGION_ID)
-          .whereIn("type", ALERT_VISIBLE_TYPES)
+          .whereIn("type", types)
           .orderBy("timestamp", "desc")
           .limit(lastX);
       })

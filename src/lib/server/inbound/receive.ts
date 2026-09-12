@@ -8,6 +8,7 @@ import { parseInboundPayload } from "./parsers.js";
 import { impactFor, parseMappingRules, resolveMonitorTag, severityFor } from "./mapping.js";
 import type { InboundProvider, NormalisedAlert } from "./types.js";
 import { signatureHeaderFor, verifySignature } from "./signature.js";
+import { suppressesAlerts, windowsAffecting } from "../maintenance/cascade.js";
 import { open as openSealed } from "../crypto/secretBox.js";
 
 /**
@@ -235,9 +236,12 @@ async function applyAlert(
  * without this check, taking a database down on a Sunday morning would announce
  * a major outage to the public the moment somebody else's monitoring noticed.
  *
- * Deliberately the same query the overlay uses, rather than a second opinion
+ * Deliberately the same helper the overlay uses, rather than a second opinion
  * about what "in maintenance" means. Two definitions would drift, and the one
- * that drifted would be the one nobody was watching.
+ * that drifted would be the one nobody was watching. That also means an inbound
+ * alert inherits both of D4's rules for free: a window on a component this one
+ * depends on suppresses it too, and a window that has opted out of suppression
+ * does not.
  *
  * A failure here is not fatal. If the lookup throws, the alert is treated as not
  * suppressed: publishing an incident during maintenance is a visible mistake
@@ -246,8 +250,10 @@ async function applyAlert(
  */
 async function underMaintenance(monitorTag: string, at: number): Promise<boolean> {
   try {
-    const windows = await db.getMaintenancesByMonitorTagRealtime(monitorTag, at);
-    return windows.length > 0;
+    // The same cascade Kener's own overlay uses: attached windows and windows on
+    // anything this component depends on, minus any that has opted out of
+    // suppressing alerts.
+    return suppressesAlerts(await windowsAffecting(monitorTag, at));
   } catch (error) {
     console.error(`Maintenance lookup failed for ${monitorTag}, treating as not in maintenance:`, error);
     return false;

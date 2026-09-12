@@ -30,6 +30,7 @@ import { MayHaveAlertConfig } from "../cache/alertConfigTags.js";
 import { getUnixTime, differenceInSeconds } from "date-fns";
 import { parseDbTimestamp } from "../tool.js";
 import GC from "../../global-constants.js";
+import { windowsAffecting, suppressesAlerts } from "../maintenance/cascade.js";
 import { dispatchTrigger } from "../notification/dispatchTrigger.js";
 import { incidentSeverityFromAlertSeverity } from "../incidents/impact.js";
 import { alertToVariables, siteDataToVariables } from "../notification/notification_utils.js";
@@ -290,16 +291,25 @@ async function sloBurnVerdict(config: MonitorAlertConfigRecord): Promise<"FIRING
  * Returns null for a config whose alert_for this build does not handle, which
  * the caller treats as "nothing to do" rather than an error.
  */
-async function evaluateIsAffected(job: JobData, threshold: number): Promise<boolean | null> {
+async function evaluateIsAffected(
+  job: JobData,
+  threshold: number,
+  unmaskMaintenance: boolean,
+): Promise<boolean | null> {
   const { monitor_tag, numerator, denominator, monitor_alerts_configured } = job;
   const alertValue = monitor_alerts_configured.alert_value;
 
   if (monitor_alerts_configured.alert_for === GC.STATUS) {
     //alertValue can be DOWN or DEGRADED
-    return await db.consecutivelyStatusFor(monitor_tag as string, alertValue, threshold);
+    return await db.consecutivelyStatusFor(monitor_tag as string, alertValue, threshold, unmaskMaintenance);
   }
   if (monitor_alerts_configured.alert_for === GC.LATENCY) {
-    return await db.consecutivelyLatencyGreaterThan(monitor_tag as string, parseFloat(alertValue), threshold);
+    return await db.consecutivelyLatencyGreaterThan(
+      monitor_tag as string,
+      parseFloat(alertValue),
+      threshold,
+      unmaskMaintenance,
+    );
   }
   if (monitor_alerts_configured.alert_for === GC.UPTIME) {
     return await IsUptimeLessThanXPercent(
@@ -325,15 +335,20 @@ async function evaluateIsAffected(job: JobData, threshold: number): Promise<bool
 }
 
 /** The recovery side of evaluateIsAffected: has the monitor been healthy long enough to resolve. */
-async function evaluateIsRecovered(job: JobData, threshold: number): Promise<boolean> {
+async function evaluateIsRecovered(job: JobData, threshold: number, unmaskMaintenance: boolean): Promise<boolean> {
   const { monitor_tag, numerator, denominator, monitor_alerts_configured } = job;
   const alertValue = monitor_alerts_configured.alert_value;
 
   if (monitor_alerts_configured.alert_for === GC.STATUS) {
-    return await db.consecutivelyStatusFor(monitor_tag as string, GC.UP, threshold);
+    return await db.consecutivelyStatusFor(monitor_tag as string, GC.UP, threshold, unmaskMaintenance);
   }
   if (monitor_alerts_configured.alert_for === GC.LATENCY) {
-    return await db.consecutivelyLatencyLessThan(monitor_tag as string, parseFloat(alertValue), threshold);
+    return await db.consecutivelyLatencyLessThan(
+      monitor_tag as string,
+      parseFloat(alertValue),
+      threshold,
+      unmaskMaintenance,
+    );
   }
   if (monitor_alerts_configured.alert_for === GC.UPTIME) {
     return await IsUptimeGreaterThanXPercent(
@@ -399,10 +414,30 @@ const addWorker = () => {
     const siteData = await GetAllSiteData();
     const templateSiteVars = siteDataToVariables(siteData);
 
+    /**
+     * D4. Whether a maintenance window is deliberately leaving alerting on.
+     *
+     * Only when a window actually reaches this monitor and declines to suppress.
+     * Outside a window there is nothing to unmask, and unmasking anyway would
+     * change what an ordinary evaluation sees: a MAINTENANCE row left in the
+     * lookback by a window that ended an hour ago would start counting again.
+     *
+     * A failure here leaves it masked, which is the pre-D4 behaviour and the
+     * quieter direction: a missed page during planned work beats paging the
+     * on-call because a maintenance lookup threw.
+     */
+    let unmaskMaintenance = false;
+    try {
+      const windows = await windowsAffecting(monitor_tag as string, getUnixTime(new Date()));
+      unmaskMaintenance = windows.length > 0 && !suppressesAlerts(windows);
+    } catch (error) {
+      console.error("Maintenance window lookup failed, leaving alerting masked:", error);
+    }
+
     // ---- Evaluation ----------------------------------------------------
     let isAffected: boolean | null;
     try {
-      isAffected = await evaluateIsAffected(jobData, monitor_alerts_configured.failure_threshold);
+      isAffected = await evaluateIsAffected(jobData, monitor_alerts_configured.failure_threshold, unmaskMaintenance);
     } catch (error) {
       console.error("Error evaluating alert condition:", error);
       return;
@@ -492,7 +527,7 @@ const addWorker = () => {
 
     let isUp: boolean;
     try {
-      isUp = await evaluateIsRecovered(jobData, monitor_alerts_configured.success_threshold);
+      isUp = await evaluateIsRecovered(jobData, monitor_alerts_configured.success_threshold, unmaskMaintenance);
     } catch (error) {
       console.error("Error evaluating alert recovery:", error);
       return;

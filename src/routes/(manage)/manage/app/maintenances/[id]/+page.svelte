@@ -65,6 +65,7 @@
     duration_seconds: number;
     status: "ACTIVE" | "INACTIVE";
     is_global: string;
+    suppress_alerts: string;
   }>({
     id: 0,
     title: "",
@@ -73,7 +74,8 @@
     rrule: "FREQ=MINUTELY;COUNT=1",
     duration_seconds: 3600, // 1 hour default
     status: "ACTIVE",
-    is_global: "YES"
+    is_global: "YES",
+    suppress_alerts: "YES"
   });
 
   // For datetime input
@@ -279,7 +281,8 @@
           rrule: result.rrule,
           duration_seconds: result.duration_seconds,
           status: result.status,
-          is_global: result.is_global || "YES"
+          is_global: result.is_global || "YES",
+          suppress_alerts: result.suppress_alerts || "YES"
         };
 
         // Parse RRULE for UI
@@ -363,7 +366,8 @@
           rrule,
           duration_seconds: calculatedDurationSeconds,
           monitors: selectedMonitors.map((m) => ({ monitor_tag: m.tag, monitor_impact: m.status })),
-          is_global: maintenance.is_global
+          is_global: maintenance.is_global,
+          suppress_alerts: maintenance.suppress_alerts
         };
 
         const response = await fetch(clientResolver(resolve, "/manage/api"), {
@@ -388,7 +392,8 @@
           duration_seconds: calculatedDurationSeconds,
           status: maintenance.status,
           monitors: selectedMonitors.map((m) => ({ monitor_tag: m.tag, monitor_impact: m.status })),
-          is_global: maintenance.is_global
+          is_global: maintenance.is_global,
+          suppress_alerts: maintenance.suppress_alerts
         };
 
         const response = await fetch(clientResolver(resolve, "/manage/api"), {
@@ -682,6 +687,24 @@
             checked={maintenance.is_global === "YES"}
             onCheckedChange={(checked) => {
               maintenance.is_global = checked ? "YES" : "NO";
+            }}
+          />
+        </div>
+
+        <!-- D4. Alert suppression -->
+        <div class="flex items-center justify-between rounded-md border p-3">
+          <div class="flex flex-col gap-1">
+            <Label for="suppress-alerts">Silence alerts</Label>
+            <p class="text-muted-foreground text-xs">
+              On by default. While this window is open, the components it covers, and anything depending on them, do
+              not trigger alerts or open incidents. Turn it off to keep being paged through work you are watching.
+            </p>
+          </div>
+          <Switch
+            id="suppress-alerts"
+            checked={maintenance.suppress_alerts !== "NO"}
+            onCheckedChange={(checked) => {
+              maintenance.suppress_alerts = checked ? "YES" : "NO";
             }}
           />
         </div>

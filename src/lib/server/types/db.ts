@@ -820,6 +820,8 @@ export interface PageFilter {
 // Uses iCalendar RRULE for scheduling
 // Reference: http://www.kanzaki.com/docs/ical/rrule.html
 export interface MaintenanceRecord {
+  /** D4. YES when this window silences alerting, which is the default. */
+  suppress_alerts?: string;
   id: number;
   title: string;
   description: string | null;
@@ -833,6 +835,8 @@ export interface MaintenanceRecord {
 }
 
 export interface MaintenanceRecordInsert {
+  /** D4. YES silences alerting for the window, NO keeps paging through it. */
+  suppress_alerts?: string;
   title: string;
   description?: string | null;
   start_date_time: number;
