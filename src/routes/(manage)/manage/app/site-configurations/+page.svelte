@@ -7,7 +7,10 @@
   import { Switch } from "$lib/components/ui/switch/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
   import GC from "$lib/global-constants.js";
+  import { latencySampleAdvice, type LatencyMetric } from "$lib/latency-metrics.js";
+  import AlertTriangleIcon from "@lucide/svelte/icons/triangle-alert";
   import SaveIcon from "@lucide/svelte/icons/save";
   import Loader from "@lucide/svelte/icons/loader";
   import UploadIcon from "@lucide/svelte/icons/upload";
@@ -106,6 +109,25 @@
     down_ms: "" as string
   });
   let savingLatencyThresholdDefault = $state(false);
+
+  /**
+   * Whether the default window can hold enough checks for the chosen percentile.
+   *
+   * Measured against a one minute schedule, which is the default cron and the
+   * densest one a monitor is normally given. A monitor checked less often has
+   * fewer samples still, so a window that is too short here is too short
+   * everywhere; its own card warns with its own cron.
+   */
+  const DEFAULT_CRON_SECONDS = 60;
+  let latencySampleWarning = $derived(
+    latencyThresholdDefault.enabled
+      ? latencySampleAdvice(
+          latencyThresholdDefault.metric as LatencyMetric,
+          Number(latencyThresholdDefault.window_minutes),
+          DEFAULT_CRON_SECONDS
+        )
+      : null
+  );
 
   /**
    * What retention would delete tonight, and how long a bar can still be served.
@@ -1475,6 +1497,20 @@
             </p>
           </div>
         </div>
+
+        {#if latencySampleWarning}
+          <Alert.Root>
+            <AlertTriangleIcon class="size-4" />
+            <Alert.Title>This window is too short for {latencyThresholdDefault.metric}</Alert.Title>
+            <Alert.Description>
+              On a one minute schedule, {latencyThresholdDefault.window_minutes} minutes holds about {latencySampleWarning.samples}
+              {latencySampleWarning.samples === 1 ? "check" : "checks"}, and {latencyThresholdDefault.metric} needs
+              {latencySampleWarning.required} before it is anything other than the slowest one. Below that, a single slow
+              check degrades the monitor. Use a window of {latencySampleWarning.suggestedWindowMinutes} minutes, or a metric
+              that needs fewer samples. A monitor checked less often than once a minute has fewer samples still.
+            </Alert.Description>
+          </Alert.Root>
+        {/if}
       </Card.Content>
       <Card.Footer class="flex justify-end">
         <Button onclick={saveLatencyThresholdDefault} disabled={savingLatencyThresholdDefault} class="cursor-pointer">

@@ -2,6 +2,7 @@ import db from "../db/db.js";
 import { GetSiteDataByKey } from "../controllers/siteDataController.js";
 import { currentOrgIdOrDefault } from "../db/orgContext.js";
 import GC from "../../global-constants.js";
+import { LATENCY_METRICS, quantileFor, type LatencyMetric } from "../../latency-metrics.js";
 
 /**
  * Latency-based DEGRADED (B5).
@@ -12,8 +13,12 @@ import GC from "../../global-constants.js";
  * the *observed* status is what lets the existing machinery do that job.
  */
 
-export const LATENCY_METRICS = ["p50", "p90", "p95", "p99", "avg"] as const;
-export type LatencyMetric = (typeof LATENCY_METRICS)[number];
+// The metric list and the sample arithmetic live in `$lib/latency-metrics`,
+// which the admin forms import too: their warning has to be computed from the
+// same numbers this file judges by. Re-exported so server callers keep reading
+// them from the rule.
+export { LATENCY_METRICS, samplesBeforePercentileIsMax, latencySampleAdvice } from "../../latency-metrics.js";
+export type { LatencyMetric } from "../../latency-metrics.js";
 
 /** How a monitor's own settings relate to the instance-wide default. */
 export const LATENCY_MODES = ["INHERIT", "OFF", "CUSTOM"] as const;
@@ -170,8 +175,8 @@ export async function resolveThreshold(monitorSetting: unknown): Promise<Latency
  */
 export function percentileOf(values: readonly number[], metric: LatencyMetric): number | null {
   if (values.length === 0) return null;
-  if (metric === "avg") return values.reduce((sum, v) => sum + v, 0) / values.length;
-  const q = metric === "p50" ? 0.5 : metric === "p90" ? 0.9 : metric === "p95" ? 0.95 : 0.99;
+  const q = quantileFor(metric);
+  if (q === null) return values.reduce((sum, v) => sum + v, 0) / values.length;
   const sorted = [...values].sort((a, b) => a - b);
   const rank = Math.min(sorted.length - 1, Math.max(0, Math.ceil(q * sorted.length) - 1));
   return sorted[rank];

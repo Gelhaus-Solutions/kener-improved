@@ -4,8 +4,11 @@
   import { Label } from "$lib/components/ui/label/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
   import SaveIcon from "@lucide/svelte/icons/save";
   import Loader from "@lucide/svelte/icons/loader";
+  import AlertTriangleIcon from "@lucide/svelte/icons/triangle-alert";
+  import { cronIntervalSeconds, latencySampleAdvice, type LatencyMetric } from "$lib/latency-metrics.js";
   import type { MonitorRecord } from "$lib/server/types/db.js";
   import { toast } from "svelte-sonner";
   import { resolve } from "$app/paths";
@@ -65,6 +68,24 @@
 
   let saving = $state(false);
   let isCustom = $derived(form.mode === "CUSTOM");
+
+  /**
+   * Whether the window can hold enough checks for the chosen percentile.
+   *
+   * Read from this monitor's own cron, not from an assumed minute, because that
+   * is what decides how many samples the window actually contains. `monitor` is
+   * the same object the general settings card binds its cron field to, so
+   * editing the schedule updates this warning without a save.
+   */
+  let sampleAdvice = $derived(
+    isCustom
+      ? latencySampleAdvice(
+          form.metric as LatencyMetric,
+          Number(form.window_minutes),
+          cronIntervalSeconds(monitor.cron)
+        )
+      : null
+  );
 
   const labelFor = (options: Array<{ value: string; label: string }>, value: string) =>
     options.find((o) => o.value === value)?.label ?? value;
@@ -179,6 +200,19 @@
           </p>
         </div>
       </div>
+      {#if sampleAdvice}
+        <Alert.Root>
+          <AlertTriangleIcon class="size-4" />
+          <Alert.Title>This window is too short for {form.metric}</Alert.Title>
+          <Alert.Description>
+            At this monitor's schedule, {form.window_minutes} minutes holds about {sampleAdvice.samples}
+            {sampleAdvice.samples === 1 ? "check" : "checks"}, and {form.metric} needs {sampleAdvice.required} before it is
+            anything other than the slowest one. Below that, a single slow check degrades the monitor. Use a window of
+            {sampleAdvice.suggestedWindowMinutes} minutes, or a metric that needs fewer samples.
+          </Alert.Description>
+        </Alert.Root>
+      {/if}
+
       <p class="text-muted-foreground text-xs">
         Timed-out and errored checks are never measured: their latency is how long we waited before giving up, not how
         long the service took.
