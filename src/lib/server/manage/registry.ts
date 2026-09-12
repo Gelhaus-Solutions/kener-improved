@@ -10,10 +10,22 @@ import type { AnyActionDefinition } from "./types.js";
 // keyed by `action`, so moving a file between domains changes nothing at
 // runtime.
 //
-// Scoped to `./actions/*/*.ts` and eager, so the registry is fully built at
-// module load and a lookup is a plain object read rather than ~100 string
-// comparisons.
-const modules = import.meta.glob<{ default: AnyActionDefinition }>("./actions/*/*.ts", { eager: true });
+// Scoped and eager, so the registry is fully built at module load and a lookup
+// is a plain object read rather than ~100 string comparisons.
+//
+// **Test files are excluded, and that is not tidiness.** `eager` imports execute
+// the module, so a co-located `*.test.ts` runs its top level inside the
+// production bundle: a `vi.mock` call there throws "Vitest mocker was not
+// initialized in this environment" during `vite build`, long after `npm run
+// check` and `npm test` have both passed. The loop below tolerates a module with
+// no default export, which is why this was invisible until a build.
+//
+// `api-server/index.ts` already avoids this by listing the four method
+// filenames it wants. This registry cannot, because an action file is named
+// after its action, so it subtracts instead.
+const modules = import.meta.glob<{ default: AnyActionDefinition }>(["./actions/*/*.ts", "!./actions/*/*.test.ts"], {
+  eager: true,
+});
 
 const registry = new Map<string, AnyActionDefinition>();
 
