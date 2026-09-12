@@ -23,6 +23,14 @@ interface JobData {
   ts: number;
   error_message?: string | null;
   raw_status?: string | null;
+  /**
+   * Which region observed this sample (B1b).
+   *
+   * Optional because a job enqueued by the previous build has no such field, and
+   * a queue is the one place where old and new code genuinely run at once: jobs
+   * outlive the deploy that created them. Absent means the merged verdict.
+   */
+  region_id?: number;
 }
 
 const getQueue = () => {
@@ -37,17 +45,39 @@ const addWorker = () => {
 
   worker = q.createWorker(getQueue(), async (job: Job): Promise<MonitoringData | null> => {
     const { monitorTag, ts, status, latency, type, error_message, raw_status } = job.data as JobData;
+    const regionId = (job.data as JobData).region_id ?? MERGED_REGION_ID;
+
+    /**
+     * Whether this sample is the authoritative verdict, or one region's view of it.
+     *
+     * **Everything except the row itself hangs off this** (B1b). A probe region
+     * contributes a sample and nothing else: it must not drive alerting, must not
+     * overwrite the status cache, and must not announce a status change.
+     *
+     * Not merely to avoid duplicates. `previous` is read from a cache keyed on
+     * the tag alone, so for a probe region it returns *region 0's* last status -
+     * and comparing Frankfurt's result against the merged verdict would invent a
+     * transition on every sample where the two legitimately differ. One flapping
+     * probe would then page on every check.
+     */
+    const isMergedVerdict = regionId === MERGED_REGION_ID;
 
     // Read before the write, and before the cache is overwritten below: this is
     // the only cheap way to know whether this sample is a *transition*. Falling
     // back to the database keeps a cold cache from inventing a status change out
     // of the first sample after a restart.
-    const previous = await GetLastMonitoringValue(monitorTag, () => db.getLatestMonitoringData(monitorTag));
+    //
+    // Skipped entirely for a probe region, because the answer would be about a
+    // different region and acting on it is the bug described above.
+    const previous = isMergedVerdict
+      ? await GetLastMonitoringValue(monitorTag, () => db.getLatestMonitoringData(monitorTag))
+      : null;
 
     const dbRes = await db.withTransaction(async () => {
       const inserted = await InsertMonitoringData({
         monitor_tag: monitorTag,
         timestamp: ts,
+        region_id: regionId,
         status: status,
         latency: latency,
         type: type,
@@ -112,15 +142,20 @@ const addWorker = () => {
       });
     }
 
-    await SetLastMonitoringValue(monitorTag, {
-      monitor_tag: monitorTag,
-      timestamp: ts,
-      region_id: MERGED_REGION_ID,
-      status: status,
-      latency: latency,
-      type: type,
-    });
-    alertingQueue.push(monitorTag, ts, status);
+    // Merged verdict only. A probe region writing here would overwrite the
+    // status every group monitor and every public bar reads, with one region's
+    // opinion, and would then alert on it.
+    if (isMergedVerdict) {
+      await SetLastMonitoringValue(monitorTag, {
+        monitor_tag: monitorTag,
+        timestamp: ts,
+        region_id: MERGED_REGION_ID,
+        status: status,
+        latency: latency,
+        type: type,
+      });
+      alertingQueue.push(monitorTag, ts, status);
+    }
 
     return dbRes;
   });
@@ -133,14 +168,20 @@ const addWorker = () => {
   return worker;
 };
 
-export const push = async (monitorTag: string, ts: number, result: MonitoringResult, options?: JobsOptions) => {
+export const push = async (
+  monitorTag: string,
+  ts: number,
+  result: MonitoringResult,
+  regionId: number = MERGED_REGION_ID,
+  options?: JobsOptions,
+) => {
   // The region belongs in the deduplication id for the same reason it belongs in
   // the primary key: two regions reporting one monitor's minute are two distinct
   // samples. Keyed on `${tag}-${ts}` alone, BullMQ would drop the second as a
   // duplicate of the first and the row would never be written at all — a quieter
   // failure than the key collision, because nothing would even reach the
   // database to be overwritten.
-  const deDupId = `${monitorTag}-${MERGED_REGION_ID}-${ts}`;
+  const deDupId = `${monitorTag}-${regionId}-${ts}`;
   if (!options) {
     options = {};
   }
@@ -163,7 +204,11 @@ export const push = async (monitorTag: string, ts: number, result: MonitoringRes
     {
       monitorTag,
       ts,
+      // Spread first so a `MonitoringResult` can never carry a region of its own
+      // that disagrees with the one the caller asked for. The caller knows which
+      // agent reported; the result does not.
       ...result,
+      region_id: regionId,
     },
     options,
   );

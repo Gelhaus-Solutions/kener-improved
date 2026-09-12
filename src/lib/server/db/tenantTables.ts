@@ -82,6 +82,11 @@ export const TENANT_TABLES: ReadonlySet<string> = new Set([
   "report_schedules",
   "report_artifacts",
 
+  // B1b. Remote probes. `probe_agents` holds one org's agents; the assignment
+  // side table says which monitors each agent checks.
+  "probe_agents",
+  "monitor_probe_assignments",
+
   // The big one. Scoped like the rest even though `monitor_tag` is globally
   // unique, because "it is safe by accident" is not a property to rely on.
   "monitoring_data",

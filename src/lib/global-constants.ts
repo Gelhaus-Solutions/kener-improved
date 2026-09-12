@@ -100,4 +100,23 @@ export default {
   MAX_INPUT_PIXELS: 4096 * 4096,
   AUTH_PROVIDER_LOCAL: "local",
   AUTH_PROVIDER_OIDC: "oidc",
+  // B1b. The monitor types a remote probe can run, which is a much shorter list
+  // than the types that exist.
+  //
+  // The test is whether a check needs anything of Kener's but the monitor row:
+  //
+  //   GROUP       reads Redis for its members' cached statuses
+  //   HEARTBEAT   reads the database for the last receipt
+  //   SQL         needs a database connection Kener holds
+  //   PROMETHEUS  and DOCKER need server-side reachability and credentials
+  //   NONE        computes nothing
+  //   GAMEDIG     and GRPC are omitted for now because neither has been run
+  //               outside the server process; they are candidates, not
+  //               exclusions on principle.
+  //
+  // The five that remain take `(monitor, timestamp)`, open one socket and touch
+  // no database, which is exactly what makes them safe to run somewhere else.
+  // An agent's reported `capabilities` are intersected with this rather than
+  // trusted, so an agent cannot be handed a check this list forbids.
+  PROBE_ELIGIBLE_TYPES: ["API", "PING", "TCP", "DNS", "SSL"],
 } as const;

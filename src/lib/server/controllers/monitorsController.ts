@@ -101,6 +101,12 @@ interface MonitoringDataInput {
   type: string;
   error_message?: string | null;
   raw_status?: string | null;
+  /**
+   * Which region observed this sample (B1b). Absent means the merged verdict at
+   * region 0, which is every sample a local check produces and therefore every
+   * sample that existed before remote probes.
+   */
+  region_id?: number;
 }
 
 interface InterpolatedDataEntry {
@@ -117,6 +123,10 @@ export const InsertMonitoringData = async (data: MonitoringDataInput): Promise<M
   return await db.insertMonitoringData({
     monitor_tag: data.monitor_tag,
     timestamp: data.timestamp,
+    // Passed through rather than defaulted here: the repository already defaults
+    // an absent region to the merged verdict, and defaulting it twice is two
+    // places to change when that ever stops being the right default.
+    region_id: data.region_id,
     status: data.status,
     latency: data.latency || 0,
     type: data.type,
