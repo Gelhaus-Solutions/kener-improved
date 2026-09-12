@@ -57,6 +57,16 @@ export const orgPermissions: Array<{ id: string; permission_name: string }> = [
   { id: "reports.write", permission_name: "Create, update, and delete scheduled report delivery" },
 
   // Organisations (P4)
+  // Remote probe agents (B1c). Their own pair rather than folding into
+  // `monitors.*`, and the token is the reason. A probe is sent monitor
+  // `type_data` with its secrets already resolved, so whoever may mint a probe
+  // token may receive the credentials of every monitor they then assign to it.
+  // Granting that to everybody who may edit a monitor would be an escalation
+  // nobody chose, and it would be invisible: the monitor screen would look
+  // exactly as it does now.
+  { id: "probes.read", permission_name: "View remote probe agents and their assignments" },
+  { id: "probes.write", permission_name: "Create, assign, and delete remote probe agents" },
+
   { id: "orgs.read", permission_name: "View organisation settings" },
   { id: "orgs.write", permission_name: "Create and update organisations" },
   { id: "orgs.members.read", permission_name: "View organisation members" },
@@ -89,6 +99,17 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   setMonitorCategory: "monitors.write",
   renameCategory: "monitors.write",
   deleteCategory: "monitors.write",
+
+  // Remote probes (B1c). Reading the fleet opens the screen; everything that
+  // mints a token, moves an agent between regions, or decides which monitors a
+  // probe is handed is a write.
+  getProbeFleet: "probes.read",
+  createProbeAgent: "probes.write",
+  updateProbeAgent: "probes.write",
+  rotateProbeAgentToken: "probes.write",
+  deleteProbeAgent: "probes.write",
+  assignMonitorToProbe: "probes.write",
+  unassignMonitorFromProbe: "probes.write",
 
   // SLO targets (F1a).
   getSlaTargets: "slo.read",
@@ -280,6 +301,10 @@ export const ORG_ROUTE_PERMISSION_MAP: Record<string, string | null> = {
   // property of a monitor; every button on it is gated on `monitors.write` by
   // its own action.
   "/(manage)/manage/app/categories": "monitors.read",
+
+  // Remote probe agents (B1c). `probes.read` opens the screen; every button on
+  // it is separately gated on `probes.write` by its own action.
+  "/(manage)/manage/app/probes": "probes.read",
 
   // SLO targets and their attainment (F1a). `slo.read` opens the screen; every
   // button on it is separately gated on `slo.write` by its own action, the same

@@ -34,6 +34,7 @@
   import DatabaseIcon from "@lucide/svelte/icons/database";
   import Building2Icon from "@lucide/svelte/icons/building-2";
   import ServerCogIcon from "@lucide/svelte/icons/server-cog";
+  import RadarIcon from "@lucide/svelte/icons/radar";
 
   import { Toaster } from "$lib/components/ui/sonner/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
@@ -66,6 +67,10 @@
         { title: "Maintenances", url: "/manage/app/maintenances", icon: ClockAlertIcon },
         { title: "Alerts", url: "/manage/app/alerts", icon: SirenIcon },
         { title: "Monitoring Data", url: "/manage/app/monitoring-data", icon: DatabaseIcon },
+        // B1c. In Operate beside Monitoring Data rather than in Settings: an
+        // operator comes here to see whether a region is still reporting, which
+        // is something watched during a bad hour, not configured once.
+        { title: "Probes", url: "/manage/app/probes", icon: RadarIcon },
         // F1a. In Operate rather than Settings: an error budget is something an
         // operator watches during a bad week, not a preference set once.
         { title: "SLOs", url: "/manage/app/slo", icon: TargetIcon },
