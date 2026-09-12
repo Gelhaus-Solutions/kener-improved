@@ -71,6 +71,22 @@ jobs:
       - name: Run tests
         run: npm test
 
+      # A production build, because `check` and `test` between them cannot see
+      # this class of failure and one reached main.
+      #
+      # `import.meta.glob(..., { eager: true })` EXECUTES every file it matches.
+      # A module that is only valid under vitest - a co-located `*.test.ts` whose
+      # top level calls `vi.mock` - therefore runs inside the server bundle and
+      # throws "Vitest mocker was not initialized in this environment", but only
+      # here: type checking is happy, and the test suite is happy because under
+      # vitest the file is exactly what it claims to be.
+      #
+      # publish-main.yml would eventually catch it by failing to build the image,
+      # but that is after merge and it does not run on a pull request, so main
+      # stays red in the meantime. This is the same gate, one step earlier.
+      - name: Build
+        run: npm run build
+
       # The migrations and seeds are the only thing that still runs from source
       # at boot, so this is also the one place CI executes them at all. A
       # migration that is not re-runnable, or a seed that imports a file the
