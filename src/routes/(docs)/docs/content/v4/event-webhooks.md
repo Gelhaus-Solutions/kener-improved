@@ -12,7 +12,8 @@ This is different from [alerting triggers](/docs/v4/alerting), which fire only o
 1. Go to **Manage → Webhooks** and select **Add endpoint**.
 2. Enter a **name** and the **HTTPS URL** that will receive events.
 3. Choose the **event types** to subscribe to.
-4. Save. **The signing secret is shown once and never again** — copy it now.
+4. Choose a **format**: Generic JSON, or Discord if the URL is a Discord webhook.
+5. Save. **The signing secret is shown once and never again**, so copy it now.
 
 If you lose the secret, rotate it (see [Rotating the secret](#rotating-the-secret)) rather than recreating the endpoint.
 
@@ -20,38 +21,72 @@ If you lose the secret, rotate it (see [Rotating the secret](#rotating-the-secre
 
 Subscribe to exact types, or to a whole domain with a wildcard such as `incident.*`.
 
-| Domain        | Types                                                                                                                                                             |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Domain        | Types                                                                                                                                                                                        |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `incident`    | `created`, `updated`, `state_changed`, `severity_changed`, `component_impact_changed`, `comment_added`, `comment_updated`, `comment_hidden`, `resolved`, `reopened`, `deleted`, `backfilled` |
-| `maintenance` | `scheduled`, `reminder`, `started`, `completed`, `cancelled`, `updated`, `deleted`                                                                                  |
-| `monitor`     | `status_changed`, `alert_triggered`, `alert_resolved`, `created`, `updated`, `deleted`, `paused`, `resumed`                                                         |
-| `postmortem`  | `drafted`, `updated`, `published`, `unpublished`                                                                                                                    |
+| `maintenance` | `scheduled`, `reminder`, `started`, `completed`, `cancelled`, `updated`, `deleted`                                                                                                           |
+| `monitor`     | `status_changed`, `alert_triggered`, `alert_resolved`, `created`, `updated`, `deleted`, `paused`, `resumed`                                                                                  |
+| `postmortem`  | `drafted`, `updated`, `published`, `unpublished`                                                                                                                                             |
 
 `incident.resolved` fires alongside `incident.state_changed`. Subscribe to whichever suits you; subscribing to both delivers two events.
 
 > [!NOTE]
 > Administrative events (user, API key, role and settings changes) are recorded in the audit log and are never deliverable to a webhook.
 
+## Discord {#discord}
+
+A Discord webhook URL will not accept Kener's own payload: it requires a body of its own shape. Set the endpoint's **format** to Discord and Kener sends what Discord expects. Without it every delivery fails and the endpoint disables itself after 20 consecutive failures.
+
+The delivery is still signed. Discord ignores the signature header, and leaving it on means changing an endpoint's format never quietly changes whether it is signed.
+
+### The message {#discord-message}
+
+The **Message** field is the line posted to the channel. The event detail is added underneath it as an embed automatically, so the message is only what you want said and who you want told. Leave it empty to post the event name alone.
+
+```
+<@&123456789012345678> {{type}}: {{object.title}}
+```
+
+| Variable                 | Is                                                    |
+| ------------------------ | ----------------------------------------------------- |
+| `{{type}}`               | The event type, such as `incident.created`            |
+| `{{object.title}}`       | The incident or maintenance title                     |
+| `{{object.status}}`      | `UP`, `DOWN`, `DEGRADED`, where the event carries one |
+| `{{object.severity}}`    | The incident severity                                 |
+| `{{object.monitor_tag}}` | The monitor, where the event is about one             |
+| `{{site_name}}`          | Your status page's name                               |
+
+A variable the event does not carry renders as nothing rather than the word `undefined`.
+
+### Mentions {#discord-mentions}
+
+Mention a role with `<@&ROLE_ID>` and a person with `<@USER_ID>`. In Discord, right-click the role or user and **Copy ID** (Developer Mode must be on).
+
+> [!IMPORTANT]
+> **Only mentions written in the Message field can notify anyone.** A mention that arrives through a variable is displayed but never pings. This is deliberate: an incident title is text somebody typed, and without this rule anyone who can open an incident could put `@everyone` in its title and notify your whole server from your status page.
+>
+> `@everyone` and `@here` work only when the Message field itself contains them.
+
 ## Payload {#payload}
 
 ```json
 {
-  "id": "01JQ8ZK5T3V9WXYZ0ABCDEFGHJ",
-  "type": "incident.resolved",
-  "api_version": "2026-09-08",
-  "occurred_at": 1788861599,
-  "seq": 4821,
-  "data": {
-    "object": { "id": 42, "title": "Checkout is failing", "state": "RESOLVED" },
-    "previous": { "state": "MONITORING" }
-  },
-  "diff": { "before": { "state": "MONITORING" }, "after": { "state": "RESOLVED" } }
+    "id": "01JQ8ZK5T3V9WXYZ0ABCDEFGHJ",
+    "type": "incident.resolved",
+    "api_version": "2026-09-08",
+    "occurred_at": 1788861599,
+    "seq": 4821,
+    "data": {
+        "object": { "id": 42, "title": "Checkout is failing", "state": "RESOLVED" },
+        "previous": { "state": "MONITORING" }
+    },
+    "diff": { "before": { "state": "MONITORING" }, "after": { "state": "RESOLVED" } }
 }
 ```
 
-| Field         | Meaning                                                                                    |
-| ------------- | ------------------------------------------------------------------------------------------ |
-| `id`          | Unique event id. Use it to discard duplicates.                                              |
+| Field         | Meaning                                                                                      |
+| ------------- | -------------------------------------------------------------------------------------------- |
+| `id`          | Unique event id. Use it to discard duplicates.                                               |
 | `seq`         | Total ordering across your instance. Events can arrive out of order; sort by this.           |
 | `occurred_at` | UTC seconds when the change happened.                                                        |
 | `data.object` | Current state of the object. On a retry this reflects the object **now**, not when it fired. |
@@ -68,38 +103,33 @@ Verify against the **raw request body**, before any JSON parsing — re-serializ
 **Node.js (Express):**
 
 ```js
-import crypto from "node:crypto";
-import express from "express";
+import crypto from "node:crypto"
+import express from "express"
 
-const app = express();
-const SECRET = process.env.KENER_WEBHOOK_SECRET;
+const app = express()
+const SECRET = process.env.KENER_WEBHOOK_SECRET
 
 app.post("/hook", express.raw({ type: "application/json" }), (req, res) => {
-  const header = req.get("Kener-Signature") ?? "";
-  const timestamp = header.match(/t=(\d+)/)?.[1];
-  const signatures = [...header.matchAll(/v1=([0-9a-f]{64})/g)].map((m) => m[1]);
-  if (!timestamp || signatures.length === 0) return res.sendStatus(400);
+    const header = req.get("Kener-Signature") ?? ""
+    const timestamp = header.match(/t=(\d+)/)?.[1]
+    const signatures = [...header.matchAll(/v1=([0-9a-f]{64})/g)].map((m) => m[1])
+    if (!timestamp || signatures.length === 0) return res.sendStatus(400)
 
-  // Reject anything older than 5 minutes, so a captured request cannot be replayed.
-  if (Math.abs(Math.floor(Date.now() / 1000) - Number(timestamp)) > 300) return res.sendStatus(400);
+    // Reject anything older than 5 minutes, so a captured request cannot be replayed.
+    if (Math.abs(Math.floor(Date.now() / 1000) - Number(timestamp)) > 300) return res.sendStatus(400)
 
-  const expected = crypto
-    .createHmac("sha256", SECRET)
-    .update(`${timestamp}.${req.body}`)
-    .digest("hex");
+    const expected = crypto.createHmac("sha256", SECRET).update(`${timestamp}.${req.body}`).digest("hex")
 
-  // During a rotation Kener sends several v1 signatures; any match is valid.
-  const valid = signatures.some((sig) =>
-    sig.length === expected.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected)),
-  );
-  if (!valid) return res.sendStatus(401);
+    // During a rotation Kener sends several v1 signatures; any match is valid.
+    const valid = signatures.some((sig) => sig.length === expected.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected)))
+    if (!valid) return res.sendStatus(401)
 
-  const event = JSON.parse(req.body.toString("utf8"));
-  console.log(event.type, event.id);
-  res.sendStatus(200);
-});
+    const event = JSON.parse(req.body.toString("utf8"))
+    console.log(event.type, event.id)
+    res.sendStatus(200)
+})
 
-app.listen(3000);
+app.listen(3000)
 ```
 
 **Python (Flask):**
@@ -169,13 +199,16 @@ See [environment variables](/docs/v4/setup/environment-variables).
 
 ## Troubleshooting {#troubleshooting}
 
-| Symptom                        | Cause                                                                                       |
-| ------------------------------ | ------------------------------------------------------------------------------------------- |
-| Signature never matches        | The body was parsed and re-serialized. Sign the raw bytes.                                   |
-| Nothing is delivered           | The event type is not subscribed. A misspelled wildcard is rejected at save time.            |
-| `URL resolves to a private address` | The receiver is on a private range; set `KENER_ALLOW_PRIVATE_WEBHOOKS=true`.            |
-| Endpoint became `DISABLED_AUTO` | 20 consecutive failures. Fix the receiver and re-enable it, then use **Retry all dead for this target** on the delivery log. |
-| `Endpoint secret could not be decrypted` | `KENER_SECRET_KEY` changed. Rotate the endpoint's secret to set a new one.        |
+- **Discord returns 400 on every delivery**: the endpoint's format is still Generic JSON. Change it to Discord.
+- **The mention shows in the message but nobody is notified**: the mention arrived through a variable rather than being written in the Message field. Put the `<@&ROLE_ID>` in the Message field itself.
+
+| Symptom                                  | Cause                                                                                                                        |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Signature never matches                  | The body was parsed and re-serialized. Sign the raw bytes.                                                                   |
+| Nothing is delivered                     | The event type is not subscribed. A misspelled wildcard is rejected at save time.                                            |
+| `URL resolves to a private address`      | The receiver is on a private range; set `KENER_ALLOW_PRIVATE_WEBHOOKS=true`.                                                 |
+| Endpoint became `DISABLED_AUTO`          | 20 consecutive failures. Fix the receiver and re-enable it, then use **Retry all dead for this target** on the delivery log. |
+| `Endpoint secret could not be decrypted` | `KENER_SECRET_KEY` changed. Rotate the endpoint's secret to set a new one.                                                   |
 
 > [!WARNING]
 > Webhook secrets are encrypted with a key derived from `KENER_SECRET_KEY`. Changing that variable makes existing secrets unreadable — as it already does for every API key hash.
