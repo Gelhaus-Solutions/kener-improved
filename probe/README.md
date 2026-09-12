@@ -56,9 +56,16 @@ need to bump the file by hand first.
    box there: two agents in Frankfurt are two machines answering "what does
    Frankfurt see", not two votes.
 
-   They are equal peers, and nothing about them is configurable individually. If
-   you find yourself wanting to weight one agent against another, what you
-   actually want is two regions.
+    By default they count equally. If one of them should settle a disagreement,
+    give it a higher **weight** on the agent: a weight of 2 against two agents at
+    1 means it decides, and a weight of 0 records an agent's result without
+    letting it vote. Weight applies only among the agents of one region, so
+    raising it still cannot buy that region more say over the others.
+
+    Weight is read by the `weighted majority` policy only, exactly as the
+    per-region weights are. Under `trust order` the first agent listed decides,
+    and under `quorum down` it is a headcount, so in both cases the number is
+    ignored.
 
 3. Copy the token. It is shown once and cannot be recovered; if it is lost,
    issue a new one with the key button.
