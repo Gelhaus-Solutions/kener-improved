@@ -73,6 +73,16 @@ export interface HeartbeatMonitorTypeData {
   downRemainingMinutes: number;
   degradedRemainingMinutes: number;
   secretString: string;
+  /**
+   * B11. The schedule the job is expected to keep, as a cron pattern. Empty or
+   * absent keeps the original interval behaviour, so existing monitors are
+   * untouched until someone opts in.
+   */
+  expectedCron?: string;
+  /** B11. IANA zone the cron is read in. Absent means UTC. */
+  cronTimezone?: string;
+  /** B11. Minutes past the expected time before a run counts as late. */
+  graceMinutes?: number;
 }
 
 export interface GroupMonitorMember {
