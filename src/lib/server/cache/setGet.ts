@@ -11,14 +11,32 @@ export async function GetLastMonitoringValue(
   return await getCache<MonitoringData>(tag + ":last_status", fetcher, 86400);
 }
 
+/**
+ * B11. What the last ping told us. `exitCode` and `durationMs` are optional
+ * because a plain GET carries neither, and because values cached before B11
+ * have only the timestamp. Absent means "the job did not say", never "zero".
+ */
+export interface LastHeartbeat {
+  timestamp: number;
+  exitCode?: number;
+  durationMs?: number;
+}
+
 //function to set heartbeat value in cache
-export async function SetLastHeartbeat(tag: string, timestamp: number): Promise<void> {
-  await setCache<{ timestamp: number }>("last_heartbeat:" + tag, { timestamp }, 45 * 86400); //set ttl to 45 days
+export async function SetLastHeartbeat(
+  tag: string,
+  timestamp: number,
+  extra?: { exitCode?: number; durationMs?: number },
+): Promise<void> {
+  const value: LastHeartbeat = { timestamp };
+  if (extra?.exitCode !== undefined) value.exitCode = extra.exitCode;
+  if (extra?.durationMs !== undefined) value.durationMs = extra.durationMs;
+  await setCache<LastHeartbeat>("last_heartbeat:" + tag, value, 45 * 86400); //set ttl to 45 days
 }
 
 //function to get heartbeat value from cache
-export async function GetLastHeartbeat(tag: string): Promise<{ timestamp: number } | null> {
-  return await getCache<{ timestamp: number }>("last_heartbeat:" + tag, undefined, 45 * 86400);
+export async function GetLastHeartbeat(tag: string): Promise<LastHeartbeat | null> {
+  return await getCache<LastHeartbeat>("last_heartbeat:" + tag, undefined, 45 * 86400);
 }
 
 export async function DeleteMonitorCaches(tag: string): Promise<void> {

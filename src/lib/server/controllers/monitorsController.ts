@@ -636,7 +636,19 @@ export const GetLastHeartbeat = async (monitor_tag: string): Promise<MonitoringD
   return await db.getLastHeartbeat(monitor_tag);
 };
 
-export const RegisterHeartbeat = async (nameInUrl: string, secret: string): Promise<string> => {
+/**
+ * B11. `report` is what the job said about its own run. A bare GET carries
+ * neither field, which stays the common case and means exactly what it always
+ * did: "I am alive". A non-zero exit code is the job reporting failure
+ * explicitly, rather than leaving us to infer it from silence that may never
+ * come - a job that runs every night and fails fast would otherwise check in
+ * punctually forever while doing nothing.
+ */
+export const RegisterHeartbeat = async (
+  nameInUrl: string,
+  secret: string,
+  report?: { exitCode?: number; durationMs?: number },
+): Promise<string> => {
   // I3e: a heartbeat URL carries the per-org slug like every other public URL.
   // These live in external cron jobs and uptime pingers for years, so the
   // default org resolving slug to the identical tag is what keeps them working.
@@ -665,7 +677,9 @@ export const RegisterHeartbeat = async (nameInUrl: string, secret: string): Prom
         nowSec += 1;
       }
 
-      await SetLastHeartbeat(tag, nowSec);
+      const failed = report?.exitCode !== undefined && report.exitCode !== 0;
+
+      await SetLastHeartbeat(tag, nowSec, { exitCode: report?.exitCode, durationMs: report?.durationMs });
 
       // Best-effort persist a heartbeat SIGNAL for restart recovery.
       // Failure here should not break heartbeat reception.
@@ -673,10 +687,12 @@ export const RegisterHeartbeat = async (nameInUrl: string, secret: string): Prom
         await InsertMonitoringData({
           monitor_tag: tag,
           timestamp: nowSec,
-          status: GC.UP,
-          latency: 0,
+          // B11. The signal row is what survives a cache flush, so a failed run
+          // has to be legible from it alone.
+          status: failed ? GC.DOWN : GC.UP,
+          latency: report?.durationMs ?? 0,
           type: GC.SIGNAL,
-          error_message: null,
+          error_message: failed ? `Run reported exit code ${report?.exitCode}` : null,
         });
       } catch (e) {
         console.error("Error persisting heartbeat signal:", e);
