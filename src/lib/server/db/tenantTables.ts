@@ -83,9 +83,14 @@ export const TENANT_TABLES: ReadonlySet<string> = new Set([
   "report_artifacts",
 
   // B1b. Remote probes. `probe_agents` holds one org's agents; the assignment
-  // side table says which monitors each agent checks.
+  // side table says which monitors are checked from each region.
   "probe_agents",
   "monitor_probe_assignments",
+
+  // B1e. What a region checks by default, and the per-monitor include/exclude
+  // that the resolved assignments above are computed from.
+  "probe_region_rules",
+  "monitor_region_overrides",
 
   // B1d. The merge cascade's two override levels. Both exist only for a monitor
   // that overrides something, so they are small and usually empty.

@@ -108,8 +108,11 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   updateProbeAgent: "probes.write",
   rotateProbeAgentToken: "probes.write",
   deleteProbeAgent: "probes.write",
-  assignMonitorToProbe: "probes.write",
-  unassignMonitorFromProbe: "probes.write",
+  // B1e. The region's rule and a monitor's exception to it replaced the
+  // per-agent assign/unassign pair. Both are the same permission: they decide
+  // where a check runs, which is what `probes.write` has always meant.
+  setProbeRegionRule: "probes.write",
+  setMonitorRegionAssignment: "probes.write",
 
   // The merge cascade (B1d). Reading what a monitor's sources resolve to is a
   // read of the probe configuration; every level that changes how observations

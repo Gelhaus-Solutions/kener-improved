@@ -5,6 +5,7 @@ import { getConnection } from "$lib/server/probes/registry.js";
 import { configuredPort } from "$lib/server/probes/wsServer.js";
 import { GetSiteDataByKey } from "$lib/server/controllers/siteDataController.js";
 import { parseMergeDefaults, MERGE_POLICIES, SOURCE_MODES, LOCAL_REGION_ID } from "$lib/server/probes/merge.js";
+import { REGION_RULES } from "$lib/server/probes/assignment.js";
 import type { ActionDefinition } from "../../types.js";
 
 /**
@@ -24,14 +25,17 @@ import type { ActionDefinition } from "../../types.js";
 export default {
   action: "getProbeFleet",
   handler: async () => {
-    const [agents, assignments, regions, monitors, mergeRegions, storedPolicy] = await Promise.all([
-      db.getProbeAgents(),
-      db.getProbeAssignments(),
-      db.getAssignableRegions(),
-      db.getMonitors({ status: "ACTIVE" }),
-      db.getMergeRegions(),
-      GetSiteDataByKey("probeMergePolicy"),
-    ]);
+    const [agents, assignments, regions, monitors, mergeRegions, storedPolicy, regionRules, overrides] =
+      await Promise.all([
+        db.getProbeAgents(),
+        db.getProbeAssignments(),
+        db.getAssignableRegions(),
+        db.getMonitors({ status: "ACTIVE" }),
+        db.getMergeRegions(),
+        GetSiteDataByKey("probeMergePolicy"),
+        db.getProbeRegionRules(),
+        db.getMonitorRegionOverrides(),
+      ]);
 
     // The web process only holds probe connections when it is also the scheduler,
     // which is production's single process but never development's split one.
@@ -75,6 +79,18 @@ export default {
         last_seen_at: agent.last_seen_at,
       })),
       assignments,
+
+      // B1e. The region is the unit of configuration now, so the screen is
+      // given the rule and the exceptions rather than being left to infer them
+      // from the resolved rows. A region with no rule row is NONE, which is the
+      // same thing the resolver believes.
+      region_rules: regionRules.map((row) => ({ region_id: row.region_id, rule: row.rule, mode: row.mode })),
+      region_overrides: overrides.map((row) => ({
+        monitor_tag: row.monitor_tag,
+        region_id: row.region_id,
+        decision: row.decision,
+      })),
+      region_rule_values: REGION_RULES,
 
       // B1d. The cascade's top two levels, so the screen can show what a source
       // actually resolves to rather than only what it overrides.

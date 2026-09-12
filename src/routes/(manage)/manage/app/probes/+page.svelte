@@ -50,11 +50,26 @@
     assignment_id: number;
     monitor_tag: string;
     mode: string;
-    agent_id: number;
-    agent_name: string;
+    /** RULE if the region's rule put it here, OVERRIDE if somebody named it. */
+    source: string;
     region_id: number;
-    status: string;
-    connection_state: string;
+    // Nullable, and that is B1e's point: an assignment belongs to the region, so
+    // a region whose agent has been deleted still has its monitors and the
+    // screen has to be able to say nothing is serving it.
+    agent_id: number | null;
+    agent_name: string | null;
+    status: string | null;
+    connection_state: string | null;
+  }
+  interface RegionRule {
+    region_id: number;
+    rule: string;
+    mode: string;
+  }
+  interface RegionOverride {
+    monitor_tag: string;
+    region_id: number;
+    decision: string;
   }
   interface PickableMonitor {
     tag: string;
@@ -73,6 +88,8 @@
   let regions = $state<Region[]>([]);
   let agents = $state<Agent[]>([]);
   let assignments = $state<Assignment[]>([]);
+  let regionRules = $state<RegionRule[]>([]);
+  let regionOverrides = $state<RegionOverride[]>([]);
   let monitors = $state<PickableMonitor[]>([]);
 
   // ---- B1d. The merge cascade ------------------------------------------
@@ -200,7 +217,7 @@
   let editName = $state("");
   let editRegion = $state<string>("");
 
-  let assigning = $state<Agent | null>(null);
+  let assigning = $state<Region | null>(null);
   let assignTag = $state<string>("");
 
   let confirmingDelete = $state<Agent | null>(null);
@@ -225,14 +242,42 @@
     return id === mergedRegionId ? region.name : `${region.name} (${region.code})`;
   }
 
-  function assignmentsFor(agentId: number): Assignment[] {
-    return assignments.filter((assignment) => assignment.agent_id === agentId);
+  function assignmentsFor(regionId: number): Assignment[] {
+    return assignments.filter((assignment) => assignment.region_id === regionId);
   }
 
-  /** Monitors this agent does not already have, so the picker never offers a duplicate. */
-  function assignableFor(agentId: number): PickableMonitor[] {
-    const taken = new Set(assignmentsFor(agentId).map((assignment) => assignment.monitor_tag));
+  /** The agent serving a region, or null when nothing is. */
+  function agentFor(regionId: number): Agent | null {
+    return agents.find((agent) => agent.region_id === regionId) ?? null;
+  }
+
+  /** A region with no rule row checks nothing, which is what the resolver believes too. */
+  function ruleFor(regionId: number): string {
+    return regionRules.find((rule) => rule.region_id === regionId)?.rule ?? "NONE";
+  }
+
+  /** Monitors this region does not already check, so the picker never offers a duplicate. */
+  function assignableFor(regionId: number): PickableMonitor[] {
+    const taken = new Set(assignmentsFor(regionId).map((assignment) => assignment.monitor_tag));
     return monitors.filter((monitor) => !taken.has(monitor.tag));
+  }
+
+  /**
+   * Why a monitor is on a region's list, in the words an operator needs.
+   *
+   * The distinction is not cosmetic: removing a monitor the rule put there has
+   * to store an exception, or the next reconcile puts it straight back.
+   */
+  function sourceLabel(assignment: Assignment): string {
+    return assignment.source === "RULE" ? "by rule" : "added";
+  }
+
+  /** Monitors an exception is keeping off a region that would otherwise check them. */
+  function excludedFor(regionId: number): string[] {
+    return regionOverrides
+      .filter((o) => o.region_id === regionId && o.decision === "EXCLUDE")
+      .map((o) => o.monitor_tag)
+      .filter((tag) => monitors.some((monitor) => monitor.tag === tag));
   }
 
   function lastSeenText(seconds: number | null): string {
@@ -266,6 +311,8 @@
       regions = result.regions ?? [];
       agents = result.agents ?? [];
       assignments = result.assignments ?? [];
+      regionRules = result.region_rules ?? [];
+      regionOverrides = result.region_overrides ?? [];
       monitors = result.monitors ?? [];
       mergePolicies = result.merge_policies ?? [];
       sourceModes = result.source_modes ?? [];
@@ -462,9 +509,9 @@
     }
   }
 
-  function openAssign(agent: Agent) {
-    assigning = agent;
-    const options = assignableFor(agent.id);
+  function openAssign(region: Region) {
+    assigning = region;
+    const options = assignableFor(region.id);
     assignTag = options.length > 0 ? options[0].tag : "";
   }
 
@@ -472,8 +519,12 @@
     if (!assigning || !assignTag) return;
     busy = true;
     try {
-      await call("assignMonitorToProbe", { monitor_tag: assignTag, agent_id: assigning.id });
-      toast.success(`Assigned to ${assigning.name}`);
+      await call("setMonitorRegionAssignment", {
+        monitor_tag: assignTag,
+        region_id: assigning.id,
+        decision: "INCLUDE"
+      });
+      toast.success(`${assignTag} is checked from ${assigning.name}`);
       assigning = null;
       await load();
     } catch (e) {
@@ -483,14 +534,60 @@
     }
   }
 
+  /**
+   * Takes a monitor off a region's list.
+   *
+   * The decision depends on the rule, and getting it wrong is the obvious bug:
+   * on a region that checks everything, dropping the exception would let the
+   * next reconcile put the monitor straight back, so the removal has to be
+   * stored as an EXCLUDE. On a region that checks only what it was given, the
+   * exception IS the assignment and removing it is the whole job.
+   */
   async function unassign(assignment: Assignment) {
+    const decision = ruleFor(assignment.region_id) === "ALL" ? "EXCLUDE" : "DEFAULT";
     busy = true;
     try {
-      await call("unassignMonitorFromProbe", { id: assignment.assignment_id });
-      toast.success(`${assignment.monitor_tag} is checked locally again`);
+      await call("setMonitorRegionAssignment", {
+        monitor_tag: assignment.monitor_tag,
+        region_id: assignment.region_id,
+        decision
+      });
+      toast.success(`${assignment.monitor_tag} is no longer checked from ${regionLabel(assignment.region_id)}`);
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not remove that assignment");
+    } finally {
+      busy = false;
+    }
+  }
+
+  /** Puts an excluded monitor back under the region's rule. */
+  async function clearException(regionId: number, tag: string) {
+    busy = true;
+    try {
+      await call("setMonitorRegionAssignment", { monitor_tag: tag, region_id: regionId, decision: "DEFAULT" });
+      toast.success(`${tag} follows the rule again`);
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not clear that exception");
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function setRule(regionId: number, rule: string) {
+    busy = true;
+    try {
+      const result = await call("setProbeRegionRule", { region_id: regionId, rule });
+      const moved = Number(result.created ?? 0) + Number(result.removed ?? 0);
+      toast.success(
+        rule === "ALL"
+          ? `${regionLabel(regionId)} now checks every eligible monitor${moved ? ` (${moved} changed)` : ""}`
+          : `${regionLabel(regionId)} now checks only what it is given${moved ? ` (${moved} changed)` : ""}`
+      );
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not change that rule");
     } finally {
       busy = false;
     }
@@ -788,11 +885,88 @@
             </div>
           </div>
         </Card.Header>
-        <Card.Content class="flex flex-col gap-2">
-          {#each assignmentsFor(agent.id) as assignment (assignment.assignment_id)}
+        <Card.Content>
+          <!-- B1e: what this agent checks is a property of its REGION, listed
+               under Coverage below. Repeating it here would invite an operator
+               to think of it as the agent's, which is the belief that made
+               deleting an agent quietly forget its monitors. -->
+          <p class="text-muted-foreground text-sm">
+            Checks whatever {regionLabel(agent.region_id)} covers: {assignmentsFor(agent.region_id).length} monitor{assignmentsFor(
+              agent.region_id
+            ).length === 1
+              ? ""
+              : "s"}.
+          </p>
+        </Card.Content>
+      </Card.Root>
+    {/each}
+
+    <!-- B1e. Coverage, region first and monitor second.
+         A region is what an operator configures and what survives an agent being
+         deleted and recreated, so it is what the list is keyed on. Every region
+         appears, including ones with no agent: "Frankfurt covers nine monitors
+         and nothing is serving it" is exactly the state that used to be
+         invisible, because the assignments vanished with the agent. -->
+    {#each regions as region (region.id)}
+      {@const agent = agentFor(region.id)}
+      {@const covered = assignmentsFor(region.id)}
+      {@const excluded = excludedFor(region.id)}
+      <Card.Root>
+        <Card.Header>
+          <Card.Title class="flex flex-wrap items-center gap-2">
+            {regionLabel(region.id)}
+            <Badge variant="outline">{covered.length} monitor{covered.length === 1 ? "" : "s"}</Badge>
+            {#if agent}
+              <Badge variant="secondary">served by {agent.name}</Badge>
+            {:else}
+              <Badge variant="destructive">no agent</Badge>
+            {/if}
+          </Card.Title>
+          <Card.Description>
+            {#if agent}
+              {region.note}
+            {:else}
+              Nothing is serving this region, so none of these monitors is being checked from it right now. The list is
+              kept: create an agent here and it picks them straight back up.
+            {/if}
+          </Card.Description>
+        </Card.Header>
+        <Card.Content class="flex flex-col gap-3">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-sm font-medium">This region checks</span>
+            <Button
+              variant={ruleFor(region.id) === "ALL" ? "default" : "outline"}
+              size="sm"
+              disabled={busy || region.id === mergedRegionId}
+              onclick={() => setRule(region.id, "ALL")}
+            >
+              Every eligible monitor
+            </Button>
+            <Button
+              variant={ruleFor(region.id) === "NONE" ? "default" : "outline"}
+              size="sm"
+              disabled={busy}
+              onclick={() => setRule(region.id, "NONE")}
+            >
+              Only what it is given
+            </Button>
+          </div>
+          {#if region.id === mergedRegionId}
+            <p class="text-muted-foreground text-xs">
+              The merged verdict region cannot check everything at once: an agent here replaces Kener's own check, so
+              each monitor has to be named deliberately.
+            </p>
+          {:else if ruleFor(region.id) === "ALL"}
+            <p class="text-muted-foreground text-xs">
+              Monitors created later are covered too, without anybody having to remember.
+            </p>
+          {/if}
+
+          {#each covered as assignment (assignment.assignment_id)}
             <div class="flex items-center justify-between gap-3 rounded-md border p-2">
-              <div class="min-w-0 truncate text-sm">
+              <div class="flex min-w-0 items-center gap-2 truncate text-sm">
                 <span class="font-medium">{assignment.monitor_tag}</span>
+                <span class="text-muted-foreground text-xs">{sourceLabel(assignment)}</span>
                 <!-- `assignment.mode` deliberately not shown. It is B1c's
                      REMOTE_PREFERRED column, which B1d stopped reading: how a
                      source takes part is now the resolved VOTE / DISPLAY_ONLY /
@@ -813,18 +987,33 @@
               </div>
             </div>
           {:else}
-            <p class="text-muted-foreground text-sm">
-              Nothing assigned. This agent will connect and sit idle until it is given a monitor.
-            </p>
+            <p class="text-muted-foreground text-sm">Nothing is checked from here yet.</p>
           {/each}
+
+          {#if excluded.length > 0}
+            <div class="flex flex-col gap-2 rounded-md border border-dashed p-2">
+              <p class="text-muted-foreground text-xs">
+                Held back from this region's rule. Without these, the rule would cover them again on the next save.
+              </p>
+              {#each excluded as tag (tag)}
+                <div class="flex items-center justify-between gap-3 text-sm">
+                  <span class="min-w-0 truncate">{tag}</span>
+                  <Button variant="ghost" size="sm" disabled={busy} onclick={() => clearException(region.id, tag)}>
+                    Follow the rule
+                  </Button>
+                </div>
+              {/each}
+            </div>
+          {/if}
+
           <div>
             <Button
               variant="outline"
               size="sm"
-              disabled={busy || assignableFor(agent.id).length === 0}
-              onclick={() => openAssign(agent)}
+              disabled={busy || assignableFor(region.id).length === 0}
+              onclick={() => openAssign(region)}
             >
-              Assign a monitor
+              Add a monitor
             </Button>
           </div>
         </Card.Content>
@@ -966,7 +1155,7 @@
 <Dialog.Root open={assigning !== null} onOpenChange={(open) => (assigning = open ? assigning : null)}>
   <Dialog.Content>
     <Dialog.Header>
-      <Dialog.Title>Assign a monitor to {assigning?.name}</Dialog.Title>
+      <Dialog.Title>Check a monitor from {assigning?.name}</Dialog.Title>
       <Dialog.Description>
         Only {eligibleTypes.join(", ")} monitors can run on a probe. The rest need something only this server has: Redis,
         the database, or a connection Kener holds.
@@ -1000,8 +1189,9 @@
     <Dialog.Header>
       <Dialog.Title>Remove {confirmingDelete?.name}?</Dialog.Title>
       <Dialog.Description>
-        Its token stops working and its assignments go with it. Every monitor it was checking is checked locally from
-        the next tick, so nothing stops being monitored.
+        Its token stops working and the monitors its region covers are checked locally from the next tick, so nothing
+        stops being monitored. The region keeps its coverage: create an agent there again and it picks the same monitors
+        back up.
       </Dialog.Description>
     </Dialog.Header>
     <Dialog.Footer>

@@ -36,6 +36,7 @@ import { CollapseStatusCounts } from "../../clientTools.js";
 import { translate, isLocaleAvailable } from "../i18n.js";
 import type { HeartbeatMonitor, GroupMonitorTypeData } from "../types/monitor.js";
 import { IsValidProxyURL } from "../../anywhere.js";
+import { reconcileProbeAssignments } from "../probes/reconcile.js";
 
 interface GroupUpdateData {
   monitor_tag: string;
@@ -343,9 +344,30 @@ export const CreateUpdateMonitor = async (monitor: MonitorInput): Promise<number
     // I3e: this is the path the admin screen uses, so it is the one that had been
     // creating monitors with a null slug ever since the column was added.
     if (!monitorData.slug) monitorData.slug = await slugForTag(monitorData.tag);
-    return await db.insertMonitor(monitorData);
+    const created = await db.insertMonitor(monitorData);
+    // B1e: a region whose rule is "check everything" means this one too, and an
+    // operator should not have to wait a minute for the scheduler's sweep to
+    // agree with what the probes screen already shows.
+    await reconcileAfterMonitorChange(monitorData.tag);
+    return created;
   }
 };
+
+/**
+ * Re-resolves the probe assignments after a monitor appears.
+ *
+ * Failure is logged and swallowed on purpose: a monitor that was created is
+ * created, and refusing the whole operation because the probe fleet could not be
+ * re-resolved would be the wrong trade. `appScheduler` reconciles on its sweep,
+ * so the worst case is that the region picks the monitor up a minute later.
+ */
+async function reconcileAfterMonitorChange(tag: string | undefined): Promise<void> {
+  try {
+    await reconcileProbeAssignments();
+  } catch (error) {
+    console.error(`Probe assignment reconcile failed after creating ${tag}:`, error);
+  }
+}
 
 /**
  * The per-org slug for a tag (I3e).
@@ -377,7 +399,9 @@ export const CreateMonitor = async (monitor: MonitorInput): Promise<number[]> =>
   // I3e: set explicitly rather than left to the repository's fallback, which
   // cannot know the org prefix.
   if (!monitorData.slug) monitorData.slug = await slugForTag(monitorData.tag);
-  return await db.insertMonitor(monitorData);
+  const created = await db.insertMonitor(monitorData);
+  await reconcileAfterMonitorChange(monitorData.tag);
+  return created;
 };
 
 interface CloneMonitorInput {
@@ -444,6 +468,7 @@ export const CloneMonitor = async ({ sourceTag, newTag, newName }: CloneMonitorI
   });
 
   await cloneMonitorRelations(sourceTagTrimmed, newTagTrimmed);
+  await reconcileAfterMonitorChange(newTagTrimmed);
 
   return inserted;
 };

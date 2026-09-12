@@ -9,6 +9,7 @@ import { getSchedulers, addJobToSchedulerQueue, removeJobFromSchedulerQueue } fr
 import { GetMonitorsParsed } from "../controllers/controller.js";
 import { UpdateMaintenanceEventStatuses } from "../controllers/maintenanceController.js";
 import { RebuildAlertConfigTagIndex } from "../cache/alertConfigTags.js";
+import { reconcileProbeAssignments } from "../probes/reconcile.js";
 import db from "../db/db.js";
 
 let appSchedulerQueue: Queue | null = null;
@@ -112,6 +113,18 @@ const addWorker = () => {
         await runWithOrg(orgId, () => UpdateMaintenanceEventStatuses());
       } catch (error) {
         console.error(`Maintenance status update failed for org ${orgId}:`, error);
+      }
+
+      // B1e. Keep the resolved probe assignments equal to what the region rules
+      // mean. The admin actions reconcile as they save, so this is the self-heal
+      // rather than the mechanism: it catches a monitor created by a path that
+      // does not reconcile, a save that failed halfway, and the rows a rule
+      // covers for monitors that appeared since. Does nothing at all when the
+      // diff is empty, which is every run on an install with no region rules.
+      try {
+        await runWithOrg(orgId, () => reconcileProbeAssignments());
+      } catch (error) {
+        console.error(`Probe assignment reconcile failed for org ${orgId}:`, error);
       }
     }
 

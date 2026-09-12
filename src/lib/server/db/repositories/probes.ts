@@ -39,13 +39,15 @@ export interface ProbeAssignmentRecord {
   id: number;
   org_id: number;
   monitor_tag: string;
-  agent_id: number;
+  region_id: number;
   mode: string;
+  /** RULE or OVERRIDE: which half of B1e's configuration produced this row. */
+  source: string;
   created_at: number;
   updated_at: number;
 }
 
-/** An assignment joined to the agent that holds it, which is what scheduling needs. */
+/** An assignment joined to the agent serving its region, which is what scheduling needs. */
 export interface ProbeTarget {
   assignment_id: number;
   monitor_tag: string;
@@ -55,6 +57,48 @@ export interface ProbeTarget {
   region_id: number;
   status: string;
   connection_state: string;
+}
+
+/**
+ * An assignment as the management screen shows it.
+ *
+ * The agent side is nullable, and that is the point of B1e: an assignment
+ * belongs to a region, so a region whose agent has been deleted still has its
+ * monitors and the screen can say "nothing is serving this region" rather than
+ * the row having quietly disappeared with the agent.
+ */
+export interface ProbeAssignmentView {
+  assignment_id: number;
+  monitor_tag: string;
+  mode: string;
+  source: string;
+  region_id: number;
+  agent_id: number | null;
+  agent_name: string | null;
+  status: string | null;
+  connection_state: string | null;
+}
+
+/** One region's default: what it checks, and how. */
+export interface ProbeRegionRuleRecord {
+  id: number;
+  org_id: number;
+  region_id: number;
+  rule: string;
+  mode: string;
+  created_at: number;
+  updated_at: number;
+}
+
+/** One monitor's exception to a region's rule. */
+export interface MonitorRegionOverrideRecord {
+  id: number;
+  org_id: number;
+  monitor_tag: string;
+  region_id: number;
+  decision: string;
+  created_at: number;
+  updated_at: number;
 }
 
 /**
@@ -102,6 +146,8 @@ export interface MonitorSourcePolicyRecord {
 
 const AGENTS = "probe_agents";
 const ASSIGNMENTS = "monitor_probe_assignments";
+const REGION_RULES = "probe_region_rules";
+const REGION_OVERRIDES = "monitor_region_overrides";
 const MERGE_POLICIES = "monitor_merge_policies";
 const SOURCE_POLICIES = "monitor_source_policies";
 
@@ -271,28 +317,45 @@ export class ProbesRepository extends BaseRepository {
       .update({ connection_state: "DISCONNECTED", updated_at: nowSeconds() });
   }
 
+  /**
+   * Deletes an agent, and deliberately leaves the assignments alone (B1e).
+   *
+   * This used to delete them, because they named the agent. That made the
+   * ordinary way of rotating a probe - delete it, create a new one with a fresh
+   * token - silently forget every monitor it was checking, and the operator got
+   * an agent that connected, reported healthy and checked nothing. Assignments
+   * belong to the region now, so the replacement agent picks them straight back
+   * up and the region keeps its configuration between the two.
+   */
   async deleteProbeAgent(id: number): Promise<number> {
-    // The assignments first: they carry no foreign key (the schema deliberately
-    // has none), so nothing in the database would otherwise remove them and they
-    // would point at an agent id that may later be reused.
     const agent = await this.table(AGENTS).where({ id }).first();
     if (!agent) return 0;
-    await this.table(ASSIGNMENTS).where({ agent_id: id }).delete();
     return await this.table(AGENTS).where({ id }).delete();
   }
 
-  /** Every assignment in the org, joined to its agent, for the management screen. */
-  async getProbeAssignments(): Promise<ProbeTarget[]> {
+  /**
+   * Every assignment in the org, with the agent serving its region if there is
+   * one, for the management screen.
+   *
+   * A left join, not an inner one. A region with no agent still has assignments
+   * and the screen has to be able to say so; an inner join would hide exactly
+   * the state this feature exists to make visible.
+   */
+  async getProbeAssignments(): Promise<ProbeAssignmentView[]> {
     return await this.table(`${ASSIGNMENTS} as a`)
-      .join(`${AGENTS} as g`, "g.id", "a.agent_id")
-      .orderBy("a.monitor_tag", "asc")
+      .leftJoin(`${AGENTS} as g`, "g.region_id", "a.region_id")
+      .orderBy([
+        { column: "a.region_id", order: "asc" },
+        { column: "a.monitor_tag", order: "asc" },
+      ])
       .select(
         "a.id as assignment_id",
         "a.monitor_tag",
         "a.mode",
+        "a.source",
+        "a.region_id",
         "g.id as agent_id",
         "g.name as agent_name",
-        "g.region_id",
         "g.status",
         "g.connection_state",
       );
@@ -309,8 +372,11 @@ export class ProbesRepository extends BaseRepository {
    * row can be stale by a whole heartbeat interval.
    */
   async getProbeTargetsForMonitor(monitorTag: string): Promise<ProbeTarget[]> {
+    // Joined on the region, not on an agent id the assignment used to carry.
+    // A region with no agent simply produces no target, which is the correct
+    // answer for scheduling: there is nothing to send the check to.
     return await this.table(`${ASSIGNMENTS} as a`)
-      .join(`${AGENTS} as g`, "g.id", "a.agent_id")
+      .join(`${AGENTS} as g`, "g.region_id", "a.region_id")
       .where("a.monitor_tag", monitorTag)
       .andWhere("g.status", "ACTIVE")
       .orderBy("g.region_id", "asc")
@@ -326,34 +392,83 @@ export class ProbesRepository extends BaseRepository {
       );
   }
 
-  async createProbeAssignment(data: { monitor_tag: string; agent_id: number; mode?: string }): Promise<number> {
+  // ---- B1e. The rule, its exceptions, and the rows they resolve to ---------
+
+  async getProbeRegionRules(): Promise<ProbeRegionRuleRecord[]> {
+    return await this.table(REGION_RULES).orderBy("region_id", "asc").select("*");
+  }
+
+  async setProbeRegionRule(data: { region_id: number; rule: string; mode: string }): Promise<void> {
     const ts = nowSeconds();
-    const inserted = await this.table(ASSIGNMENTS).insert(
-      {
-        monitor_tag: data.monitor_tag,
-        agent_id: data.agent_id,
-        mode: data.mode ?? "REMOTE_PREFERRED",
-        created_at: ts,
-        updated_at: ts,
-      },
-      ["id"],
-    );
-    const first = Array.isArray(inserted) ? inserted[0] : inserted;
-    return typeof first === "object" ? Number((first as { id: number }).id) : Number(first);
+    await this.table(REGION_RULES)
+      .insert({ ...data, created_at: ts, updated_at: ts })
+      .onConflict(["org_id", "region_id"])
+      .merge({ rule: data.rule, mode: data.mode, updated_at: ts });
   }
 
-  async deleteProbeAssignment(id: number): Promise<number> {
-    return await this.table(ASSIGNMENTS).where({ id }).delete();
+  async getMonitorRegionOverrides(): Promise<MonitorRegionOverrideRecord[]> {
+    return await this.table(REGION_OVERRIDES).orderBy(["region_id", "monitor_tag"]).select("*");
   }
 
-  /** Whether this monitor is already assigned to this agent, so the form can say so. */
-  async probeAssignmentExists(monitorTag: string, agentId: number): Promise<boolean> {
-    const row = await this.table(ASSIGNMENTS).where({ monitor_tag: monitorTag, agent_id: agentId }).first();
-    return !!row;
+  async setMonitorRegionOverride(data: { monitor_tag: string; region_id: number; decision: string }): Promise<void> {
+    const ts = nowSeconds();
+    await this.table(REGION_OVERRIDES)
+      .insert({ ...data, created_at: ts, updated_at: ts })
+      .onConflict(["monitor_tag", "region_id"])
+      .merge({ decision: data.decision, updated_at: ts });
   }
 
-  /** Removes every assignment for a monitor. Called when the monitor itself goes. */
+  /** Drops an exception, so the monitor goes back to whatever the region's rule says. */
+  async deleteMonitorRegionOverride(monitorTag: string, regionId: number): Promise<number> {
+    return await this.table(REGION_OVERRIDES).where({ monitor_tag: monitorTag, region_id: regionId }).delete();
+  }
+
+  /** The stored resolved rows, in the shape the resolver compares against. */
+  async getResolvedAssignments(): Promise<
+    Array<{ monitor_tag: string; region_id: number; mode: string; source: string }>
+  > {
+    return await this.table(ASSIGNMENTS).select("monitor_tag", "region_id", "mode", "source");
+  }
+
+  /**
+   * Brings the stored rows in line with what the rules and exceptions mean.
+   *
+   * The caller wraps this in `db.withTransaction`: a half-applied reconcile is a
+   * fleet checking a set of monitors nobody configured, and the next reconcile
+   * would have no way to tell that from a deliberate state. It is not opened
+   * here because a repository has no business deciding transaction boundaries
+   * for work that also reads the monitor list.
+   */
+  async applyAssignmentDiff(diff: {
+    create: Array<{ monitor_tag: string; region_id: number; mode: string; source: string }>;
+    update: Array<{ monitor_tag: string; region_id: number; mode: string; source: string }>;
+    remove: Array<{ monitor_tag: string; region_id: number }>;
+  }): Promise<void> {
+    const ts = nowSeconds();
+
+    for (const row of diff.remove) {
+      await this.table(ASSIGNMENTS).where({ monitor_tag: row.monitor_tag, region_id: row.region_id }).delete();
+    }
+    for (const row of diff.update) {
+      await this.table(ASSIGNMENTS)
+        .where({ monitor_tag: row.monitor_tag, region_id: row.region_id })
+        .update({ mode: row.mode, source: row.source, updated_at: ts });
+    }
+    if (diff.create.length > 0) {
+      await this.table(ASSIGNMENTS).insert(diff.create.map((row) => ({ ...row, created_at: ts, updated_at: ts })));
+    }
+  }
+
+  /**
+   * Removes a monitor's assignments and its exceptions. Called when the monitor
+   * itself goes.
+   *
+   * The exceptions matter as much as the assignments: an `INCLUDE` left behind
+   * for a deleted tag would silently reassign a monitor created with the same
+   * tag later.
+   */
   async deleteProbeAssignmentsForMonitor(monitorTag: string): Promise<number> {
+    await this.table(REGION_OVERRIDES).where({ monitor_tag: monitorTag }).delete();
     return await this.table(ASSIGNMENTS).where({ monitor_tag: monitorTag }).delete();
   }
 
