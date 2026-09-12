@@ -152,6 +152,37 @@ describe("planProbeExecution", () => {
     expect(plan.displayOnly.map((s) => s.regionId)).toEqual([3]);
   });
 
+  it("keeps every agent of a voting region, so the merge sees all of them", async () => {
+    registry.register(agent({ id: 2, region_id: 3 }), vi.fn(), vi.fn());
+    registry.register(agent({ id: 3, region_id: 3 }), vi.fn(), vi.fn());
+    fake.getProbeTargetsForMonitor.mockResolvedValue([
+      target({ agent_id: 2, region_id: 3 }),
+      target({ agent_id: 3, region_id: 3 }),
+    ]);
+
+    const plan = await planProbeExecution(monitor());
+    expect(plan.voting.map((s) => s.connection.agent.id)).toEqual([2, 3]);
+    // Both carry the region, not an identity of their own: the worker merges
+    // them into the one answer the region gives.
+    expect(plan.voting.map((s) => s.regionId)).toEqual([3, 3]);
+  });
+
+  it("dispatches one agent only for a DISPLAY_ONLY region", async () => {
+    registry.register(agent({ id: 2, region_id: 3 }), vi.fn(), vi.fn());
+    registry.register(agent({ id: 3, region_id: 3 }), vi.fn(), vi.fn());
+    fake.getProbeTargetsForMonitor.mockResolvedValue([
+      target({ agent_id: 2, region_id: 3 }),
+      target({ agent_id: 3, region_id: 3 }),
+    ]);
+    fake.getMergeRegions.mockResolvedValue([{ id: 3, default_mode: "DISPLAY_ONLY" }]);
+
+    // Nobody awaits a display-only sample, so there is nothing to merge several
+    // answers in, and all of them would compete for the single row the region
+    // gets for this minute.
+    const plan = await planProbeExecution(monitor());
+    expect(plan.displayOnly.map((s) => s.connection.agent.id)).toEqual([2]);
+  });
+
   it("does not dispatch an OFF region at all", async () => {
     registry.register(agent({ id: 2, region_id: 3 }), vi.fn(), vi.fn());
     fake.getProbeTargetsForMonitor.mockResolvedValue([target({ agent_id: 2, region_id: 3 })]);

@@ -99,7 +99,7 @@ describe("unregister", () => {
     if (!registered.ok) return;
 
     const resolve = vi.fn();
-    registered.connection.pending.set("a-1", { monitor_tag: "api", ts: 100, resolve });
+    registered.connection.pending.set("a-1", { monitor_tag: "api", ts: 100, recordsSample: false, resolve });
 
     registry.unregister(1, "socket closed");
 

@@ -203,9 +203,27 @@ export async function planProbeExecution(monitor: MonitorRecordTyped): Promise<P
   );
 
   const plan: ProbePlan = { voting: [], displayOnly: [], localSlots: [], config };
+
+  /**
+   * Display-only regions already represented in the plan.
+   *
+   * A display-only region is dispatched to **one** of its agents, unlike a
+   * voting one. Nobody awaits these, so there is nothing to merge several
+   * answers in: each would be recorded straight from its own socket, and all of
+   * them compete for the one row `(monitor_tag, region_id, timestamp)` allows,
+   * so the region's displayed sample would be whichever agent happened to land
+   * last. One agent's view is the honest version of "this is what that region
+   * saw", and a replica adds nothing to a reading that nothing counts.
+   */
+  const displayOnlyRegions = new Set<number>();
+
   for (const { connection, regionId } of connected) {
     const mode = config.sources.get(regionId)?.mode ?? "VOTE";
     if (mode === "OFF") continue;
+    if (mode === "DISPLAY_ONLY" && regionId !== LOCAL_REGION_ID) {
+      if (displayOnlyRegions.has(regionId)) continue;
+      displayOnlyRegions.add(regionId);
+    }
     const source: ProbeSource = { connection, regionId, mode };
     if (regionId === LOCAL_REGION_ID) {
       plan.localSlots.push(source);
@@ -326,6 +344,9 @@ export function runOnProbe(
     connection.pending.set(id, {
       monitor_tag: monitor.tag,
       ts,
+      // The execute worker is holding this promise and writes the region's row
+      // itself, after merging however many agents answered for it.
+      recordsSample: false,
       resolve: (outcome: AssignmentOutcome) => {
         if (outcome.kind === "result") {
           finish(outcome.result);
@@ -366,6 +387,9 @@ export function dispatchSample(connection: ProbeConnection, monitor: MonitorReco
   connection.pending.set(id, {
     monitor_tag: monitor.tag,
     ts,
+    // Nobody is waiting for this one, so the socket side recording it is the
+    // only way it is ever written down.
+    recordsSample: true,
     resolve: () => {
       clearTimeout(timer);
       connection.pending.delete(id);

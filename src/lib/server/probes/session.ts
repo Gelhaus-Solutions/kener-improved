@@ -377,7 +377,12 @@ export function handleConnection(socket: WebSocket): void {
     // result is the verdict, and it is handed back to the execute worker that is
     // waiting for it so that overlays, the confirmation threshold and the merge
     // all still apply exactly as they do to a local check.
-    if (agent.region_id !== MERGED_REGION_ID) {
+    //
+    // `recordsSample` is what keeps that from becoming a second writer for a row
+    // the execute worker is already writing. An awaited assignment says false:
+    // the worker merges the region's agents and writes one row. Only a
+    // fire-and-forget sample, which nobody is holding, is recorded here.
+    if (agent.region_id !== MERGED_REGION_ID && pending.recordsSample) {
       try {
         await runWithOrg(agent.org_id, () =>
           monitorResponseQueue.push(pending.monitor_tag, pending.ts, result, agent.region_id),

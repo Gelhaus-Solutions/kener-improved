@@ -38,6 +38,23 @@ export type AssignmentOutcome =
 export interface PendingAssignment {
   monitor_tag: string;
   ts: number;
+  /**
+   * Whether the socket side writes this result's row, or somebody else does.
+   *
+   * **Two writers for one row is the failure this field exists to stop.** The
+   * response queue deduplicates on `${tag}-${region}-${ts}`, with no agent in the
+   * key, and `monitoring_data` is keyed the same way. So every result recorded
+   * here competes for the same row as the execute worker's own write, and with
+   * several agents in a region they no longer carry the same value: the worker
+   * writes the region's merged verdict and each agent would write its own raw
+   * answer over the top, whichever landed last.
+   *
+   * `false` for an awaited assignment (`runOnProbe`): the execute worker is
+   * holding the promise and writes the merged row itself. `true` for a
+   * fire-and-forget sample (`dispatchSample`), where nobody is waiting and this
+   * is the only chance to record it.
+   */
+  recordsSample: boolean;
   resolve: (outcome: AssignmentOutcome) => void;
 }
 
