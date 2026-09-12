@@ -43,7 +43,39 @@ import type {
  */
 
 const WS_URL = process.env.KENER_PROBE_URL;
-const TOKEN = process.env.KENER_PROBE_TOKEN;
+/**
+ * The tokens this probe presents, one session each.
+ *
+ * **One container, several organisations.** A probe agent belongs to exactly one
+ * org, so monitoring three tenants from one box used to mean three containers.
+ * Each token here opens its own session to the same upstream and authenticates
+ * as that org's agent; the server needs no change at all, because its registry
+ * is keyed by `org:region` and by agent id, so two agents in different orgs are
+ * already independent sessions even when they share a region id and a host.
+ *
+ * Still one upstream: `KENER_PROBE_URL` is singular and stays that way. A probe
+ * that fanned out to several Kener servers would have two sources of truth for
+ * what it should be checking.
+ *
+ * Comma-separated in the singular variable rather than a new plural one, so a
+ * single-token deployment, every existing compose file and the README are
+ * untouched: one token is a list of one. Whitespace and empty entries are
+ * dropped, which is what makes a multi-line value from a secret manager or a
+ * YAML block scalar behave. Duplicates are dropped too - the same token twice
+ * would open two sessions as the same agent, and the server closes the first as
+ * "replaced by a newer connection" in a loop.
+ */
+function parseTokens(raw: string | undefined): string[] {
+  if (!raw) return [];
+  const seen = new Set<string>();
+  for (const token of raw.split(/[,\s]+/)) {
+    const trimmed = token.trim();
+    if (trimmed) seen.add(trimmed);
+  }
+  return [...seen];
+}
+
+const TOKENS = parseTokens(process.env.KENER_PROBE_TOKEN);
 /**
  * Injected from `probe/package.json` at bundle time, overridable at runtime.
  *
@@ -72,14 +104,13 @@ const CAPABILITIES = ["API", "PING", "TCP", "DNS", "SSL"];
 const RECONNECT_MIN_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 
-if (!WS_URL || !TOKEN) {
+if (!WS_URL || TOKENS.length === 0) {
   console.error("KENER_PROBE_URL and KENER_PROBE_TOKEN are both required");
+  console.error("KENER_PROBE_TOKEN may be a comma-separated list, one token per organisation.");
   process.exit(1);
 }
 
-let socket: WebSocket | null = null;
-let heartbeatTimer: NodeJS.Timeout | null = null;
-let reconnectDelay = RECONNECT_MIN_MS;
+/** Set once, by a signal. Every session checks it before reconnecting. */
 let shuttingDown = false;
 
 /**
@@ -112,186 +143,258 @@ async function runCheck(assignment: AssignMessage): Promise<MonitoringResult | n
   }
 }
 
-function send(frame: string): void {
-  if (socket?.readyState !== WebSocket.OPEN) return;
-  try {
-    socket.send(frame);
-  } catch (error) {
-    console.error("Could not write to Kener:", error);
+/**
+ * One authenticated session: one token, one socket, its own backoff.
+ *
+ * **Everything that was module-level state is per session now**, and that is the
+ * whole correctness argument for multi-org. `send` used to write to the single
+ * global socket; with several sessions open, a result written to the wrong
+ * socket would be a result delivered to the wrong organisation. Closing over the
+ * socket makes that impossible to express rather than merely unlikely: there is
+ * no way to reach another session's socket from inside this one.
+ */
+function createSession(token: string) {
+  let socket: WebSocket | null = null;
+  let heartbeatTimer: NodeJS.Timeout | null = null;
+  let reconnectDelay = RECONNECT_MIN_MS;
+  /** Set when the server refuses this token. Refused sessions never retry. */
+  let refused = false;
+
+  // Until `ready` arrives all this session can be called is the last four
+  // characters of its token, which is the same hint the probes screen shows
+  // beside the agent. Afterwards it is named by the agent it authenticated as,
+  // so every later line is attributable to one organisation's agent.
+  let label = `token \u2026${token.slice(-4)}`;
+
+  function log(message: string): void {
+    console.log(`[${label}] ${message}`);
   }
-}
-
-function startHeartbeat(intervalSeconds: number): void {
-  stopHeartbeat();
-  heartbeatTimer = setInterval(() => {
-    send(encode({ type: "heartbeat", id: newMessageId("h") }));
-  }, intervalSeconds * 1000);
-}
-
-function stopHeartbeat(): void {
-  if (!heartbeatTimer) return;
-  clearInterval(heartbeatTimer);
-  heartbeatTimer = null;
-}
-
-async function onAssign(assignment: AssignMessage): Promise<void> {
-  // Sent before the check runs, not after. A check can take as long as its
-  // timeout allows, and the server's log is much easier to read when it says the
-  // probe took the work rather than going silent for ten seconds.
-  send(encode({ type: "accept", id: assignment.id, monitor_tag: assignment.monitor_tag, ts: assignment.ts }));
-
-  let result: MonitoringResult | null = null;
-  try {
-    result = await runCheck(assignment);
-  } catch (error) {
-    // A service class throwing is a bug or an environment fault, not a DOWN
-    // verdict. Rejecting hands the check back to Kener, which will run it
-    // locally and get an answer; inventing a DOWN here would put a fabricated
-    // outage on somebody's status page.
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`Check for ${assignment.monitor_tag} threw:`, message);
-    send(
-      encode({
-        type: "reject",
-        id: assignment.id,
-        monitor_tag: assignment.monitor_tag,
-        ts: assignment.ts,
-        reason: `check threw: ${message}`,
-      }),
-    );
-    return;
+  function warn(message: string): void {
+    console.warn(`[${label}] ${message}`);
+  }
+  function error(message: string): void {
+    console.error(`[${label}] ${message}`);
   }
 
-  if (!result) {
-    send(
-      encode({
-        type: "reject",
-        id: assignment.id,
-        monitor_tag: assignment.monitor_tag,
-        ts: assignment.ts,
-        reason: `this probe does not run ${assignment.monitor_type} checks`,
-      }),
-    );
-    return;
+  function send(frame: string): void {
+    if (socket?.readyState !== WebSocket.OPEN) return;
+    try {
+      socket.send(frame);
+    } catch (err) {
+      error(`Could not write to Kener: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
-  if (DEBUG) {
-    console.log(
-      `ran ${assignment.monitor_type} ${assignment.monitor_tag} @${assignment.ts}: ${result.status} in ${result.latency}ms`,
-    );
+  function startHeartbeat(intervalSeconds: number): void {
+    stopHeartbeat();
+    heartbeatTimer = setInterval(() => {
+      send(encode({ type: "heartbeat", id: newMessageId("h") }));
+    }, intervalSeconds * 1000);
   }
 
-  send(
-    encode({
-      type: "result",
-      id: assignment.id,
-      monitor_tag: assignment.monitor_tag,
-      ts: assignment.ts,
-      result,
-    }),
-  );
-}
+  function stopHeartbeat(): void {
+    if (!heartbeatTimer) return;
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
 
-function connect(): void {
-  if (shuttingDown) return;
+  async function onAssign(assignment: AssignMessage): Promise<void> {
+    // Sent before the check runs, not after. A check can take as long as its
+    // timeout allows, and the server's log is much easier to read when it says
+    // the probe took the work rather than going silent for ten seconds.
+    send(encode({ type: "accept", id: assignment.id, monitor_tag: assignment.monitor_tag, ts: assignment.ts }));
 
-  console.log(`Connecting to ${WS_URL}`);
-  socket = new WebSocket(WS_URL as string);
-
-  socket.on("open", () => {
-    send(
-      encode({
-        type: "hello",
-        id: newMessageId("hello"),
-        token: TOKEN as string,
-        agent_version: AGENT_VERSION,
-        capabilities: CAPABILITIES,
-      }),
-    );
-  });
-
-  socket.on("message", (raw: unknown) => {
-    const parsed = parseMessage(String(raw));
-    if (!parsed.ok) {
-      console.error(`Kener sent something unreadable: ${parsed.reason}`);
+    let result: MonitoringResult | null = null;
+    try {
+      result = await runCheck(assignment);
+    } catch (err) {
+      // A service class throwing is a bug or an environment fault, not a DOWN
+      // verdict. Rejecting hands the check back to Kener, which will run it
+      // locally and get an answer; inventing a DOWN here would put a fabricated
+      // outage on somebody's status page.
+      const message = err instanceof Error ? err.message : String(err);
+      error(`Check for ${assignment.monitor_tag} threw: ${message}`);
+      send(
+        encode({
+          type: "reject",
+          id: assignment.id,
+          monitor_tag: assignment.monitor_tag,
+          ts: assignment.ts,
+          reason: `check threw: ${message}`,
+        }),
+      );
       return;
     }
 
-    const message = parsed.message;
-    switch (message.type) {
-      case "ready": {
-        const ready = message as ReadyMessage;
-        // The server owns the cadence, so the probe's timer and the server's
-        // patience can never drift apart into a fleet that marks itself offline.
-        console.log(`Connected as agent ${ready.agent_id}, region ${ready.region_id}`);
-        reconnectDelay = RECONNECT_MIN_MS;
-        startHeartbeat(ready.heartbeat_interval_seconds);
-        break;
-      }
-      case "assign":
-        // Not awaited: a slow check must not stop the probe reading its socket,
-        // or a single ten-second API monitor would block every other assignment
-        // and the heartbeat with it.
-        void onAssign(message as AssignMessage).catch((error) => {
-          console.error("Assignment handling failed:", error);
-        });
-        break;
-      case "bye":
-        console.log("Kener closed the session");
-        break;
-      case "error":
-        console.error(`Kener refused: ${message.code} ${message.message}`);
-        // An authentication failure will fail identically on every retry, so a
-        // reconnect loop would be a pointless one. Exiting non-zero lets a
-        // supervisor or Docker restart policy decide, and makes the problem
-        // visible instead of burying it in a log that repeats forever.
-        if (message.code === ERROR_CODES.UNAUTHORIZED || message.code === ERROR_CODES.BAD_VERSION) {
-          shuttingDown = true;
-          stopHeartbeat();
-          socket?.close(1000, "refused");
-          process.exitCode = 1;
-        }
-        break;
-      default:
-        break;
+    if (!result) {
+      send(
+        encode({
+          type: "reject",
+          id: assignment.id,
+          monitor_tag: assignment.monitor_tag,
+          ts: assignment.ts,
+          reason: `this probe does not run ${assignment.monitor_type} checks`,
+        }),
+      );
+      return;
     }
-  });
 
-  socket.on("close", () => {
+    if (DEBUG) {
+      log(
+        `ran ${assignment.monitor_type} ${assignment.monitor_tag} @${assignment.ts}: ${result.status} in ${result.latency}ms`,
+      );
+    }
+
+    send(
+      encode({
+        type: "result",
+        id: assignment.id,
+        monitor_tag: assignment.monitor_tag,
+        ts: assignment.ts,
+        result,
+      }),
+    );
+  }
+
+  function connect(): void {
+    if (shuttingDown || refused) return;
+
+    log(`Connecting to ${WS_URL}`);
+    socket = new WebSocket(WS_URL as string);
+
+    socket.on("open", () => {
+      send(
+        encode({
+          type: "hello",
+          id: newMessageId("hello"),
+          token,
+          agent_version: AGENT_VERSION,
+          capabilities: CAPABILITIES,
+        }),
+      );
+    });
+
+    socket.on("message", (raw: unknown) => {
+      const parsed = parseMessage(String(raw));
+      if (!parsed.ok) {
+        error(`Kener sent something unreadable: ${parsed.reason}`);
+        return;
+      }
+
+      const message = parsed.message;
+      switch (message.type) {
+        case "ready": {
+          const ready = message as ReadyMessage;
+          // The server owns the cadence, so the probe's timer and the server's
+          // patience can never drift apart into a fleet that marks itself offline.
+          label = `agent ${ready.agent_id}`;
+          log(`Connected, region ${ready.region_id}`);
+          reconnectDelay = RECONNECT_MIN_MS;
+          startHeartbeat(ready.heartbeat_interval_seconds);
+          break;
+        }
+        case "assign":
+          // Not awaited: a slow check must not stop the probe reading its socket,
+          // or a single ten-second API monitor would block every other assignment
+          // and the heartbeat with it.
+          void onAssign(message as AssignMessage).catch((err) => {
+            error(`Assignment handling failed: ${err instanceof Error ? err.message : String(err)}`);
+          });
+          break;
+        case "bye":
+          log("Kener closed the session");
+          break;
+        case "error":
+          error(`Kener refused: ${message.code} ${message.message}`);
+          // An authentication failure will fail identically on every retry, so a
+          // reconnect loop would be a pointless one.
+          //
+          // **It takes down this session only.** With one container serving
+          // several organisations, one revoked token must not stop the others
+          // being monitored - and the container exits only when every session has
+          // been refused, so a wholly broken configuration still fails fast and
+          // visibly rather than idling forever.
+          if (message.code === ERROR_CODES.UNAUTHORIZED || message.code === ERROR_CODES.BAD_VERSION) {
+            refused = true;
+            stopHeartbeat();
+            socket?.close(1000, "refused");
+            exitIfAllRefused();
+          }
+          break;
+        default:
+          break;
+      }
+    });
+
+    socket.on("close", () => {
+      stopHeartbeat();
+      socket = null;
+      if (shuttingDown || refused) return;
+
+      warn(`Disconnected, retrying in ${Math.round(reconnectDelay / 1000)}s`);
+      setTimeout(connect, reconnectDelay);
+      // Exponential up to the cap. Kener falls back to checking locally while the
+      // probe is away, so retrying hard buys nothing and a restarting server
+      // should not be met with a reconnect storm from every agent at once.
+      reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
+    });
+
+    socket.on("error", (err: Error) => {
+      // `ws` emits error then close, and close is what schedules the retry.
+      error(`Socket error: ${err.message}`);
+    });
+  }
+
+  function farewell(signal: string): void {
     stopHeartbeat();
-    socket = null;
-    if (shuttingDown) return;
+    // Saying goodbye is worth the extra frame: it lets Kener drop the agent from
+    // its registry at once and fall back to local checks immediately, rather than
+    // waiting out three missed heartbeats first.
+    send(encode({ type: "bye", id: newMessageId("bye"), reason: signal }));
+    socket?.close(1000, "shutting down");
+  }
 
-    console.warn(`Disconnected, retrying in ${Math.round(reconnectDelay / 1000)}s`);
-    setTimeout(connect, reconnectDelay);
-    // Exponential up to the cap. Kener falls back to checking locally while the
-    // probe is away, so retrying hard buys nothing and a restarting server
-    // should not be met with a reconnect storm from every agent at once.
-    reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
-  });
+  return {
+    connect,
+    farewell,
+    get refused() {
+      return refused;
+    },
+  };
+}
 
-  socket.on("error", (error: Error) => {
-    // `ws` emits error then close, and close is what schedules the retry.
-    console.error("Socket error:", error.message);
-  });
+const sessions = TOKENS.map(createSession);
+
+/**
+ * Exits non-zero once every session has been refused.
+ *
+ * One refused token among several is a configuration problem for one
+ * organisation and is logged as such; all of them refused is a container that
+ * can never do anything, and staying up would bury that in a log nobody reads.
+ * `process.exitCode` rather than `process.exit` so the remaining sockets close
+ * cleanly first.
+ */
+function exitIfAllRefused(): void {
+  if (!sessions.every((session) => session.refused)) return;
+  console.error("Every token was refused; nothing left to do");
+  shuttingDown = true;
+  process.exitCode = 1;
 }
 
 function shutdown(signal: string): void {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.log(`${signal} received, disconnecting`);
-  stopHeartbeat();
-  // Saying goodbye is worth the extra frame: it lets Kener drop the agent from
-  // its registry at once and fall back to local checks immediately, rather than
-  // waiting out three missed heartbeats first.
-  send(encode({ type: "bye", id: newMessageId("bye"), reason: signal }));
-  socket?.close(1000, "shutting down");
-  // A short grace period for the close frame to leave, then go regardless.
+  console.log(`${signal} received, disconnecting ${sessions.length} session(s)`);
+  for (const session of sessions) session.farewell(signal);
+  // A short grace period for the close frames to leave, then go regardless.
   setTimeout(() => process.exit(0), 500).unref();
 }
 
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
 
-console.log(`Kener probe ${AGENT_VERSION}, protocol v${PROTOCOL_VERSION}, capabilities ${CAPABILITIES.join(", ")}`);
-connect();
+console.log(
+  `Kener probe ${AGENT_VERSION}, protocol v${PROTOCOL_VERSION}, capabilities ${CAPABILITIES.join(", ")}, ` +
+    `${sessions.length} session(s)`,
+);
+for (const session of sessions) session.connect();

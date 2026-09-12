@@ -72,12 +72,41 @@ node probe/build.js
 KENER_PROBE_URL=ws://localhost:3390 KENER_PROBE_TOKEN=kener_probe_... node probe/dist/probe.js
 ```
 
-| Variable              | Required | Meaning                                                                          |
-| --------------------- | -------- | -------------------------------------------------------------------------------- |
-| `KENER_PROBE_URL`     | yes      | WebSocket address of the Kener scheduler process                                 |
-| `KENER_PROBE_TOKEN`   | yes      | The token shown once when the agent was created                                  |
-| `KENER_PROBE_VERSION` | no       | Reported to Kener and shown on the probes screen                                 |
-| `KENER_PROBE_DEBUG`   | no       | `1` logs every check it runs. Useful for the first ten minutes, noisy after that |
+| Variable              | Required | Meaning                                                                                                          |
+| --------------------- | -------- | ---------------------------------------------------------------------------------------------------------------- |
+| `KENER_PROBE_URL`     | yes      | WebSocket address of the Kener scheduler process                                                                 |
+| `KENER_PROBE_TOKEN`   | yes      | The token shown once when the agent was created. A comma-separated list runs one probe for several organisations |
+| `KENER_PROBE_VERSION` | no       | Reported to Kener and shown on the probes screen                                                                 |
+| `KENER_PROBE_DEBUG`   | no       | `1` logs every check it runs. Useful for the first ten minutes, noisy after that                                 |
+
+## One probe, several organisations
+
+A probe agent belongs to one organisation, so monitoring several tenants used to
+mean running a container each. Give `KENER_PROBE_TOKEN` a comma-separated list
+instead and the probe opens one session per token against the same Kener:
+
+```bash
+docker run -d --name kener-probe-frankfurt \
+  -e KENER_PROBE_URL=ws://kener.example.com:3390 \
+  -e KENER_PROBE_TOKEN=kener_probe_aaa...,kener_probe_bbb... \
+  ghcr.io/gelhaus-solutions/kener-probe:latest
+```
+
+Each session authenticates as that organisation's own agent, is handed only that
+organisation's monitors, and reports only to it. Kener needs no configuration for
+this and cannot tell the difference from several separate containers.
+
+**Still one upstream.** `KENER_PROBE_URL` is singular and stays that way: a probe
+answering to two Kener servers would have two sources of truth about what it
+should be checking.
+
+Every log line is prefixed with the session it belongs to, as the token's last
+four characters until it connects and as `agent <id>` afterwards.
+
+**One bad token does not stop the others.** A token Kener refuses takes down its
+own session and is not retried, because every retry would fail identically. The
+container exits non-zero only when _every_ token has been refused, so a wholly
+broken configuration still fails fast instead of idling.
 
 ## What happens when it goes away
 

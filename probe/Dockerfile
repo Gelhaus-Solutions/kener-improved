@@ -47,7 +47,9 @@ USER node
 ENV NODE_ENV=production
 
 # KENER_PROBE_URL   ws://kener-host:3390  - where to connect
-# KENER_PROBE_TOKEN the token shown once when the agent was created
+# KENER_PROBE_TOKEN the token shown once when the agent was created; a
+#                   comma-separated list serves several organisations from one
+#                   container, one session per token
 # KENER_PROBE_VERSION optional, reported to Kener and shown on the probes screen
 #
 # No HEALTHCHECK: the probe is a client, so it exposes no port to poll. Whether
