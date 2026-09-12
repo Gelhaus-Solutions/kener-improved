@@ -230,21 +230,6 @@ export class ProbesRepository extends BaseRepository {
     return await this.table(AGENTS).where({ id }).first();
   }
 
-  /**
-   * Whether another agent already claims this region in this org.
-   *
-   * B1c runs one agent per region, so two agents sharing one would mean the
-   * second could never connect - a failure that would show up as a probe that
-   * silently never works rather than as a refused form. `excludeId` lets an edit
-   * of an existing agent not collide with itself.
-   */
-  async regionHasAgent(regionId: number, excludeId?: number): Promise<boolean> {
-    const query = this.table(AGENTS).where({ region_id: regionId });
-    if (excludeId !== undefined) query.whereNot({ id: excludeId });
-    const row = await query.first();
-    return !!row;
-  }
-
   async createProbeAgent(data: {
     name: string;
     region_id: number;

@@ -527,7 +527,6 @@ class DbImpl {
   regionCodeExists!: ProbesRepository["regionCodeExists"];
   getProbeAgents!: ProbesRepository["getProbeAgents"];
   getProbeAgentById!: ProbesRepository["getProbeAgentById"];
-  regionHasAgent!: ProbesRepository["regionHasAgent"];
   createProbeAgent!: ProbesRepository["createProbeAgent"];
   updateProbeAgent!: ProbesRepository["updateProbeAgent"];
   setProbeAgentConnection!: ProbesRepository["setProbeAgentConnection"];
@@ -1448,7 +1447,6 @@ class DbImpl {
     this.regionCodeExists = this.probes.regionCodeExists.bind(this.probes);
     this.getProbeAgents = this.probes.getProbeAgents.bind(this.probes);
     this.getProbeAgentById = this.probes.getProbeAgentById.bind(this.probes);
-    this.regionHasAgent = this.probes.regionHasAgent.bind(this.probes);
     this.createProbeAgent = this.probes.createProbeAgent.bind(this.probes);
     this.updateProbeAgent = this.probes.updateProbeAgent.bind(this.probes);
     this.setProbeAgentConnection = this.probes.setProbeAgentConnection.bind(this.probes);

@@ -7,12 +7,16 @@ import { ERROR_CODES, type ErrorCode } from "./protocol.js";
  *
  * **Explicitly throwaway, and this is the file the note is about.** The registry
  * is a plain `Map` in the scheduler process's memory, so it is lost on restart
- * and invisible to a second instance. That is survivable only because of the
- * three other things B1c decided: assignment is push-based, there is one agent
- * per region, and a probe that cannot be reached falls back to a local check.
- * The full suite is pull-based precisely so that none of those hold - a pulled
- * assignment needs no registry at all, which is what makes quorum and
- * multi-instance possible.
+ * and invisible to a second instance. That is survivable because of the two
+ * other things B1c decided: assignment is push-based, and a probe that cannot be
+ * reached falls back to a local check. The full suite is pull-based precisely so
+ * that neither has to hold - a pulled assignment needs no registry at all, which
+ * is what makes quorum and multi-instance possible.
+ *
+ * B1c's third condition, one agent per region, is gone: a region may now be
+ * served by any number of agents, which are replicas reduced to that region's
+ * single verdict before the merge sees them. That changed this file from a slot
+ * per region to a set per region, and it changed nothing about the other two.
  *
  * So: nothing outside this directory should learn the shape of a connection, and
  * nothing should persist anything from it. `connection_state` on `probe_agents`

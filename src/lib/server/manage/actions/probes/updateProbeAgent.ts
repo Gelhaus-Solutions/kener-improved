@@ -20,9 +20,11 @@ interface Payload {
  * second mechanism for the same outcome and a reconnect loop to go with it,
  * since a disabled agent's daemon has no way of knowing it should stop trying.
  *
- * Moving an agent to a region that already has one is refused for the same
- * reason creating a second one is: the registry serves one per region, so the
- * loser would authenticate and immediately be closed.
+ * Moving an agent into a region that already has agents is allowed, for the same
+ * reason creating a second one there is: they are replicas of one vantage point,
+ * all dispatched, and reduced to that region's single verdict before the merge
+ * sees them. What moving an agent changes is what its results *mean*, never
+ * where it runs.
  */
 export default {
   action: "updateProbeAgent",

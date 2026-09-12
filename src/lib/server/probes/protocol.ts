@@ -174,7 +174,12 @@ export const ERROR_CODES = {
   NOT_READY: "NOT_READY",
   /** A second `hello` on an already-authenticated connection. */
   ALREADY_READY: "ALREADY_READY",
-  /** Another connection already holds this agent's region (B1c is one-agent-per-region). */
+  /**
+   * No longer sent. B1c allowed one agent per region and refused the second with
+   * this; a region may now hold any number. Kept because it is part of the v1
+   * wire contract and a deployed probe still has a branch for it, so removing it
+   * would be a protocol change for no gain.
+   */
   REGION_TAKEN: "REGION_TAKEN",
 } as const;
 

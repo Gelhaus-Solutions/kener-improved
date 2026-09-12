@@ -48,15 +48,27 @@ need to bump the file by hand first.
     provider that blocks datacenter ranges: rank the probe above the local check
     and the local 403 stops deciding.
 
-2. Copy the token. It is shown once and cannot be recovered; if it is lost,
+2. Put more than one agent in a region if you want that vantage point to keep
+   reporting when a machine goes down. Every agent in the region runs every
+   check, and their answers are reduced to the one answer that region gives
+   before anything else sees them, using that region's own merge policy. So a
+   region's say in the final status does not grow because you deployed a second
+   box there: two agents in Frankfurt are two machines answering "what does
+   Frankfurt see", not two votes.
+
+   They are equal peers, and nothing about them is configurable individually. If
+   you find yourself wanting to weight one agent against another, what you
+   actually want is two regions.
+
+3. Copy the token. It is shown once and cannot be recovered; if it is lost,
    issue a new one with the key button.
 
-3. Make sure the Kener instance has a listener. `KENER_PROBE_WS_PORT` must be
+4. Make sure the Kener instance has a listener. `KENER_PROBE_WS_PORT` must be
    set on the process that runs the schedulers, and the port reachable from
    wherever the probe runs. With it unset there is no listener at all and no
    agent can connect.
 
-4. Run the probe.
+5. Run the probe.
 
 ## Running it
 
