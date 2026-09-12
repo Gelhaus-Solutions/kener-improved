@@ -24,6 +24,12 @@ export interface ProbeAgentRecord {
   org_id: number;
   name: string;
   region_id: number;
+  /**
+   * B1g. This agent's say among the others in its own region, never outside it.
+   * Non-negative; 0 reports and is recorded but cannot carry a vote. Only
+   * `WEIGHTED_MAJORITY` reads it, exactly as `SourceConfig.weight` does.
+   */
+  weight: number;
   token_hash: string;
   token_hint: string | null;
   status: string;
@@ -233,6 +239,7 @@ export class ProbesRepository extends BaseRepository {
   async createProbeAgent(data: {
     name: string;
     region_id: number;
+    weight?: number;
     token_hash: string;
     token_hint: string | null;
   }): Promise<number> {
@@ -241,6 +248,10 @@ export class ProbesRepository extends BaseRepository {
       {
         name: data.name,
         region_id: data.region_id,
+        // B1g. Listed explicitly because this insert is an allowlist: a field
+        // missing from it is accepted by the caller, dropped here, and the write
+        // still reports success.
+        weight: data.weight ?? 1,
         token_hash: data.token_hash,
         token_hint: data.token_hint,
         status: "ACTIVE",
@@ -256,7 +267,14 @@ export class ProbesRepository extends BaseRepository {
 
   async updateProbeAgent(
     id: number,
-    patch: { name?: string; region_id?: number; status?: string; token_hash?: string; token_hint?: string | null },
+    patch: {
+      name?: string;
+      region_id?: number;
+      weight?: number;
+      status?: string;
+      token_hash?: string;
+      token_hint?: string | null;
+    },
   ): Promise<number> {
     return await this.table(AGENTS)
       .where({ id })

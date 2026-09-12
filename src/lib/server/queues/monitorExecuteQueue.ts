@@ -12,7 +12,13 @@ import GC from "../../global-constants.js";
 import { resolveConfirmedStatus } from "../services/confirmationThreshold.js";
 import { planProbeExecution, runOnProbe, dispatchSample } from "../probes/dispatch.js";
 import { windowsAffecting, suppressesAlerts } from "../maintenance/cascade.js";
-import { mergeObservations, mergeRegionAgents, LOCAL_REGION_ID, type Observation } from "../probes/merge.js";
+import {
+  mergeObservations,
+  mergeRegionAgents,
+  LOCAL_REGION_ID,
+  type Observation,
+  type AgentAnswer,
+} from "../probes/merge.js";
 
 let monitorExecuteQueue: Queue | null = null;
 let worker: Worker | null = null;
@@ -162,6 +168,10 @@ const addWorker = () => {
     const probeAnswers = await Promise.all(
       probePlan.voting.map(async (source) => ({
         regionId: source.regionId,
+        // B1g. Carried from the agent record so the region can weigh its own
+        // siblings. It never leaves the region: the outer merge uses the
+        // region's weight, not this one.
+        weight: source.connection.agent.weight,
         result: await runOnProbe(source.connection, monitor, ts),
       })),
     );
@@ -169,19 +179,22 @@ const addWorker = () => {
     /**
      * One answer per region, however many agents that region has.
      *
-     * Agents in a region are replicas of a single vantage point, so they are
+     * Agents in a region answer for a single vantage point, so they are
      * gathered by region and reduced to the one verdict that region reports
      * (`mergeRegionAgents`). Two things depend on it: the outer merge must not
      * give a region extra say for having extra hardware, and `monitoring_data`
      * is keyed `(monitor_tag, region_id, timestamp)`, so two rows for one region
      * and one minute would collide on the primary key and the upsert would keep
      * whichever landed last.
+     *
+     * B1g. Each agent carries its own weight into that reduction, so siblings
+     * need not count equally. The weight stops at the region boundary.
      */
-    const answersByRegion = new Map<number, MonitoringResult[]>();
+    const answersByRegion = new Map<number, AgentAnswer[]>();
     for (const answer of probeAnswers) {
       if (!answer.result) continue;
       const forRegion = answersByRegion.get(answer.regionId) ?? [];
-      forRegion.push(answer.result);
+      forRegion.push({ result: answer.result, weight: answer.weight });
       answersByRegion.set(answer.regionId, forRegion);
     }
 

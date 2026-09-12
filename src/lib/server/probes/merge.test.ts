@@ -403,6 +403,11 @@ describe("mergeRegionAgents: several agents, one regional answer", () => {
     return { status, latency, type: GC.REALTIME, ...(error ? { error_message: error } : {}) };
   }
 
+  /** One agent's answer. B1g: an absent weight means 1. */
+  function a(r: ReturnType<typeof result>, weight?: number) {
+    return weight === undefined ? { result: r } : { result: r, weight };
+  }
+
   it("returns null when no agent answered", () => {
     expect(mergeRegionAgents([], config("WEIGHTED_MAJORITY", []))).toBeNull();
   });
@@ -411,19 +416,22 @@ describe("mergeRegionAgents: several agents, one regional answer", () => {
     // The pre-multi-agent path. It must stay byte-for-byte what it was, so an
     // install with one agent per region sees no change at all.
     const only = result(GC.UP, 42);
-    expect(mergeRegionAgents([only], config("WEIGHTED_MAJORITY", []))).toBe(only);
+    expect(mergeRegionAgents([a(only)], config("WEIGHTED_MAJORITY", []))).toBe(only);
   });
 
   it("resolves disagreeing agents by majority", () => {
     const merged = mergeRegionAgents(
-      [result(GC.UP), result(GC.UP), result(GC.DOWN, 9000, "timeout")],
+      [a(result(GC.UP)), a(result(GC.UP)), a(result(GC.DOWN, 9000, "timeout"))],
       config("WEIGHTED_MAJORITY", []),
     );
     expect(merged?.status).toBe(GC.UP);
   });
 
   it("breaks a tie towards the worse status, as the outer merge does", () => {
-    const merged = mergeRegionAgents([result(GC.UP), result(GC.DOWN, 9000, "timeout")], config("WEIGHTED_MAJORITY", []));
+    const merged = mergeRegionAgents(
+      [a(result(GC.UP)), a(result(GC.DOWN, 9000, "timeout"))],
+      config("WEIGHTED_MAJORITY", []),
+    );
     expect(merged?.status).toBe(GC.DOWN);
   });
 
@@ -431,7 +439,7 @@ describe("mergeRegionAgents: several agents, one regional answer", () => {
     // Agents rank by their position in the registry's list, which is agent id
     // order. Anything else would make the answer depend on who reconnected last.
     const merged = mergeRegionAgents(
-      [result(GC.UP), result(GC.DOWN, 9000, "timeout")],
+      [a(result(GC.UP)), a(result(GC.DOWN, 9000, "timeout"))],
       config("TRUST_ORDER", []),
     );
     expect(merged?.status).toBe(GC.UP);
@@ -439,11 +447,15 @@ describe("mergeRegionAgents: several agents, one regional answer", () => {
 
   it("holds DOWN until the region's own agents reach quorum", () => {
     const cfg = config("QUORUM_DOWN", [], { quorumThreshold: 2 });
-    const one = mergeRegionAgents([result(GC.DOWN, 9000, "timeout"), result(GC.UP), result(GC.UP)], cfg, GC.UP);
+    const one = mergeRegionAgents(
+      [a(result(GC.DOWN, 9000, "timeout")), a(result(GC.UP)), a(result(GC.UP))],
+      cfg,
+      GC.UP,
+    );
     expect(one?.status).toBe(GC.UP);
 
     const two = mergeRegionAgents(
-      [result(GC.DOWN, 9000, "timeout"), result(GC.DOWN, 9000, "timeout"), result(GC.UP)],
+      [a(result(GC.DOWN, 9000, "timeout")), a(result(GC.DOWN, 9000, "timeout")), a(result(GC.UP))],
       cfg,
       GC.UP,
     );
@@ -452,18 +464,109 @@ describe("mergeRegionAgents: several agents, one regional answer", () => {
 
   it("ignores an agent that reported NO_DATA rather than letting it dilute the vote", () => {
     const merged = mergeRegionAgents(
-      [result(GC.DOWN, 9000, "timeout"), result(GC.NO_DATA, 0)],
+      [a(result(GC.DOWN, 9000, "timeout")), a(result(GC.NO_DATA, 0))],
       config("WEIGHTED_MAJORITY", []),
     );
     expect(merged?.status).toBe(GC.DOWN);
   });
 
-  it("weighs every agent equally however the outer cascade weighted the region", () => {
-    // A region's configured weight is its say among OTHER regions. Inside the
-    // region the agents are replicas, so a heavy region does not become a region
-    // whose first agent outvotes its second.
+  it("does not let a region's own weight leak into the merge among its agents", () => {
+    // A region's configured weight is its say among OTHER regions. B1g gave
+    // agents their own weights, but this is still not where the region's comes
+    // from: a heavy region must not become a region whose first agent outvotes
+    // its second.
     const heavy = config("WEIGHTED_MAJORITY", [source(7, { weight: 99 })]);
-    const merged = mergeRegionAgents([result(GC.UP), result(GC.UP), result(GC.DOWN, 9000, "timeout")], heavy);
+    const merged = mergeRegionAgents([a(result(GC.UP)), a(result(GC.UP)), a(result(GC.DOWN, 9000, "timeout"))], heavy);
     expect(merged?.status).toBe(GC.UP);
+  });
+
+  it("treats an absent weight as 1, so an unconfigured fleet is unchanged", () => {
+    // Two UP at an explicit 1 against one DOWN with no weight at all.
+    const merged = mergeRegionAgents(
+      [a(result(GC.UP), 1), a(result(GC.UP), 1), a(result(GC.DOWN, 9000, "timeout"))],
+      config("WEIGHTED_MAJORITY", []),
+    );
+    expect(merged?.status).toBe(GC.UP);
+  });
+});
+
+describe("mergeRegionAgents: B1g per-agent weights", () => {
+  function result(status: string, latency = 100, error?: string) {
+    return { status, latency, type: GC.REALTIME, ...(error ? { error_message: error } : {}) };
+  }
+  function a(r: ReturnType<typeof result>, weight?: number) {
+    return weight === undefined ? { result: r } : { result: r, weight };
+  }
+
+  it("lets a heavier agent outvote two lighter siblings", () => {
+    // The case the two-regions advice could not serve: a datacentre probe and
+    // two residential boxes all answering for one vantage point.
+    const merged = mergeRegionAgents(
+      [a(result(GC.DOWN, 9000, "timeout"), 10), a(result(GC.UP), 1), a(result(GC.UP), 1)],
+      config("WEIGHTED_MAJORITY", []),
+    );
+    expect(merged?.status).toBe(GC.DOWN);
+  });
+
+  it("lets a lighter agent lose a vote it would have won on headcount", () => {
+    const merged = mergeRegionAgents(
+      [a(result(GC.UP), 10), a(result(GC.DOWN, 9000, "timeout"), 1), a(result(GC.DOWN, 9000, "timeout"), 1)],
+      config("WEIGHTED_MAJORITY", []),
+    );
+    expect(merged?.status).toBe(GC.UP);
+  });
+
+  it("records an agent at weight 0 but gives it no vote", () => {
+    const merged = mergeRegionAgents(
+      [a(result(GC.UP), 1), a(result(GC.DOWN, 9000, "timeout"), 0)],
+      config("WEIGHTED_MAJORITY", []),
+    );
+    expect(merged?.status).toBe(GC.UP);
+  });
+
+  it("falls back to the worst status when every agent is at weight 0", () => {
+    // A misconfiguration must not be able to publish UP over an agent that
+    // reported DOWN, which is what the outer merge does with the same input.
+    const merged = mergeRegionAgents(
+      [a(result(GC.UP), 0), a(result(GC.DOWN, 9000, "timeout"), 0)],
+      config("WEIGHTED_MAJORITY", []),
+    );
+    expect(merged?.status).toBe(GC.DOWN);
+  });
+
+  it("ignores weight under TRUST_ORDER, where rank decides", () => {
+    // Matches SourceConfig.weight in the outer merge: weight is a
+    // WEIGHTED_MAJORITY concept and rank is a TRUST_ORDER one.
+    const merged = mergeRegionAgents(
+      [a(result(GC.UP), 1), a(result(GC.DOWN, 9000, "timeout"), 99)],
+      config("TRUST_ORDER", []),
+    );
+    expect(merged?.status).toBe(GC.UP);
+  });
+
+  it("returns a lone agent's answer whatever its weight", () => {
+    // Weight is a comparison and a lone agent has nothing to be compared with.
+    // Silencing a region is DISPLAY_ONLY's job, not weight zero's.
+    const only = result(GC.DOWN, 9000, "timeout");
+    expect(mergeRegionAgents([a(only, 0)], config("WEIGHTED_MAJORITY", []))).toBe(only);
+  });
+
+  it("gives a negative weight no vote rather than letting it subtract", () => {
+    // Pins the contract, not the mechanism: the clamp exists both here and in
+    // mergeByWeight, so this stays green if either one alone is removed.
+    const merged = mergeRegionAgents(
+      [a(result(GC.UP), -100), a(result(GC.DOWN, 9000, "timeout"), 1)],
+      config("WEIGHTED_MAJORITY", []),
+    );
+    expect(merged?.status).toBe(GC.DOWN);
+  });
+
+  it("treats a nonsense weight as no weight rather than poisoning the tally", () => {
+    // NaN in a sum makes every comparison false and the whole region silent.
+    const merged = mergeRegionAgents(
+      [a(result(GC.UP), Number.NaN), a(result(GC.UP), Number.NaN), a(result(GC.DOWN, 9000, "timeout"), 1)],
+      config("WEIGHTED_MAJORITY", []),
+    );
+    expect(merged?.status).toBe(GC.DOWN);
   });
 });

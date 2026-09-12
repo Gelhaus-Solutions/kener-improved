@@ -393,6 +393,16 @@ export function mergeObservations(
   }
 }
 
+/** B1g. One agent's answer, and how much say it has among its own siblings. */
+export interface AgentAnswer {
+  result: MonitoringResult;
+  /**
+   * Non-negative. Absent means 1, which is what every agent had before B1g and
+   * is what keeps an unconfigured fleet behaving exactly as it did.
+   */
+  weight?: number;
+}
+
 /**
  * Several agents in one region, reduced to the single answer that region gives.
  *
@@ -411,27 +421,53 @@ export function mergeObservations(
  * whichever landed last. One answer per region per minute is the only shape that
  * key can hold.
  *
- * **The agents are peers, and the region's own policy settles them.** Each is
- * given equal weight and a trust rank following the order the registry lists
- * them, which is by agent id and therefore stable. Nothing here is configurable
- * per agent, deliberately: an agent is a replica, and a replica that has to be
- * weighted against its own siblings is really a separate region.
+ * **B1g: the agents are no longer forced to be equal.** Each carries its own
+ * `probe_agents.weight`, and the region's policy settles them. None of the
+ * paragraph above changes: the weight applies only here, among siblings, and the
+ * region still casts exactly one vote outside. What it buys is the case that
+ * made the old advice wrong - a datacentre probe and a residential box can both
+ * legitimately report for Frankfurt while deserving different say, and splitting
+ * them into two regions to express that would double Frankfurt's weight in the
+ * outer merge, which is the very thing this function exists to prevent.
+ *
+ * Trust rank still follows the order the registry lists agents in, which is by
+ * agent id and therefore stable. Under `TRUST_ORDER` the weight does nothing, on
+ * purpose and exactly as `SourceConfig.weight` behaves in the outer merge.
+ *
+ * **A lone agent short-circuits whatever its weight**, because weight is a
+ * comparison and there is nothing to compare it against. An operator who wants a
+ * region recorded but not counted wants `DISPLAY_ONLY`, which is a region-level
+ * mode and means the same thing under every policy.
  *
  * Returns null when nothing could decide, exactly as `mergeObservations` does,
  * so a region whose agents all went silent simply does not participate.
  */
 export function mergeRegionAgents(
-  results: MonitoringResult[],
+  answers: AgentAnswer[],
   config: MergeConfig,
   lastKnownStatus?: string,
 ): MonitoringResult | null {
-  if (results.length === 0) return null;
+  if (answers.length === 0) return null;
   // Not merely an optimisation: it keeps the single-agent path byte-for-byte
   // what it was before multi-agent regions existed.
-  if (results.length === 1) return results[0];
+  if (answers.length === 1) return answers[0].result;
 
   const sources = new Map<number, SourceConfig>(
-    results.map((_, index) => [index, { regionId: index, mode: "VOTE" as SourceMode, weight: 1, trustRank: index }]),
+    answers.map((answer, index) => [
+      index,
+      {
+        regionId: index,
+        mode: "VOTE" as SourceMode,
+        // Normalised here for the same reason the cascade normalises at its own
+        // `sources.set` above: a SourceConfig is documented to hold a
+        // non-negative weight, and every place that builds one should honour
+        // that rather than leaving it to the reader. `mergeByWeight` clamps
+        // again on the way out, so this is belt and braces and no test can tell
+        // the two apart - removing either one alone changes no behaviour.
+        weight: Math.max(0, Number(answer.weight ?? 1) || 0),
+        trustRank: index,
+      },
+    ]),
   );
 
   // The region's policy, applied among its own agents. `sources` is replaced
@@ -445,7 +481,7 @@ export function mergeRegionAgents(
   };
 
   return mergeObservations(
-    results.map((result, index) => ({ regionId: index, result })),
+    answers.map((answer, index) => ({ regionId: index, result: answer.result })),
     innerConfig,
     lastKnownStatus,
   );

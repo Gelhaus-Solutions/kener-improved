@@ -35,6 +35,7 @@ function agent(overrides: Partial<ProbeAgentRecord> = {}): ProbeAgentRecord {
     org_id: 1,
     name: "Frankfurt",
     region_id: 3,
+    weight: 1,
     token_hash: "hash",
     token_hint: "abcd",
     status: "ACTIVE",
