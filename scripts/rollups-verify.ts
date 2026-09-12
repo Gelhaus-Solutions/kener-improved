@@ -25,9 +25,32 @@
 import knexLib from "knex";
 import type { Knex } from "knex";
 import knexOb from "../knexfile.js";
+import { LATENCY_TYPES, OVERLAY_TYPES, grainsInFoldOrder } from "../src/lib/server/services/rollupCompute.js";
+import { ROLLUP_GRAIN_SECONDS, ROLLUP_TABLES, type RollupGrain } from "../src/lib/server/types/db.js";
 
 const DAY = 86400;
 const HOUR = 3600;
+
+/**
+ * Which sample types count as overlay and which carry a real latency.
+ *
+ * **Imported, not written out again, and that is a narrower exception than it
+ * looks.** The point of this script is that the arithmetic is independent - the
+ * counting happens in SQL precisely so it cannot agree with `aggregateSamples`
+ * about a mistake. But *which types exist* is a definition, not arithmetic, and
+ * a second copy of a definition is only ever a way to be out of date: KENER-123
+ * added `OPERATOR` to the overlay set and this file kept its own list, so the
+ * verifier reported two failures a day against an engine that was right.
+ *
+ * The independence that matters is preserved. These two sets say what the words
+ * mean; the SQL below still does its own counting.
+ */
+const overlayTypes = [...OVERLAY_TYPES];
+const latencyTypes = [...LATENCY_TYPES];
+const placeholders = (values: ReadonlyArray<unknown>) => values.map(() => "?").join(",");
+
+/** Every grain finer than a day, which is what a daily bucket is the sum of. */
+const subDayGrains: RollupGrain[] = grainsInFoldOrder().filter((grain) => ROLLUP_GRAIN_SECONDS[grain] < DAY);
 
 let failures = 0;
 let checks = 0;
@@ -134,15 +157,15 @@ async function main(): Promise<void> {
              SUM(CASE WHEN status = 'DEGRADED' THEN 1 ELSE 0 END) AS count_degraded,
              SUM(CASE WHEN status = 'MAINTENANCE' THEN 1 ELSE 0 END) AS count_maintenance,
              SUM(CASE WHEN status = 'NO_DATA' THEN 1 ELSE 0 END) AS count_no_data,
-             SUM(CASE WHEN type IN ('INCIDENT','MAINTENANCE') THEN 1 ELSE 0 END) AS count_overlay,
-             SUM(CASE WHEN type IN ('INCIDENT','MAINTENANCE') THEN 0 ELSE 1 END) AS count_observed,
-             SUM(CASE WHEN type IN ('REALTIME','TIMEOUT','ERROR','MANUAL') AND latency IS NOT NULL THEN 1 ELSE 0 END) AS latency_count,
+             SUM(CASE WHEN type IN (${placeholders(overlayTypes)}) THEN 1 ELSE 0 END) AS count_overlay,
+             SUM(CASE WHEN type IN (${placeholders(overlayTypes)}) THEN 0 ELSE 1 END) AS count_observed,
+             SUM(CASE WHEN type IN (${placeholders(latencyTypes)}) AND latency IS NOT NULL THEN 1 ELSE 0 END) AS latency_count,
              MIN("timestamp") AS first_ts,
              MAX("timestamp") AS last_ts
            FROM monitoring_data
           WHERE org_id = ? AND region_id = 0 AND monitor_tag = ?
             AND "timestamp" >= ? AND "timestamp" < ?`,
-          [orgId, tag, dayStart, dayStart + DAY],
+          [...overlayTypes, ...overlayTypes, ...latencyTypes, orgId, tag, dayStart, dayStart + DAY],
         );
 
         const [rollup] = await rows(
@@ -183,45 +206,40 @@ async function main(): Promise<void> {
         });
 
         // ---- the grains against each other -------------------------------
-        const [hourly] = await rows(
-          knex,
-          `SELECT COUNT(*) AS buckets, SUM(count_total) AS count_total, SUM(count_up) AS count_up,
-                  SUM(latency_count) AS latency_count
-             FROM monitor_rollup_1h
-            WHERE org_id = ? AND monitor_tag = ? AND region_id = 0
-              AND bucket_start >= ? AND bucket_start < ?`,
-          [orgId, tag, dayStart, dayStart + DAY],
-        );
-        check(
-          `${label}: the day equals the sum of its hours (count_total)`,
-          n(hourly.count_total) === n(rollup.count_total),
-          {
-            day: n(rollup.count_total),
-            hours: n(hourly.count_total),
-            buckets: n(hourly.buckets),
-          },
-        );
-        check(`${label}: the day equals the sum of its hours (count_up)`, n(hourly.count_up) === n(rollup.count_up), {
-          day: n(rollup.count_up),
-          hours: n(hourly.count_up),
-        });
-        check(
-          `${label}: the day equals the sum of its hours (latency_count)`,
-          n(hourly.latency_count) === n(rollup.latency_count),
-          { day: n(rollup.latency_count), hours: n(hourly.latency_count) },
-        );
+        //
+        // **Every grain finer than the day, derived rather than listed.** This
+        // block used to name `1h` and `5m`, so when KENER-124 inserted `15m`
+        // between them the new grain was the one thing the acceptance test never
+        // looked at - and it was also the one grain that turned out to be empty
+        // on an upgraded instance. A verifier that has to be remembered is a
+        // verifier that goes quiet exactly when a grain is new.
+        for (const grain of subDayGrains) {
+          const [sums] = await rows(
+            knex,
+            `SELECT COUNT(*) AS buckets, SUM(count_total) AS count_total, SUM(count_up) AS count_up,
+                    SUM(latency_count) AS latency_count
+               FROM ${ROLLUP_TABLES[grain]}
+              WHERE org_id = ? AND monitor_tag = ? AND region_id = 0
+                AND bucket_start >= ? AND bucket_start < ?`,
+            [orgId, tag, dayStart, dayStart + DAY],
+          );
 
-        const [fine] = await rows(
-          knex,
-          `SELECT SUM(count_total) AS count_total FROM monitor_rollup_5m
-            WHERE org_id = ? AND monitor_tag = ? AND region_id = 0
-              AND bucket_start >= ? AND bucket_start < ?`,
-          [orgId, tag, dayStart, dayStart + DAY],
-        );
-        check(`${label}: the day equals the sum of its 5m buckets`, n(fine.count_total) === n(rollup.count_total), {
-          day: n(rollup.count_total),
-          fine: n(fine.count_total),
-        });
+          // A grain with no buckets at all for a day the day-grain covers is the
+          // upgrade failure itself, not a rounding difference, so it is worth
+          // its own assertion rather than showing up as a count mismatch.
+          check(`${label}: the ${grain} grain covers a sealed day`, n(sums.buckets) > 0, {
+            buckets: n(sums.buckets),
+            day_total: n(rollup.count_total),
+          });
+
+          for (const column of ["count_total", "count_up", "latency_count"]) {
+            check(
+              `${label}: the day equals the sum of its ${grain} buckets (${column})`,
+              n(sums[column]) === n(rollup[column]),
+              { day: n(rollup[column]), [grain]: n(sums[column]), buckets: n(sums.buckets) },
+            );
+          }
+        }
 
         // A histogram is only absent when nothing had a latency worth recording.
         check(
