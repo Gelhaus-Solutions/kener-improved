@@ -19,12 +19,32 @@ export interface SlaTargetRow {
   exclude_maintenance: string;
   /** YES | NO. */
   degraded_counts_as_bad: string;
-  /** YES | NO. */
+  /**
+   * YES | NO, and **derived, not authoritative**.
+   *
+   * Kept in step by `saveSlaTarget` as `YES` exactly when `public_placements` is
+   * non-empty, so anything outside this repository still reading it gets the
+   * same answer. Nothing here decides visibility from it: a boolean could say
+   * "publish" without saying where, which is precisely how page- and
+   * category-scoped targets came to be published to nowhere.
+   */
   show_on_public: string;
+  /**
+   * Where this target appears publicly. Empty means nowhere.
+   *
+   * Stored as a JSON array of `SloPublicSurface`; parsed here so no caller has
+   * to know that.
+   */
+  public_placements: string[];
+  /** COMPACT | FULL. */
+  public_detail: string;
   status: string;
 }
 
-export type SlaTargetInsert = Omit<SlaTargetRow, "id" | "org_id">;
+export type SlaTargetInsert = Omit<SlaTargetRow, "id" | "org_id" | "public_placements"> & {
+  /** Serialised on the way in, because the column is text. */
+  public_placements: string;
+};
 
 /** A whole `sla_evaluations` row. */
 export interface SlaEvaluationRow {
@@ -88,6 +108,33 @@ export class SlaRepository extends BaseRepository {
       .where("status", "ACTIVE")
       .orderBy("id", "asc");
     return rows.map(normalizeTarget);
+  }
+
+  /**
+   * Every published target in the org, with its evaluation, in one query.
+   *
+   * **One read for every public surface**, rather than one per scope. A status
+   * page needs the page's own targets, its categories' and its components' all
+   * at once; an instance has tens of targets, not thousands; and three queries
+   * that each had to remember the same two filters is three places for the next
+   * surface to be forgotten in. Callers bucket the result by scope.
+   *
+   * ACTIVE only, because an inactive target is not evaluated and would publish a
+   * frozen figure. The placement filter is deliberately *not* in SQL: the column
+   * is a JSON array and `LIKE '%...%'` over it would match a surface name inside
+   * another, differently on each dialect. It is filtered in `publishedSlosFor`.
+   */
+  async getPublishedSlaTargets(): Promise<Array<{ target: SlaTargetRow; evaluation: SlaEvaluationRow | null }>> {
+    const targets = (await this.table(TARGETS).select("*").where("status", "ACTIVE").orderBy("id", "asc")).map(
+      normalizeTarget,
+    );
+    const published = targets.filter((target) => target.public_placements.length > 0);
+    if (published.length === 0) return [];
+
+    const evaluations = new Map(
+      (await this.getSlaEvaluations(published.map((target) => target.id))).map((row) => [row.sla_target_id, row]),
+    );
+    return published.map((target) => ({ target, evaluation: evaluations.get(target.id) ?? null }));
   }
 
   async createSlaTarget(data: SlaTargetInsert): Promise<number> {
@@ -223,8 +270,28 @@ function normalizeTarget(row: Record<string, unknown>): SlaTargetRow {
     exclude_maintenance: String(row.exclude_maintenance ?? "YES"),
     degraded_counts_as_bad: String(row.degraded_counts_as_bad ?? "NO"),
     show_on_public: String(row.show_on_public ?? "NO"),
+    public_placements: parsePlacements(row.public_placements),
+    public_detail: String(row.public_detail ?? "FULL"),
     status: String(row.status ?? "ACTIVE"),
   };
+}
+
+/**
+ * Reads the stored placement list.
+ *
+ * A column that is null, empty or not valid JSON all mean the same thing here -
+ * nowhere - because the alternative is throwing on the public read path over a
+ * malformed row and taking the whole status page down with it. A corrupt value
+ * hides one figure; an exception hides the page.
+ */
+function parsePlacements(raw: unknown): string[] {
+  if (typeof raw !== "string" || raw.length === 0) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
 }
 
 const num = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));

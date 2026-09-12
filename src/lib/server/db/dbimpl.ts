@@ -126,6 +126,7 @@ class DbImpl {
   getSlaTargets!: SlaRepository["getSlaTargets"];
   getSlaTargetById!: SlaRepository["getSlaTargetById"];
   getSlaTargetsForMonitor!: SlaRepository["getSlaTargetsForMonitor"];
+  getPublishedSlaTargets!: SlaRepository["getPublishedSlaTargets"];
   createSlaTarget!: SlaRepository["createSlaTarget"];
   updateSlaTarget!: SlaRepository["updateSlaTarget"];
   deleteSlaTarget!: SlaRepository["deleteSlaTarget"];
@@ -730,6 +731,7 @@ class DbImpl {
     this.getSlaTargets = this.sla.getSlaTargets.bind(this.sla);
     this.getSlaTargetById = this.sla.getSlaTargetById.bind(this.sla);
     this.getSlaTargetsForMonitor = this.sla.getSlaTargetsForMonitor.bind(this.sla);
+    this.getPublishedSlaTargets = this.sla.getPublishedSlaTargets.bind(this.sla);
     this.createSlaTarget = this.sla.createSlaTarget.bind(this.sla);
     this.updateSlaTarget = this.sla.updateSlaTarget.bind(this.sla);
     this.deleteSlaTarget = this.sla.deleteSlaTarget.bind(this.sla);

@@ -3,6 +3,7 @@
   import LivePageStatusCard from "$lib/components/LivePageStatusCard.svelte";
   import ThemePlus from "$lib/components/ThemePlus.svelte";
   import MonitorList from "$lib/components/MonitorList.svelte";
+  import MonitorSloPanel from "$lib/components/MonitorSloPanel.svelte";
   import IncidentItem from "$lib/components/IncidentItem.svelte";
   import MaintenanceItem from "$lib/components/MaintenanceItem.svelte";
   import NotificationsList from "$lib/components/NotificationsList.svelte";
@@ -14,6 +15,7 @@
   import { getEndOfDayAtTz } from "$lib/client/datetime";
   import { SveltePurify } from "@humanspeak/svelte-purify";
   import GC from "$lib/global-constants.js";
+  import { t } from "$lib/stores/i18n";
   let { data } = $props();
   let pageSettings = $derived(data.pageDetails.page_settings);
   let barCount = $derived.by(() =>
@@ -114,12 +116,18 @@
             {/each}
           </div>
         {/if}
+        <!-- F1a: page-scoped SLOs placed at the top of this page, plus any
+             page-scoped breach wherever it was placed. Mirrored in
+             `[page_path]/+page.svelte`: this page exists twice. -->
+        <MonitorSloPanel slos={data.pageSlos} heading={$t("Service Level Agreement")} />
         <MonitorList
           pagePath={""}
           monitorTags={data.monitorTags}
           monitorSlugsByTag={data.monitorSlugsByTag}
           monitorCategoriesByTag={data.monitorCategoriesByTag}
           monitorGroupMembersByTag={data.monitorGroupMembersByTag}
+          monitorSlos={data.monitorSlos}
+          categorySlos={data.categorySlos}
           {pageSettings}
           {barCount}
           {endOfDayTodayAtTz}

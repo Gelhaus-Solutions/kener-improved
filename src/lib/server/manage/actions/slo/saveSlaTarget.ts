@@ -1,6 +1,16 @@
 import db from "$lib/server/db/db.js";
 import GC from "$lib/global-constants.js";
-import { SLO_CALENDAR_PERIODS, SLO_COMBINATIONS, SLO_SCOPE_TYPES, SLO_WINDOW_TYPES } from "$lib/server/services/slo.js";
+import {
+  SLO_CALENDAR_PERIODS,
+  SLO_COMBINATIONS,
+  SLO_PUBLIC_DETAILS,
+  SLO_PUBLIC_SURFACES,
+  SLO_SCOPE_TYPES,
+  SLO_SURFACES_BY_SCOPE,
+  SLO_WINDOW_TYPES,
+  isSurfaceValidForScope,
+  type SloScopeType,
+} from "$lib/server/services/slo.js";
 import { ActionError } from "../../types.js";
 import type { ActionDefinition } from "../../types.js";
 
@@ -18,7 +28,16 @@ interface Payload {
   calendar_period?: string | null;
   exclude_maintenance?: boolean;
   degraded_counts_as_bad?: boolean;
-  show_on_public?: boolean;
+  /**
+   * Where this target appears publicly. An empty array is "nowhere".
+   *
+   * Replaces the old `show_on_public` boolean, which could say "publish" without
+   * saying where - and for a page- or category-scoped target there was nowhere,
+   * so it published to nothing at all.
+   */
+  public_placements?: string[];
+  /** COMPACT | FULL. */
+  public_detail?: string;
   status?: string;
 }
 
@@ -92,6 +111,30 @@ export default {
       }
     }
 
+    // **Every placement is checked against the scope, not just against the list
+    // of legal words.** The combinations left out are the ones that would
+    // publish a misleading figure - a page-wide number on one component's page
+    // reads as that component's attainment - and refusing here is the only point
+    // where somebody is present to be told which one was wrong.
+    const requested = Array.isArray(data.public_placements) ? data.public_placements.map(String) : [];
+    const placements = Array.from(new Set(requested));
+    for (const placement of placements) {
+      if (!SLO_PUBLIC_SURFACES.includes(placement as never)) {
+        throw new ActionError(400, `Unknown placement "${placement}"`);
+      }
+      if (!isSurfaceValidForScope(scopeType, placement)) {
+        throw new ActionError(
+          400,
+          `A ${scopeType.toLowerCase()}-scoped target cannot be placed on "${placement}". Allowed: ${SLO_SURFACES_BY_SCOPE[scopeType as SloScopeType].join(", ")}`,
+        );
+      }
+    }
+
+    const detail = String(data.public_detail ?? "FULL");
+    if (!SLO_PUBLIC_DETAILS.includes(detail as never)) {
+      throw new ActionError(400, `public_detail must be one of ${SLO_PUBLIC_DETAILS.join(", ")}`);
+    }
+
     const row = {
       name,
       scope_type: scopeType,
@@ -104,7 +147,11 @@ export default {
       calendar_period: calendarPeriod,
       exclude_maintenance: data.exclude_maintenance === false ? GC.NO : GC.YES,
       degraded_counts_as_bad: data.degraded_counts_as_bad === true ? GC.YES : GC.NO,
-      show_on_public: data.show_on_public === true ? GC.YES : GC.NO,
+      public_placements: JSON.stringify(placements),
+      public_detail: detail,
+      // Derived, never chosen. Kept in step so anything outside this repo still
+      // reading the old boolean gets the same answer; nothing here reads it.
+      show_on_public: placements.length > 0 ? GC.YES : GC.NO,
       status: data.status === "INACTIVE" ? "INACTIVE" : "ACTIVE",
     };
 

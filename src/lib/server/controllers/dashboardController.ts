@@ -3,6 +3,7 @@ import { GetMinuteStartNowTimestampUTC, BeginningOfMinute, BeginningOfDay } from
 import { GetPageByPathWithMonitors, GetLatestMonitoringDataAllActive } from "./controller.js";
 import { GetMonitorsParsed } from "./monitorsController.js";
 import { getPageStatus, type LatestStatus, type PageStatus } from "../incidents/pageStatus.js";
+import { publicSloSurfacesFor, type PublicSlo } from "../services/sloPublic.js";
 
 import type {
   IncidentRecord,
@@ -222,6 +223,24 @@ export interface PageDashboardData {
    * org - its prefix is empty, so slug and tag are the same string.
    */
   monitorSlugsByTag: Record<string, string>;
+  /**
+   * Published SLO figures for this page, bucketed by where they were placed.
+   *
+   * Computed here rather than in either page loader because the public status
+   * page exists twice - `(kener)/+page.svelte` and
+   * `(kener)/[page_path]/+page.svelte` - and anything added to one of those and
+   * not the other silently works on the home page and not on a named one. Both
+   * call this function, so this is the only place where both get it.
+   *
+   * `pageSlos` are placed at the top of this page; `categorySlos` on a section
+   * header, keyed by category name; `monitorSlos` beside a component, keyed by
+   * physical tag for the same reason `monitorCategoriesByTag` is. A breached
+   * target is folded into whichever of the three it is about even when it was
+   * placed elsewhere - see `publicSloSurfacesFor`.
+   */
+  pageSlos: PublicSlo[];
+  categorySlos: Record<string, PublicSlo[]>;
+  monitorSlos: Record<string, PublicSlo[]>;
   pageDetails: PageRecordTyped;
   socialPagePreviewImage?: string;
   metaPageTitle?: string;
@@ -383,6 +402,13 @@ export const GetPageDashboardData = async (
   }
 
   if (monitorTags.length === 0) {
+    // A page with no components can still carry a page-scoped SLO: the contract
+    // is about the page, and an operator emptying it does not retract it.
+    const emptySurfaces = publicSloSurfacesFor(await db.getPublishedSlaTargets(), {
+      pageRef: String(pageDetails.id),
+      monitors: new Set<string>(),
+      categories: new Set<string>(),
+    });
     return {
       pageStatus: await getPageStatus([], nowTs),
       ongoingIncidents: [],
@@ -392,6 +418,7 @@ export const GetPageDashboardData = async (
       monitorGroupMembersByTag: {},
       monitorCategoriesByTag: {},
       monitorSlugsByTag: {},
+      ...emptySurfaces,
       pageDetails: pageDetailsTyped,
       socialPagePreviewImage,
       metaPageTitle,
@@ -446,6 +473,20 @@ export const GetPageDashboardData = async (
     monitorGroupMembersByTag[monitor.tag] = groupData.monitors.map((member) => member.tag);
   }
 
+  // F1a. Published SLO figures, bucketed by the surface they were placed on.
+  // One read for all three surfaces; see `getPublishedSlaTargets`.
+  //
+  // Both `allowedRefs` sets are built from what this page actually shows, so a
+  // target belonging to another page's components never reaches this page's
+  // hydration payload.
+  const sloSurfaces = publicSloSurfacesFor(await db.getPublishedSlaTargets(), {
+    pageRef: String(pageDetails.id),
+    monitors: new Set(monitorTags),
+    categories: new Set(
+      Object.values(monitorCategoriesByTag).filter((category): category is string => category !== null),
+    ),
+  });
+
   return {
     pageStatus,
     ongoingIncidents,
@@ -455,6 +496,7 @@ export const GetPageDashboardData = async (
     monitorGroupMembersByTag,
     monitorCategoriesByTag,
     monitorSlugsByTag,
+    ...sloSurfaces,
     pageDetails: pageDetailsTyped,
     socialPagePreviewImage,
     metaPageTitle,

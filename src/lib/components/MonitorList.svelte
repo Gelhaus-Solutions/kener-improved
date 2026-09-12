@@ -5,6 +5,8 @@
   import MonitorBar from "$lib/components/MonitorBar.svelte";
   import MonitorStatusFilter from "$lib/components/MonitorStatusFilter.svelte";
   import MonitorGroupSection from "$lib/components/MonitorGroupSection.svelte";
+  import SloBadge from "$lib/components/SloBadge.svelte";
+  import type { PublicSlo } from "$lib/types/slo";
   import { requestMonitorBar } from "$lib/client/monitor-bar-client";
   import type { MonitorBarResponse } from "$lib/server/api-server/monitor-bar/get";
   import type { PageMonitorLayoutStyle } from "$lib/types/api";
@@ -44,6 +46,16 @@
     pageSettings: PageSettingsType | null;
     barCount: number;
     endOfDayTodayAtTz: number;
+    /**
+     * F1a: published SLO figures placed beside a component, keyed by physical tag.
+     *
+     * Keyed on the tag for the same reason `monitorCategoriesByTag` is: the page
+     * speaks tags internally and slugs only in links, and keying this on the
+     * slug would silently miss every lookup on a prefixed org.
+     */
+    monitorSlos?: Record<string, PublicSlo[]>;
+    /** Published SLO figures placed on a category section header, keyed by category name. */
+    categorySlos?: Record<string, PublicSlo[]>;
   }
 
   let {
@@ -54,8 +66,15 @@
     monitorGroupMembersByTag,
     pageSettings,
     barCount,
-    endOfDayTodayAtTz
+    endOfDayTodayAtTz,
+    monitorSlos = {},
+    categorySlos = {}
   }: Props = $props();
+
+  // Both maps arrive already merged: `publicSloSurfacesFor` folds a breached
+  // target into the surface it is about even when it was placed elsewhere, so
+  // there is nothing to combine here.
+  const slosForCategory = (label: string | null): PublicSlo[] => (label === null ? [] : (categorySlos[label] ?? []));
 
   let monitorBarDataByTag = $state<Record<string, MonitorBarResponse>>({});
   let monitorBarErrorByTag = $state<Record<string, string>>({});
@@ -260,6 +279,10 @@
           compact={isCompact}
           grid={isGrid}
         />
+        <!-- F1a. Under the bar rather than inside it: MonitorBar is shared with
+             the embed and the badge routes, which are not places a contract
+             figure belongs. -->
+        <SloBadge slos={monitorSlos[tag] ?? []} class="mt-1" />
       </div>
     {/each}
   </div>
@@ -287,6 +310,9 @@
         open={isGroupOpen(group.key)}
         ontoggle={(open) => setGroupOpen(group.key, open)}
       >
+        {#snippet badge()}
+          <SloBadge slos={slosForCategory(group.label)} />
+        {/snippet}
         {@render bars(group.tags)}
       </MonitorGroupSection>
     {/each}

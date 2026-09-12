@@ -25,6 +25,62 @@ export const SLO_COMBINATIONS: readonly SloCombination[] = ["WORST", "AVERAGE"];
 export const SLO_WINDOW_TYPES: readonly SloWindowType[] = ["ROLLING", "CALENDAR"];
 export const SLO_CALENDAR_PERIODS: readonly SloCalendarPeriod[] = ["MONTH", "QUARTER", "YEAR"];
 
+/**
+ * The public surfaces a target can be placed on.
+ *
+ *   COMPONENT_PAGE         the component's own page, `/monitors/<slug>`
+ *   STATUS_PAGE_COMPONENT  beside that component in the list on a status page
+ *   PAGE_TOP               a panel at the top of the status page it names
+ *   CATEGORY_SECTION       on the header of its category's section
+ *
+ * **This list replaces a boolean, and the reason is the bug it fixes.**
+ * `show_on_public` could say yes for any scope while only one surface had ever
+ * been built, so a page- or category-scoped target published happily and
+ * rendered nowhere. Naming the surfaces makes "published" and "has somewhere to
+ * appear" the same statement.
+ */
+export type SloPublicSurface = "COMPONENT_PAGE" | "STATUS_PAGE_COMPONENT" | "PAGE_TOP" | "CATEGORY_SECTION";
+
+export const SLO_PUBLIC_SURFACES: readonly SloPublicSurface[] = [
+  "COMPONENT_PAGE",
+  "STATUS_PAGE_COMPONENT",
+  "PAGE_TOP",
+  "CATEGORY_SECTION",
+];
+
+/**
+ * Which surfaces each scope may be placed on.
+ *
+ * Constrained rather than free, because the combinations left out are the ones
+ * that would publish a misleading number: a page-wide figure on one component's
+ * page reads as that component's attainment, and a component's figure on a
+ * category header reads as the section's. A target measures what its scope says
+ * and is only offered the places where that is what a visitor would read.
+ */
+export const SLO_SURFACES_BY_SCOPE: Record<SloScopeType, readonly SloPublicSurface[]> = {
+  MONITOR: ["COMPONENT_PAGE", "STATUS_PAGE_COMPONENT"],
+  PAGE: ["PAGE_TOP"],
+  CATEGORY: ["CATEGORY_SECTION"],
+};
+
+/**
+ * How much of a target is published.
+ *
+ * `COMPACT` is attainment against the objective, which is the whole answer for a
+ * badge beside a component. `FULL` adds the remaining error budget and the
+ * window, which is what the standing panel has always shown. Burn rates are in
+ * neither and never will be: they describe how fast the provider's own alerting
+ * would fire, not how the service behaved.
+ */
+export type SloPublicDetail = "COMPACT" | "FULL";
+export const SLO_PUBLIC_DETAILS: readonly SloPublicDetail[] = ["COMPACT", "FULL"];
+
+/** Whether `surface` is one this scope is allowed to use. */
+export function isSurfaceValidForScope(scopeType: string, surface: string): boolean {
+  const allowed = SLO_SURFACES_BY_SCOPE[scopeType as SloScopeType];
+  return !!allowed && (allowed as readonly string[]).includes(surface);
+}
+
 const DAY = 86400;
 
 /** The burn-rate windows, in seconds. The names are the stored column suffixes. */

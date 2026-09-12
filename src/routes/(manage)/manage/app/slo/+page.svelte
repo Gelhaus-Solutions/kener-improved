@@ -4,6 +4,7 @@
   import { Label } from "$lib/components/ui/label/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
+  import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import { Spinner } from "$lib/components/ui/spinner/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
@@ -48,6 +49,8 @@
     exclude_maintenance: string;
     degraded_counts_as_bad: string;
     show_on_public: string;
+    public_placements: string[];
+    public_detail: string;
     status: string;
     evaluation: Evaluation | null;
   }
@@ -102,7 +105,8 @@
     calendar_period: "MONTH",
     exclude_maintenance: true,
     degraded_counts_as_bad: false,
-    show_on_public: false,
+    public_placements: [] as string[],
+    public_detail: "FULL",
     status: "ACTIVE"
   });
 
@@ -119,6 +123,63 @@
 
   /** Only meaningful when the scope can resolve to more than one component. */
   let scopeIsMulti = $derived(form.scope_type !== "MONITOR");
+
+  /**
+   * The surfaces this target's scope may be placed on.
+   *
+   * Mirrors `SLO_SURFACES_BY_SCOPE` on the server, which validates the same rule
+   * and is the one that decides. Offering the wrong surface here would be a form
+   * that saves and then 400s, so the two lists must agree - and the server's is
+   * the one that matters.
+   */
+  const PLACEMENTS: Record<string, Array<{ value: string; label: string; hint: string }>> = {
+    MONITOR: [
+      {
+        value: "COMPONENT_PAGE",
+        label: "On the component's own page",
+        hint: "A panel on /monitors/<component>."
+      },
+      {
+        value: "STATUS_PAGE_COMPONENT",
+        label: "Beside the component on the status page",
+        hint: "A small figure under that component's bar."
+      }
+    ],
+    PAGE: [
+      {
+        value: "PAGE_TOP",
+        label: "At the top of the status page it covers",
+        hint: "A panel above the component list."
+      }
+    ],
+    CATEGORY: [
+      {
+        value: "CATEGORY_SECTION",
+        label: "On its category's section header",
+        hint: "Needs the page's Component Grouping set to group by category."
+      }
+    ]
+  };
+
+  let placementOptions = $derived(PLACEMENTS[form.scope_type] ?? []);
+
+  /** What the list badge says, so an operator can see where a target actually appears. */
+  function placementSummary(target: Target): string {
+    const labels: Record<string, string> = {
+      COMPONENT_PAGE: "Component page",
+      STATUS_PAGE_COMPONENT: "Status page",
+      PAGE_TOP: "Page top",
+      CATEGORY_SECTION: "Category header"
+    };
+    return (target.public_placements ?? []).map((value) => labels[value] ?? value).join(", ");
+  }
+
+  function togglePlacement(value: string, on: boolean) {
+    const next = new Set(form.public_placements);
+    if (on) next.add(value);
+    else next.delete(value);
+    form.public_placements = [...next];
+  }
 
   const labelFor = (options: Array<{ value: string; label: string }>, value: string, fallback: string) =>
     options.find((option) => option.value === value)?.label ?? fallback;
@@ -165,7 +226,8 @@
       calendar_period: "MONTH",
       exclude_maintenance: true,
       degraded_counts_as_bad: false,
-      show_on_public: false,
+      public_placements: [] as string[],
+      public_detail: "FULL",
       status: "ACTIVE"
     };
     dialogOpen = true;
@@ -184,7 +246,8 @@
       calendar_period: target.calendar_period ?? "MONTH",
       exclude_maintenance: target.exclude_maintenance === "YES",
       degraded_counts_as_bad: target.degraded_counts_as_bad === "YES",
-      show_on_public: target.show_on_public === "YES",
+      public_placements: [...(target.public_placements ?? [])],
+      public_detail: target.public_detail || "FULL",
       status: target.status
     };
     dialogOpen = true;
@@ -285,7 +348,12 @@
               <Card.Title class="flex items-center gap-2">
                 {target.name}
                 {#if target.status !== "ACTIVE"}<Badge variant="secondary">Inactive</Badge>{/if}
-                {#if target.show_on_public === "YES"}<Badge variant="outline">Public</Badge>{/if}
+                <!-- Driven by the placements, not by the legacy boolean: the
+                     badge used to say "Public" for a target that rendered
+                     nowhere, which is the bug this screen was part of. -->
+                {#if (target.public_placements ?? []).length > 0}
+                  <Badge variant="outline">{placementSummary(target)}</Badge>
+                {/if}
               </Card.Title>
               <Card.Description>
                 {scopeLabel(target)} &middot; {windowLabel(target)} &middot; objective {target.objective_percent}%
@@ -368,6 +436,11 @@
               // The previous reference names a different kind of thing now, and
               // keeping it would submit a monitor tag as a page id.
               form.scope_ref = "";
+              // Same for the placements: the old scope's surfaces are not this
+              // scope's, and the server rejects one that is not. Pruned here
+              // rather than in an $effect so the form's state is only ever
+              // written by something the operator did.
+              form.public_placements = [];
             }}
           >
             <Select.Trigger class="w-full">{labelFor(SCOPE_TYPES, form.scope_type, "Choose")}</Select.Trigger>
@@ -469,15 +542,50 @@
           </div>
           <Switch bind:checked={form.degraded_counts_as_bad} />
         </div>
-        <div class="flex items-center justify-between gap-4">
-          <div>
-            <Label>Show on the public page</Label>
-            <p class="text-muted-foreground text-xs">
-              Publishes attainment and remaining budget to anyone who can see the component.
-            </p>
+        <!-- Placement, not a boolean. The surfaces offered depend on the scope,
+             because the combinations left out would publish a figure that reads
+             as being about something it does not measure. A target with nothing
+             ticked is not public. -->
+        <div class="flex flex-col gap-2">
+          <Label>Show on the public page</Label>
+          <p class="text-muted-foreground text-xs">
+            Where this figure appears to visitors. Nothing ticked keeps it private. A breached target is flagged on the
+            status page regardless, so a missed contract is never hidden.
+          </p>
+          <div class="flex flex-col gap-2 pt-1">
+            {#each placementOptions as option (option.value)}
+              <label class="flex items-start gap-2 text-sm">
+                <Checkbox
+                  checked={form.public_placements.includes(option.value)}
+                  onCheckedChange={(checked) => togglePlacement(option.value, checked === true)}
+                />
+                <span>
+                  {option.label}
+                  <span class="text-muted-foreground block text-xs">{option.hint}</span>
+                </span>
+              </label>
+            {/each}
           </div>
-          <Switch bind:checked={form.show_on_public} />
         </div>
+
+        {#if form.public_placements.length > 0}
+          <div class="flex flex-col gap-2">
+            <Label for="slo-detail">How much to show</Label>
+            <Select.Root
+              type="single"
+              value={form.public_detail}
+              onValueChange={(v) => (form.public_detail = v ?? "FULL")}
+            >
+              <Select.Trigger id="slo-detail" class="w-full">
+                {form.public_detail === "COMPACT" ? "Compact" : "Full"}
+              </Select.Trigger>
+              <Select.Content>
+                <Select.Item value="COMPACT">Compact - attainment and objective</Select.Item>
+                <Select.Item value="FULL">Full - adds error budget left and the window</Select.Item>
+              </Select.Content>
+            </Select.Root>
+          </div>
+        {/if}
         <div class="flex items-center justify-between gap-4">
           <div>
             <Label>Active</Label>

@@ -33,10 +33,18 @@
      * hide the answer), and a two-way binding would fight that.
      */
     ontoggle: (open: boolean) => void;
+    /**
+     * F1a: published SLO figures for this category, rendered on the header.
+     *
+     * A snippet rather than data, so this component keeps knowing nothing about
+     * SLOs. It is a heading over monitors, and the moment it starts reading
+     * attainment it becomes a second place where "what a section is" is decided.
+     */
+    badge?: Snippet;
     children: Snippet;
   }
 
-  let { label, count, summaryStatus, showSummary, open, ontoggle, children }: Props = $props();
+  let { label, count, summaryStatus, showSummary, open, ontoggle, badge, children }: Props = $props();
 
   const heading = $derived(label ?? $t("Other"));
 
@@ -77,6 +85,10 @@
 
     <span class="truncate text-sm font-medium">{heading}</span>
     <span class="text-muted-foreground shrink-0 text-xs tabular-nums">{count}</span>
+
+    {#if badge}
+      <span class="shrink-0">{@render badge()}</span>
+    {/if}
 
     {#if showSummary}
       <!-- Worst-of over the members, via the same collapse the bars use, so the
