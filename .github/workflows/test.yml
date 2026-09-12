@@ -16,6 +16,27 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
         contents: read
+
+    # Both audits run against a real Postgres, because both read the live
+    # schema. `check-tenancy` compares the `org_id` columns the database
+    # actually has against `TENANT_TABLES`, and `check-org-provisioning` walks
+    # the rows every org holds. Neither can be answered from source alone, which
+    # is exactly why they were never wired in and why the gaps they exist to
+    # catch reached production twice.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: kener_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4.2.2
@@ -49,3 +70,28 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+      # The migrations and seeds are the only thing that still runs from source
+      # at boot, so this is also the one place CI executes them at all. A
+      # migration that is not re-runnable, or a seed that imports a file the
+      # build does not ship, fails here rather than in a deployment.
+      - name: Migrate and seed a throwaway database
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/kener_ci
+        run: |
+          npx knex migrate:latest
+          npx knex seed:run
+          # Re-runnability is a property every migration in this repo claims and
+          # nothing checked. A second pass must be a no-op.
+          npx knex migrate:latest
+          npx knex seed:run
+
+      - name: Check tenancy registration
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/kener_ci
+        run: npm run db:check-tenancy
+
+      - name: Check org provisioning
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/kener_ci
+        run: npm run db:check-orgs
