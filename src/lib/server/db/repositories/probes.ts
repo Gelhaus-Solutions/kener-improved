@@ -62,10 +62,12 @@ export interface ProbeTarget {
 /**
  * An assignment as the management screen shows it.
  *
- * The agent side is nullable, and that is the point of B1e: an assignment
- * belongs to a region, so a region whose agent has been deleted still has its
- * monitors and the screen can say "nothing is serving this region" rather than
- * the row having quietly disappeared with the agent.
+ * Region and no agent, which is the point of B1e: an assignment belongs to a
+ * region, so a region whose agents have all been deleted still has its monitors
+ * and the screen can say "nothing is serving this region" rather than the rows
+ * having quietly disappeared with the agent. Who is serving the region is a
+ * separate question with a separate answer, and since a region may hold several
+ * agents it is no longer one an assignment row could carry.
  */
 export interface ProbeAssignmentView {
   assignment_id: number;
@@ -73,10 +75,6 @@ export interface ProbeAssignmentView {
   mode: string;
   source: string;
   region_id: number;
-  agent_id: number | null;
-  agent_name: string | null;
-  status: string | null;
-  connection_state: string | null;
 }
 
 /** One region's default: what it checks, and how. */
@@ -334,31 +332,29 @@ export class ProbesRepository extends BaseRepository {
   }
 
   /**
-   * Every assignment in the org, with the agent serving its region if there is
-   * one, for the management screen.
+   * Every assignment in the org, for the management screen.
    *
-   * A left join, not an inner one. A region with no agent still has assignments
-   * and the screen has to be able to say so; an inner join would hide exactly
-   * the state this feature exists to make visible.
+   * **No join to `probe_agents`, and that is a correctness fix rather than a
+   * tidy-up.** This used to left-join agents on `region_id` so a row could name
+   * who was serving it. A region may now hold several agents, and a left join
+   * returns one row per matching agent: every assignment in a two-agent region
+   * came back twice, with the same `assignment_id`. The screen keys its list on
+   * that id, so the duplicate crashed the render outright
+   * (`each_key_duplicate`) and the whole page hung on its spinner.
+   *
+   * Nothing was lost with the join. The screen has been region-first since B1e:
+   * it lists a region's agents from the fleet's own `agents` array and its
+   * monitors from here, so the agent columns on an assignment row were already
+   * dead by the time they became ambiguous. An assignment belongs to a region,
+   * never to an agent, which is the whole of B1e.
    */
   async getProbeAssignments(): Promise<ProbeAssignmentView[]> {
     return await this.table(`${ASSIGNMENTS} as a`)
-      .leftJoin(`${AGENTS} as g`, "g.region_id", "a.region_id")
       .orderBy([
         { column: "a.region_id", order: "asc" },
         { column: "a.monitor_tag", order: "asc" },
       ])
-      .select(
-        "a.id as assignment_id",
-        "a.monitor_tag",
-        "a.mode",
-        "a.source",
-        "a.region_id",
-        "g.id as agent_id",
-        "g.name as agent_name",
-        "g.status",
-        "g.connection_state",
-      );
+      .select("a.id as assignment_id", "a.monitor_tag", "a.mode", "a.source", "a.region_id");
   }
 
   /**

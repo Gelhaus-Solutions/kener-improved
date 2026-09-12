@@ -52,14 +52,11 @@
     mode: string;
     /** RULE if the region's rule put it here, OVERRIDE if somebody named it. */
     source: string;
+    // An assignment belongs to the region and names no agent, which is B1e's
+    // point: a region whose agents have all been deleted still has its monitors
+    // and the screen can say nothing is serving it. Which agents serve a region
+    // is read from `agents`, because there may be several.
     region_id: number;
-    // Nullable, and that is B1e's point: an assignment belongs to the region, so
-    // a region whose agent has been deleted still has its monitors and the
-    // screen has to be able to say nothing is serving it.
-    agent_id: number | null;
-    agent_name: string | null;
-    status: string | null;
-    connection_state: string | null;
   }
   interface RegionRule {
     region_id: number;
