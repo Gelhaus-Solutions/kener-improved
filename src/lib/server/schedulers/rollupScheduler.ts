@@ -4,7 +4,13 @@ import db from "../db/db.js";
 import { runWithOrg } from "../db/orgContext.js";
 import { GetNowTimestampUTC } from "../tool.js";
 import { MERGED_REGION_ID } from "../db/regions.js";
-import { advanceWatermark, backfillChunk, drainDirty, foldDays } from "../services/rollupEngine.js";
+import {
+  advanceWatermark,
+  backfillChunk,
+  drainDirty,
+  foldDays,
+  getRegionBackfillStatus,
+} from "../services/rollupEngine.js";
 
 /**
  * The scheduler that keeps the rollups current (F6b).
@@ -81,7 +87,8 @@ async function runForwardPass(): Promise<void> {
     const drained = await drainDirty(DIRTY_BATCH, nowTs);
     if (drained.hours > 0) {
       console.log(
-        `Rollups: recomputed ${drained.hours} dirty hour(s) -> ${drained.buckets5m} 5m, ${drained.buckets1h} 1h, ${drained.days} 1d`,
+        `Rollups: recomputed ${drained.hours} dirty hour(s) -> ${drained.buckets5m} 5m, ${drained.buckets15m} 15m, ` +
+          `${drained.buckets1h} 1h, ${drained.days} 1d`,
       );
     }
 
@@ -102,7 +109,7 @@ async function runForwardPass(): Promise<void> {
         if (advanced.hours > 0) {
           console.log(
             `Rollups: region ${regionId} sealed ${advanced.hours} hour(s) -> ` +
-              `${advanced.buckets5m} 5m, ${advanced.buckets1h} 1h, ${advanced.days} 1d`,
+              `${advanced.buckets5m} 5m, ${advanced.buckets15m} 15m, ${advanced.buckets1h} 1h, ${advanced.days} 1d`,
           );
         }
       } catch (error) {
@@ -135,15 +142,19 @@ async function pickBackfillRegion(): Promise<number | null> {
 
   let candidate: { regionId: number; cursor: number } | null = null;
   for (const regionId of regionIds) {
-    const state = await db.getRollupState("1h", regionId);
-    if (state?.backfill_complete) continue;
+    // Every grain, not just `1h`. Asking the hourly grain alone is what left the
+    // quarter-hour grain unbuildable on an instance that had already finished
+    // its backfill before that grain existed (KENER-124): `1h` said complete,
+    // the region was skipped here, and nothing ever came back for the new grain.
+    const status = await getRegionBackfillStatus(regionId);
+    if (status.complete) continue;
 
     if (regionId === MERGED_REGION_ID) return regionId;
 
     // Never started sorts first: `backfill_cursor_ts` is null until the first
     // chunk lands, and treating that as "furthest behind" is what stops a new
     // probe queueing behind an almost-finished one forever.
-    const cursor = state?.backfill_cursor_ts ?? Number.NEGATIVE_INFINITY;
+    const cursor = status.cursor ?? Number.NEGATIVE_INFINITY;
     if (!candidate || cursor < candidate.cursor) candidate = { regionId, cursor };
   }
 
@@ -158,9 +169,14 @@ async function runBackfillPass(): Promise<void> {
 
     const progress = await backfillChunk(regionId, nowTs, 1);
     if (progress.chunksProcessed > 0) {
+      // A fold catch-up reports no hours, because it recomputes none: it reads
+      // one grain and writes the one above it. Counting the buckets it wrote is
+      // the only way that pass shows up in the log as anything but silence.
+      const { hours, buckets5m, buckets15m, buckets1h, days } = progress.summary;
+      const work = hours > 0 ? `${hours} hours` : `${buckets5m + buckets15m + buckets1h + days} buckets folded`;
       console.log(
         `Rollups: region ${regionId} backfilled to ${new Date((progress.cursor ?? 0) * 1000).toISOString()} ` +
-          `(${progress.summary.hours} hours)${progress.done ? " (COMPLETE)" : ""}`,
+          `(${work})${progress.done ? " (COMPLETE)" : ""}`,
       );
     }
   });

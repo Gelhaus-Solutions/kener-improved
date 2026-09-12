@@ -562,6 +562,35 @@ export class RollupsRepository extends BaseRepository {
   }
 
   /**
+   * The oldest and newest bucket of a grain in a region, for sizing a fold.
+   *
+   * The rollup-side twin of `getRawSampleBounds`, and needed for the same job on
+   * an instance where raw can no longer answer it. Retention keeps raw for
+   * ninety days and the five-minute grain for four hundred, so a grain added
+   * after the fact has to be rebuilt from the grain below it over a range raw
+   * has long forgotten.
+   */
+  async getRollupBounds(grain: RollupGrain, regionId: number): Promise<{ lo: number; hi: number } | null> {
+    const row = (await this.table(ROLLUP_TABLES[grain])
+      .where("region_id", regionId)
+      .min({ lo: "bucket_start" })
+      .max({ hi: "bucket_start" })
+      .first()) as { lo?: number | string | null; hi?: number | string | null } | undefined;
+    if (!row || row.lo === null || row.lo === undefined) return null;
+    return { lo: Number(row.lo), hi: Number(row.hi) };
+  }
+
+  /** Every monitor tag with buckets of a grain in a region. Drives a fold's fan-out. */
+  async getTagsWithRollups(grain: RollupGrain, regionId: number, from: number, to: number): Promise<string[]> {
+    const rows = await this.table(ROLLUP_TABLES[grain])
+      .distinct("monitor_tag")
+      .where("region_id", regionId)
+      .where("bucket_start", ">=", from)
+      .where("bucket_start", "<", to);
+    return rows.map((row: { monitor_tag: string }) => row.monitor_tag);
+  }
+
+  /**
    * Maintenance windows overlapping a range, per monitor.
    *
    * From `maintenances_events` joined through `maintenance_monitors`, which is

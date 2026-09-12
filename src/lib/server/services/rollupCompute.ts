@@ -35,7 +35,7 @@ export const ROLLUP_VERSION = 1;
  * month's uptime is 40% overlay" instead of presenting an operator's account of
  * an outage as if it were measurement.
  */
-const OVERLAY_TYPES: ReadonlySet<string> = new Set([GC.INCIDENT, GC.MAINTENANCE, GC.OPERATOR]);
+export const OVERLAY_TYPES: ReadonlySet<string> = new Set([GC.INCIDENT, GC.MAINTENANCE, GC.OPERATOR]);
 
 /**
  * Sample types whose latency is a real measurement.
@@ -54,7 +54,7 @@ const OVERLAY_TYPES: ReadonlySet<string> = new Set([GC.INCIDENT, GC.MAINTENANCE,
  * were reporting a number somebody typed. That is the half of KENER-123 that was
  * not merely a labelling problem.
  */
-const LATENCY_TYPES: ReadonlySet<string> = new Set([GC.REALTIME, GC.TIMEOUT, GC.ERROR, GC.MANUAL]);
+export const LATENCY_TYPES: ReadonlySet<string> = new Set([GC.REALTIME, GC.TIMEOUT, GC.ERROR, GC.MANUAL]);
 
 /** The minimum a sample must look like for the aggregation to use it. */
 export interface RollupSample {
@@ -379,3 +379,37 @@ export const FOLD_SOURCE: Record<RollupGrain, RollupGrain | null> = {
   "1h": "15m",
   "1d": "1h",
 };
+
+/**
+ * Every grain, ordered so each one comes after the grain it folds from.
+ *
+ * Derived from `FOLD_SOURCE` rather than written out, because a hand-written
+ * list of grains is exactly what KENER-124 got wrong: adding `15m` meant
+ * updating the cascade, the completion marker, the watermark writer and the
+ * summary, and missing any one of them produced a grain that existed but was
+ * never filled. Everything that walks the grains walks this, so adding the next
+ * one is a single edit to the chain above.
+ *
+ * Throws on a cycle or a source that is not itself a grain, which are the only
+ * two ways the chain can be written down wrong.
+ */
+export function grainsInFoldOrder(): RollupGrain[] {
+  const remaining = new Set(Object.keys(FOLD_SOURCE) as RollupGrain[]);
+  const ordered: RollupGrain[] = [];
+  while (remaining.size > 0) {
+    const before = remaining.size;
+    for (const grain of [...remaining]) {
+      const source = FOLD_SOURCE[grain];
+      if (source === null || ordered.includes(source)) {
+        ordered.push(grain);
+        remaining.delete(grain);
+      }
+    }
+    if (remaining.size === before) {
+      throw new Error(
+        `FOLD_SOURCE cannot be ordered, it has a cycle or an unknown source: ${[...remaining].join(", ")}`,
+      );
+    }
+  }
+  return ordered;
+}

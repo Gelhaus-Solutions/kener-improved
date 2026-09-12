@@ -115,8 +115,10 @@ class DbImpl {
   deleteRollups!: RollupsRepository["deleteRollups"];
   getRawSamplesForRollup!: RollupsRepository["getRawSamples"];
   getRawSampleBounds!: RollupsRepository["getRawSampleBounds"];
+  getRollupBounds!: RollupsRepository["getRollupBounds"];
   getRollupRegionIds!: RollupsRepository["getRollupRegionIds"];
   getTagsWithSamples!: RollupsRepository["getTagsWithSamples"];
+  getTagsWithRollups!: RollupsRepository["getTagsWithRollups"];
   getMaintenanceWindowsForRollup!: RollupsRepository["getMaintenanceWindows"];
 
   // ============ SLO targets and evaluations (F1a) ============
@@ -693,8 +695,10 @@ class DbImpl {
     this.deleteRollups = this.rollups.deleteRollups.bind(this.rollups);
     this.getRawSamplesForRollup = this.rollups.getRawSamples.bind(this.rollups);
     this.getRawSampleBounds = this.rollups.getRawSampleBounds.bind(this.rollups);
+    this.getRollupBounds = this.rollups.getRollupBounds.bind(this.rollups);
     this.getRollupRegionIds = this.rollups.getRollupRegionIds.bind(this.rollups);
     this.getTagsWithSamples = this.rollups.getTagsWithSamples.bind(this.rollups);
+    this.getTagsWithRollups = this.rollups.getTagsWithRollups.bind(this.rollups);
     this.getMaintenanceWindowsForRollup = this.rollups.getMaintenanceWindows.bind(this.rollups);
 
     this.sla = new SlaRepository(this.knex);
