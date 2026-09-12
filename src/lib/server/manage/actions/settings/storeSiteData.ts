@@ -5,6 +5,10 @@ import {
   SITE_DATA_KEY as LATENCY_THRESHOLD_KEY,
   invalidateLatencyThresholdCache,
 } from "$lib/server/services/latencyThreshold.js";
+import {
+  SITE_DATA_KEY as DEPENDENCY_RECORDING_KEY,
+  invalidateDependencyRecordingCache,
+} from "$lib/server/services/dependencyEscalation.js";
 import type { ActionDefinition, LegacyPayload } from "../../types.js";
 
 async function storeSiteData(data: { [x: string]: any }) {
@@ -52,6 +56,11 @@ async function storeSiteData(data: { [x: string]: any }) {
       // rule and watches the old one keep deciding for another ten seconds.
       if (key === LATENCY_THRESHOLD_KEY) {
         invalidateLatencyThresholdCache();
+      }
+
+      // C3c's recording switch memoises the same way, for the same reason.
+      if (key === DEPENDENCY_RECORDING_KEY) {
+        invalidateDependencyRecordingCache();
       }
     }
   }

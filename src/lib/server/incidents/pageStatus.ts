@@ -128,6 +128,12 @@ export interface PageStatus {
 export interface LatestStatus {
   monitor_tag: string;
   status?: string | null;
+  /**
+   * What the check itself observed, before the confirmation threshold damped it
+   * and before C3c's dependency escalation moved it. Never used to derive a
+   * status - that would bypass the threshold - only to explain one.
+   */
+  raw_status?: string | null;
 }
 
 /**

@@ -2,6 +2,7 @@ import type { MonitoringResult, MonitoringResultTS } from "../types/monitor.js";
 import { Queue, Worker, Job, type JobsOptions } from "bullmq";
 import q from "./q.js";
 import { applyLatencyEscalation } from "../services/latencyThreshold.js";
+import { applyDependencyEscalation } from "../services/dependencyEscalation.js";
 import type { MonitorRecordTyped } from "../types/db.js";
 import Service, { type MonitorWithType } from "../services/service.js";
 import { GetMinuteStartNowTimestampUTC } from "../tool.js";
@@ -269,6 +270,14 @@ const addWorker = () => {
             : "Status held during grace period";
         }
       }
+
+      // C3c. After `raw_status` and after the threshold, both deliberately:
+      // `raw_status` keeps meaning what this monitor's own check observed, and
+      // an inherited status is not damped a second time by the parent when the
+      // child's own threshold already confirmed it. The overlay merge below
+      // still outranks this, exactly as `derivePageStatus` ranks the two.
+      // See services/dependencyEscalation.ts.
+      await applyDependencyEscalation(monitor.tag, realtimeData[ts], ts);
     }
     let defaultData: MonitoringResultTS = {};
     let mergedData: MonitoringResultTS = {};

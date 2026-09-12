@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { siteDataKeys } from "./siteDataKeys.js";
 import { SITE_DATA_KEY, DEFAULT_THRESHOLD, LATENCY_METRICS } from "../services/latencyThreshold.js";
+import { SITE_DATA_KEY as DEPENDENCY_RECORDING_KEY, DEFAULT_RECORDING } from "../services/dependencyEscalation.js";
 
 function keyFor(key: string) {
   return siteDataKeys.find((k) => k.key === key);
@@ -70,6 +71,38 @@ describe("latencyThresholdDefault is a writable key", () => {
   it("keeps null down_ms meaningful: latency alone never makes it DOWN", () => {
     const rule = { ...DEFAULT_THRESHOLD, down_ms: null };
     expect(keyFor(SITE_DATA_KEY)?.isValid(JSON.stringify(rule))).toBe(true);
+  });
+});
+
+/**
+ * C3c's switch, held to the same standard for the same reason: B5 shipped the
+ * reader, the cache, the invalidator and the whole form, and the one line that
+ * lets the value be written was missing. Nothing caught it because no test wrote
+ * through the real registry.
+ */
+describe("dependencyRecording is a writable key", () => {
+  it("is registered at all", () => {
+    expect(keyFor(DEPENDENCY_RECORDING_KEY)).toBeDefined();
+  });
+
+  it("stores as an object, so it is JSON.parsed back on read", () => {
+    expect(keyFor(DEPENDENCY_RECORDING_KEY)?.data_type).toBe("object");
+  });
+
+  it("accepts both positions", () => {
+    expect(keyFor(DEPENDENCY_RECORDING_KEY)?.isValid(JSON.stringify(DEFAULT_RECORDING))).toBe(true);
+    expect(keyFor(DEPENDENCY_RECORDING_KEY)?.isValid(JSON.stringify({ enabled: true }))).toBe(true);
+  });
+
+  /**
+   * A payload the reader would take as off has to be refused at the write,
+   * or the screen reports "on" while nothing is recording - which is the exact
+   * class of failure this whole item exists to remove.
+   */
+  it("rejects anything the reader would silently read as off", () => {
+    for (const payload of ["{}", '{"enabled":"true"}', '{"enabled":1}', "[]", "null", "not json"]) {
+      expect(keyFor(DEPENDENCY_RECORDING_KEY)?.isValid(payload), payload).toBe(false);
+    }
   });
 });
 

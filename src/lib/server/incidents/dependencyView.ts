@@ -1,6 +1,6 @@
 import db from "../db/db.js";
 import { derivePageStatus, type ComponentStatus, type LatestStatus } from "./pageStatus.js";
-import { activeOverride, MAX_DEPTH, type DependencyEdge, type RollupSetting } from "./rollup.js";
+import { activeOverride, applyRollup, MAX_DEPTH, type DependencyEdge, type RollupSetting } from "./rollup.js";
 import { GetMonitorsParsed } from "../controllers/monitorsController.js";
 import {
   componentImpactFromMonitorImpact,
@@ -57,6 +57,20 @@ export interface MonitorDependencyView {
   silent: boolean;
   /** The monitor's own latest sample, before anything was declared or rolled up. */
   ownStatus: string | null;
+  /**
+   * What the graph alone says about this monitor, ignoring its own state (C3c).
+   *
+   * The parent's own status is deliberately left out, so this answers "how bad
+   * are my dependencies" rather than "how bad am I". That is what the check-time
+   * escalation needs: it has the monitor's *current* result in hand and must
+   * combine the graph with that, not with the row from the previous minute,
+   * which by then already carries the last escalation and would latch.
+   *
+   * A live pin on this monitor is excluded for the same reason. A pin is an
+   * operator publishing a value by hand; recording it as an observation would
+   * leave it in the history long after it expired.
+   */
+  childrenImpact: ComponentImpact;
   /** Names of the visible direct children the rollup took this status from. */
   inheritedFrom: string[];
 }
@@ -151,22 +165,42 @@ export async function getMonitorDependencyView(tag: string, nowSeconds: number):
     db.getDeclaredMaintenanceImpacts(nowSeconds, closureTags),
   ]);
 
+  const selfRollingTags = new Set(groupMonitors.map((m) => m.tag));
   const derived = derivePageStatus({
     monitorTags: closureTags,
     latest,
     incidentImpacts,
     maintenanceImpacts,
-    rollup: {
-      edges,
-      settings,
-      selfRollingTags: new Set(groupMonitors.map((m) => m.tag)),
-      nowSeconds,
-    },
+    rollup: { edges, settings, selfRollingTags, nowSeconds },
   });
 
   const byTag = new Map(derived.components.map((c) => [c.monitor_tag, c]));
   const self = byTag.get(tag);
   const resolved = new Map(derived.components.map((c) => [c.monitor_tag, c.component_impact]));
+
+  /**
+   * What the graph says about this monitor with its own state taken out (C3c).
+   *
+   * A second pass rather than a value read out of the first: `applyRollup`
+   * combines a parent with its children, and there is no way to subtract the
+   * parent back out afterwards under `WEIGHTED`, where the answer is a score
+   * over the children rather than the worst of them.
+   *
+   * Idempotent over the first pass. Every child in `resolved` already carries
+   * its own subtree, and rolling an already-rolled value produces the same
+   * value under both modes.
+   */
+  const graphOnly = applyRollup({
+    edges,
+    // A live pin short-circuits the walk and answers with the pinned value. Here
+    // that would report an operator's typed status as something the dependencies
+    // said, so this monitor's pin is dropped for this pass only.
+    settings: settings.map((s) => (s.monitor_tag === tag ? { ...s, manual_override: null } : s)),
+    own: new Map(resolved).set(tag, "OPERATIONAL"),
+    selfRollingTags,
+    nowSeconds,
+  });
+  const childrenImpact = graphOnly.get(tag) ?? "OPERATIONAL";
 
   // The neighbours worth showing: ACTIVE, not hidden, and in this org. One query
   // for both directions, because a monitor can be on both lists.
@@ -195,6 +229,36 @@ export async function getMonitorDependencyView(tag: string, nowSeconds: number):
   // status an operator typed by hand would be a lie about where it came from.
   const pinned = activeOverride(setting, nowSeconds) !== null;
 
+  const ownStatus = ownStatusOf(latest, tag);
+  const ownImpact = liveComponentImpactFor(ownStatus);
+  const impact = self?.component_impact ?? "OPERATIONAL";
+
+  /**
+   * Whether the graph is what put this monitor where it is.
+   *
+   * Two ways to be true, and both are needed once C3c records the verdict. The
+   * read-time rollup reports `source === "rollup"` when it moved the value it
+   * was given; but with recording on, the value it was given *already* carries
+   * the escalation, so it moves nothing and reports "monitoring". The second
+   * test catches that, by asking the graph directly: are this monitor's
+   * dependencies currently worse than its own check?
+   *
+   * Deliberately not "the published status differs from the raw one". The
+   * confirmation threshold also makes those differ - it holds the previous
+   * status through a grace period - and attributing a held status to a
+   * dependency would be an explanation for something else entirely. Asking the
+   * children also stops a recovered dependency being named for a recorded
+   * escalation the parent has not re-checked away yet.
+   */
+  const movedByGraph = self?.source === "rollup" || isWorseImpact(childrenImpact, ownImpact);
+
+  const inherited =
+    show && !pinned && movedByGraph
+      ? inheritedFrom({ edges: directChildren, resolved, displayable, ownImpact }).map(
+          (childTag) => nameByTag.get(childTag) ?? childTag,
+        )
+      : [];
+
   return {
     visible: show,
     dependsOn: show
@@ -203,30 +267,30 @@ export async function getMonitorDependencyView(tag: string, nowSeconds: number):
     partOf: show
       ? directParents.filter((e) => displayable.has(e.parent_monitor_tag)).map((e) => node(e.parent_monitor_tag, e))
       : [],
-    impact: self?.component_impact ?? "OPERATIONAL",
-    source: self?.source ?? "silent",
+    impact,
+    // A recorded escalation is still a rollup, whatever the read-time pass made
+    // of it, and `+page.server.ts` gates the "Own check" line on this.
+    source: inherited.length > 0 ? "rollup" : (self?.source ?? "silent"),
     silent: self?.source === "silent",
-    ownStatus: latest.find((row) => row.monitor_tag === tag)?.status ?? null,
-    inheritedFrom:
-      show && !pinned && self?.source === "rollup"
-        ? inheritedFrom({
-            edges: directChildren,
-            resolved,
-            displayable,
-            ownImpact: ownImpactOf(latest, tag),
-          }).map((childTag) => nameByTag.get(childTag) ?? childTag)
-        : [],
+    ownStatus,
+    childrenImpact,
+    inheritedFrom: inherited,
   };
 }
 
 /**
  * The monitor's status before the graph touched it.
  *
- * Read back from the raw sample rather than from the derived component, because
+ * `raw_status` first, because that is exactly this: what the check observed,
+ * recorded on every realtime sample before the confirmation threshold damps it
+ * and before C3c escalates it. Falling back to `status` covers the rows that
+ * carry no raw value, such as a filled default for a minute nobody checked.
+ *
+ * Read back from the sample rather than from the derived component, because
  * `derivePageStatus` overwrites `component_impact` in place when the rollup moves
  * a component, so by the time we look the "before" value is gone.
  */
-function ownImpactOf(latest: LatestStatus[], tag: string): ComponentImpact {
-  const status = latest.find((row) => row.monitor_tag === tag)?.status ?? null;
-  return liveComponentImpactFor(status);
+function ownStatusOf(latest: LatestStatus[], tag: string): string | null {
+  const row = latest.find((r) => r.monitor_tag === tag);
+  return row?.raw_status ?? row?.status ?? null;
 }

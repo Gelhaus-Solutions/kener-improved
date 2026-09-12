@@ -130,6 +130,17 @@
   );
 
   /**
+   * C3c. Whether a dependency rollup is written down or only displayed.
+   *
+   * Ships off, on the same reasoning as the latency default above: recording
+   * changes what a monitor's uptime figure means and makes a parent's alert
+   * rules fire for its children's outages, and an upgrade must not start doing
+   * either on its own.
+   */
+  let dependencyRecording = $state({ enabled: false });
+  let savingDependencyRecording = $state(false);
+
+  /**
    * What retention would delete tonight, and how long a bar can still be served.
    *
    * Loaded separately from the policy because it is not configuration - it is the
@@ -284,6 +295,10 @@
             degraded_ms: Number(d.degraded_ms ?? 1000),
             down_ms: d.down_ms == null ? "" : String(d.down_ms)
           };
+        }
+
+        if (data.dependencyRecording) {
+          dependencyRecording = { enabled: (data.dependencyRecording as Record<string, unknown>).enabled === true };
         }
         dataRetentionPolicy = {
           enabled: data.dataRetentionPolicy?.enabled ?? true,
@@ -610,6 +625,30 @@
       toast.error(e instanceof Error ? e.message : "Failed to save the latency threshold default");
     } finally {
       savingLatencyThresholdDefault = false;
+    }
+  }
+
+  async function saveDependencyRecording() {
+    savingDependencyRecording = true;
+    try {
+      const response = await fetch(clientResolver(resolve, "/manage/api"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "storeSiteData",
+          data: { dependencyRecording: JSON.stringify({ enabled: dependencyRecording.enabled }) }
+        })
+      });
+      const result = await response.json();
+      if (result.error) toast.error(result.error);
+      // Each monitor picks this up on its next check, so a monitor on a five
+      // minute cron takes five minutes to start recording. Said here so nobody
+      // watches a bar for a minute wondering whether the save worked.
+      else toast.success("Saved. Each monitor applies it on its next check.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save the dependency recording setting");
+    } finally {
+      savingDependencyRecording = false;
     }
   }
 
@@ -1515,6 +1554,45 @@
       <Card.Footer class="flex justify-end">
         <Button onclick={saveLatencyThresholdDefault} disabled={savingLatencyThresholdDefault} class="cursor-pointer">
           {#if savingLatencyThresholdDefault}
+            <Loader class="h-4 w-4 animate-spin" />
+            Saving...
+          {:else}
+            Save
+          {/if}
+        </Button>
+      </Card.Footer>
+    </Card.Root>
+
+    <!-- Dependency Recording Card (C3c) -->
+    <Card.Root>
+      <Card.Header>
+        <Card.Title>Record Inherited Status</Card.Title>
+        <Card.Description>
+          A component that depends on something broken already reads as impaired on its page. Turn this on and that
+          verdict is written into its samples, so its uptime, its bar, its SLOs, the API and its alerts all agree with
+          the headline instead of reporting only its own check.
+        </Card.Description>
+      </Card.Header>
+      <Card.Content class="space-y-4">
+        <div class="flex items-center justify-between">
+          <div class="space-y-0.5">
+            <Label>Write the rolled-up status down</Label>
+            <p class="text-muted-foreground text-xs">
+              Applies to every monitor that depends on another one. The monitor's own check is still recorded next to
+              it, so its page can keep showing what it observed itself.
+            </p>
+          </div>
+          <Switch bind:checked={dependencyRecording.enabled} />
+        </div>
+        <p class="text-muted-foreground text-xs">
+          Off by default, and worth reading before turning on: a parent's uptime figure starts counting its
+          dependencies' outages, and any alert rule on the parent will fire for them. Only what happens from now on is
+          recorded; history already written is left exactly as it is.
+        </p>
+      </Card.Content>
+      <Card.Footer class="flex justify-end">
+        <Button onclick={saveDependencyRecording} disabled={savingDependencyRecording} class="cursor-pointer">
+          {#if savingDependencyRecording}
             <Loader class="h-4 w-4 animate-spin" />
             Saving...
           {:else}

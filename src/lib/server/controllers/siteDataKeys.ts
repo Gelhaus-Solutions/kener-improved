@@ -90,6 +90,25 @@ function IsValidLatencyThreshold(value: string): boolean {
 }
 
 /**
+ * C3c's dependency recording switch.
+ *
+ * One boolean, validated as one: `enabled` absent or non-boolean is a payload
+ * the reader would silently take as off, and "the screen says on while nothing
+ * is recording" is precisely the failure this whole item exists to remove.
+ */
+function IsValidDependencyRecording(value: string): boolean {
+  if (!IsValidJSONString(value)) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return false;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+  return typeof (parsed as Record<string, unknown>).enabled === "boolean";
+}
+
+/**
  * The instance-wide probe merge defaults (B1d).
  *
  * The enum fields are the point of validating at all. `parseMergeDefaults`
@@ -479,6 +498,13 @@ export const siteDataKeys: SiteDataKey[] = [
     // from what the operator wrote. See `probes/merge.ts`.
     key: "probeMergePolicy",
     isValid: IsValidProbeMergePolicy,
+    data_type: "object",
+  },
+  {
+    // C3c's switch: whether the dependency rollup is written into a monitor's
+    // samples or only shown on the page. See services/dependencyEscalation.ts.
+    key: "dependencyRecording",
+    isValid: IsValidDependencyRecording,
     data_type: "object",
   },
 ];

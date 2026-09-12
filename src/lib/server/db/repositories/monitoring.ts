@@ -180,6 +180,24 @@ export class MonitoringRepository extends BaseRepository {
       .first();
   }
 
+  /**
+   * The newest row for one monitor at one specific region.
+   *
+   * Everything else in this file pins `region_id = MERGED_REGION_ID`, and that is
+   * the right default: region 0 is the verdict and a caller that has not thought
+   * about regions wants the verdict. This is for the callers that have, and today
+   * that means C3c asking what the server's own check said (`LOCAL_REGION_ID`)
+   * underneath a verdict the dependency graph moved.
+   */
+  async getLatestMonitoringDataAtRegion(monitor_tag: string, region_id: number): Promise<MonitoringData | undefined> {
+    return await this.table("monitoring_data")
+      .where("monitor_tag", monitor_tag)
+      .where("region_id", region_id)
+      .orderBy("timestamp", "desc")
+      .limit(1)
+      .first();
+  }
+
   async getLatestMonitoringDataAllActive(monitor_tags: string[]): Promise<MonitoringData[]> {
     if (!monitor_tags || monitor_tags.length === 0) {
       return [];
