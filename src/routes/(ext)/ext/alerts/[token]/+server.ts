@@ -103,6 +103,7 @@ const handler: RequestHandler = async ({ params, request }) => {
     opened: result.opened,
     resolved: result.resolved,
     unmapped: result.unmapped,
+    suppressed: result.suppressed,
   });
 };
 

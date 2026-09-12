@@ -60,6 +60,15 @@ Each alert carries a fingerprint: Alertmanager's own where it sends one, otherwi
 - A resolved notification closes the incident, if **auto-resolve** is on.
 - An alert that resolves and fires again opens a new incident, because it is a new outage.
 
+## Planned maintenance {#maintenance}
+
+An alert whose component is inside an open maintenance window is recorded but opens no incident, and the response counts it under `suppressed`. This matches what Kener's own alerting already does, so planned work does not announce itself as an outage.
+
+Suppression is not amnesia: if the alert is still firing when the window closes, the next notification opens an incident normally. A resolved notification still closes an incident that was already open before the window started.
+
+> [!NOTE]
+> Only components attached to the maintenance are suppressed. A dependent service that fails *because* of the work still alerts.
+
 ## Signing {#signing}
 
 Set a signing secret on the endpoint and Kener will verify every request, refusing any that is unsigned or wrongly signed. The signature is a hex HMAC-SHA256 of the raw body.
@@ -82,7 +91,7 @@ Set a signing secret on the endpoint and Kener will verify every request, refusi
 A successful request returns what it changed:
 
 ```json
-{ "accepted": 1, "opened": 1, "resolved": 0, "unmapped": 0 }
+{ "accepted": 1, "opened": 1, "resolved": 0, "unmapped": 0, "suppressed": 0 }
 ```
 
 | Code | Meaning |
@@ -104,3 +113,5 @@ A successful request returns what it changed:
 **Incidents open but never close.** Turn on auto-resolve, and check the sender actually emits a resolved notification.
 
 **Duplicate incidents.** Your sender is changing its fingerprint between notifications. With `GENERIC`, send a stable `id`.
+
+**Alerts arrive but are counted as `suppressed`.** The component is in an open maintenance window. That is deliberate; see [Planned maintenance](#maintenance).

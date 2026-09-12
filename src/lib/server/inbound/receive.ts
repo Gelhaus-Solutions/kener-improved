@@ -40,6 +40,8 @@ export type ReceiveResult =
       resolved: number;
       /** Understood, recorded, and deliberately not turned into an incident. */
       unmapped: number;
+      /** Recorded, and not turned into an incident because the component is in planned maintenance. */
+      suppressed: number;
     }
   | { ok: false; status: number; reason: string };
 
@@ -127,7 +129,7 @@ async function applyAlert(
   endpoint: InboundEndpointRecord,
   rules: ReturnType<typeof parseMappingRules>,
   at: number,
-): Promise<"opened" | "resolved" | "unmapped" | "noop"> {
+): Promise<"opened" | "resolved" | "unmapped" | "suppressed" | "noop"> {
   const monitorTag = resolveMonitorTag(alert, rules, endpoint.default_monitor_tag);
   const existing = await db.getInboundAlert(endpoint.id, alert.fingerprint);
 
@@ -152,6 +154,12 @@ async function applyAlert(
     if (!monitorTag) {
       await insertAlertRow(endpoint, alert, { ...common, incident_id: null, resolved_at: null }, at);
       return "unmapped";
+    }
+    if (await underMaintenance(monitorTag, at)) {
+      // Recorded with no incident. The alert row keeps `incident_id` null, so
+      // the next notification after the window ends opens one the ordinary way.
+      await insertAlertRow(endpoint, alert, { ...common, incident_id: null, resolved_at: null }, at);
+      return "suppressed";
     }
     const incidentId = await openIncidentFor(alert, endpoint, monitorTag, at);
     await insertAlertRow(endpoint, alert, { ...common, incident_id: incidentId, resolved_at: null }, at);
@@ -194,6 +202,16 @@ async function applyAlert(
     return "unmapped";
   }
 
+  if (await underMaintenance(monitorTag, at)) {
+    await db.updateInboundAlert(existing.id, {
+      ...common,
+      incident_id: null,
+      resolved_at: null,
+      notification_count: count,
+    });
+    return "suppressed";
+  }
+
   const incidentId = await openIncidentFor(alert, endpoint, monitorTag, at);
   await db.updateInboundAlert(existing.id, {
     ...common,
@@ -204,6 +222,36 @@ async function applyAlert(
     first_seen_at: alert.startsAt ?? at,
   });
   return "opened";
+}
+
+/**
+ * Whether this component is inside a planned maintenance window right now.
+ *
+ * **Kener's own alerting is already suppressed during maintenance, and this is
+ * what makes an inbound alert behave the same way.** The overlay writes rows of
+ * type MAINTENANCE, and alert evaluation reads only `ALERT_VISIBLE_TYPES`, which
+ * excludes them, so the alert window freezes and no incident is opened. An
+ * inbound alert never touches that path: it calls `CreateIncident` directly. So
+ * without this check, taking a database down on a Sunday morning would announce
+ * a major outage to the public the moment somebody else's monitoring noticed.
+ *
+ * Deliberately the same query the overlay uses, rather than a second opinion
+ * about what "in maintenance" means. Two definitions would drift, and the one
+ * that drifted would be the one nobody was watching.
+ *
+ * A failure here is not fatal. If the lookup throws, the alert is treated as not
+ * suppressed: publishing an incident during maintenance is a visible mistake
+ * somebody can close, while swallowing a real outage because a query failed is
+ * the silence this product exists to prevent.
+ */
+async function underMaintenance(monitorTag: string, at: number): Promise<boolean> {
+  try {
+    const windows = await db.getMaintenancesByMonitorTagRealtime(monitorTag, at);
+    return windows.length > 0;
+  } catch (error) {
+    console.error(`Maintenance lookup failed for ${monitorTag}, treating as not in maintenance:`, error);
+    return false;
+  }
 }
 
 /** SQLite stores booleans as 0/1, so `auto_resolve` arrives as either. */
@@ -290,6 +338,7 @@ export async function receiveInboundAlert(
     let opened = 0;
     let resolved = 0;
     let unmapped = 0;
+    let suppressed = 0;
 
     for (const alert of alerts) {
       // One bad alert must not discard the rest of a batch: Alertmanager sends
@@ -300,6 +349,7 @@ export async function receiveInboundAlert(
         if (outcome === "opened") opened++;
         else if (outcome === "resolved") resolved++;
         else if (outcome === "unmapped") unmapped++;
+        else if (outcome === "suppressed") suppressed++;
       } catch (error) {
         console.error(`Inbound alert ${alert.fingerprint} on endpoint ${endpoint.id} failed:`, error);
         await db.recordEndpointRequest(endpoint.id, {
@@ -316,7 +366,7 @@ export async function receiveInboundAlert(
       error: unmapped > 0 ? NO_COMPONENT : null,
     });
 
-    return { ok: true as const, accepted: alerts.length, opened, resolved, unmapped };
+    return { ok: true as const, accepted: alerts.length, opened, resolved, unmapped, suppressed };
   });
 }
 
