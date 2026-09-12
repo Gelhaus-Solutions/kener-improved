@@ -40,6 +40,73 @@ import type { TimestampStatusCount } from "./types/db";
 const NOON_UTC = 1768478400; // 2026-01-15T12:00:00Z
 const DAY_START = 1768435200; // 2026-01-15T00:00:00Z
 
+/**
+ * D5. The helpers must not depend on the host's timezone.
+ *
+ * `startup.ts` sets `process.env.TZ = "UTC"`, but it is imported by the
+ * scheduler process and by `scripts/main.ts` only - never by `vite dev`'s web
+ * process. So the same computation could disagree between the two, which is the
+ * shape of the maintenance times differing between the UI and the email.
+ *
+ * The fixtures here are deliberately NOT noon UTC. A midday timestamp lands on
+ * the same calendar day in every zone within twelve hours of UTC, which is
+ * exactly why this class of bug survived: it is invisible unless the local date
+ * can differ from the UTC date.
+ */
+describe("timestamp helpers are independent of the host timezone", () => {
+  const ORIGINAL_TZ = process.env.TZ;
+  afterEach(() => {
+    process.env.TZ = ORIGINAL_TZ;
+  });
+
+  // 2026-01-15T23:30:00Z. In Europe/Berlin that is already the 16th; in
+  // America/New_York it is still the afternoon of the 15th.
+  const LATE_UTC = 1768519800;
+  // 2026-01-15T00:30:00Z, which is the 14th in New York.
+  const EARLY_UTC = 1768437000;
+
+  const ZONES = ["UTC", "Europe/Berlin", "America/New_York", "Asia/Kolkata", "Pacific/Kiritimati"];
+
+  function inEveryZone<T>(fn: () => T): T[] {
+    return ZONES.map((zone) => {
+      process.env.TZ = zone;
+      return fn();
+    });
+  }
+
+  it("GetMinuteStartTimestampUTC floors to the same instant in every host zone", () => {
+    const results = inEveryZone(() => GetMinuteStartTimestampUTC(LATE_UTC + 45));
+    expect(new Set(results).size).toBe(1);
+    expect(results[0]).toBe(LATE_UTC);
+  });
+
+  it("GetDayStartTimestampUTC returns UTC midnight in every host zone", () => {
+    // Midnight of the UTC day, never of the host's local day.
+    const late = inEveryZone(() => GetDayStartTimestampUTC(LATE_UTC));
+    expect(new Set(late).size).toBe(1);
+    expect(late[0]).toBe(1768435200); // 2026-01-15T00:00:00Z
+
+    const early = inEveryZone(() => GetDayStartTimestampUTC(EARLY_UTC));
+    expect(new Set(early).size).toBe(1);
+    expect(early[0]).toBe(1768435200);
+  });
+
+  it("GetDayStartWithOffset agrees in every host zone", () => {
+    // Built on both helpers above, so it is where a disagreement would surface.
+    const results = inEveryZone(() => GetDayStartWithOffset(LATE_UTC, 330));
+    expect(new Set(results).size).toBe(1);
+  });
+
+  it("GetMinuteStartNowTimestampUTC agrees in every host zone", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-15T23:30:45Z"));
+    const results = inEveryZone(() => GetMinuteStartNowTimestampUTC());
+    vi.useRealTimers();
+    expect(new Set(results).size).toBe(1);
+    expect(results[0]).toBe(LATE_UTC);
+  });
+});
+
 describe("timestamp helpers", () => {
   afterEach(() => {
     vi.useRealTimers();

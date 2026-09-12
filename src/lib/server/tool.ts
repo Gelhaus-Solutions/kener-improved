@@ -30,7 +30,17 @@ const GetNowTimestampUTCInMs = function () {
   const timestamp = now.getTime();
   return timestamp;
 };
-//return given timestamp minute start timestamp in UTC
+/**
+ * D5. The start of the minute a timestamp falls in.
+ *
+ * **The local-looking constructor here is correct, and deliberately left alone.**
+ * It reads local accessors and feeds them to the *local* `Date` constructor, so
+ * the two cancel and the instant round-trips. Every real timezone offset is a
+ * whole number of minutes, so flooring to a minute gives the same instant in
+ * every zone - verified across UTC, Berlin, New York and the half-hour offset of
+ * Kolkata. The day helpers below were the broken ones: they fed local accessors
+ * to `Date.UTC`, which does not cancel.
+ */
 const GetMinuteStartTimestampUTC = function (timestamp: number): number {
   //use js date instead of moment
   const now = new Date(timestamp * 1000);
@@ -62,21 +72,30 @@ const GetMinuteStartNowTimestampUTC = function () {
   const minuteStartTimestamp = minuteStart.getTime();
   return Math.floor(minuteStartTimestamp / 1000);
 };
-//return given timestamp day start timestamp in UTC
+/**
+ * D5. Midnight UTC of the day a timestamp falls on.
+ *
+ * **This used to read the host's calendar day and label it UTC.** It took
+ * `getFullYear`/`getMonth`/`getDate`, which are *local* accessors, and handed
+ * them to `Date.UTC`. Under `TZ=UTC` the two agree and nothing showed. Anywhere
+ * else the local date can be a different day from the UTC date, and the function
+ * then returned midnight of the wrong one: at 2026-01-15T23:30Z it answered
+ * 2026-01-16 in Berlin and Kolkata, and 2026-01-15 in New York and UTC.
+ *
+ * That mattered because `startup.ts` forces `TZ=UTC` for the scheduler process
+ * and for `scripts/main.ts`, but never for `vite dev`'s web process, so the two
+ * halves of a dev install could disagree about which day a sample belonged to.
+ *
+ * Integer arithmetic rather than a `Date` round trip: unix time counts seconds
+ * with no leap seconds, so every UTC midnight is an exact multiple of 86400 and
+ * there is no calendar to get wrong.
+ */
+const DAY_SECONDS = 86400;
+
 const GetDayStartTimestampUTC = function (timestamp: number): number {
-  //use js date instead of moment
-  const now = new Date(timestamp * 1000);
-  const dayStart = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0));
-  const dayStartTimestamp = dayStart.getTime();
-  return Math.floor(dayStartTimestamp / 1000);
+  return Math.floor(timestamp / DAY_SECONDS) * DAY_SECONDS;
 };
-const GetDayEndTimestampUTC = function (timestamp: number): number {
-  //use js date instead of moment
-  const now = new Date(timestamp * 1000);
-  const dayEnd = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999));
-  const dayEndTimestamp = dayEnd.getTime();
-  return Math.floor(dayEndTimestamp / 1000) + 60;
-};
+
 const DurationInMinutes = function (start: number, end: number): number {
   return Math.floor((end - start) / 60);
 };
