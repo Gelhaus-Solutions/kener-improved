@@ -7,7 +7,7 @@
   import { Badge } from "$lib/components/ui/badge/index.js";
   import STATUS_ICON from "$lib/icons";
   import { t } from "$lib/stores/i18n";
-  import { formatDate, formatDuration } from "$lib/stores/datetime";
+  import { formatDate, formatDuration, zoneLabel } from "$lib/stores/datetime";
   import { resolve } from "$app/paths";
   import clientResolver from "$lib/client/resolver.js";
   import { GetInitials } from "$lib/clientTools.js";
@@ -105,6 +105,7 @@
     >
       <span class="max-w-full rounded-full border px-3 py-2 wrap-break-word">
         {$formatDate(maintenance.start_date_time, page.data.dateAndTimeFormat.datePlusTime)}
+        <span class="text-muted-foreground">{$zoneLabel(maintenance.start_date_time)}</span>
       </span>
       <span class="relative w-full text-center sm:flex-1">
         <span
@@ -116,6 +117,7 @@
       </span>
       <span class="max-w-full rounded-full border px-3 py-2 wrap-break-word">
         {$formatDate(maintenance.end_date_time, page.data.dateAndTimeFormat.datePlusTime)}
+        <span class="text-muted-foreground">{$zoneLabel(maintenance.end_date_time)}</span>
       </span>
     </Item.Description>
   </Item.Content>

@@ -1,6 +1,6 @@
 import { derived, get } from "svelte/store";
 import { format, formatDistanceStrict } from "date-fns";
-import { toZonedTime } from "date-fns-tz";
+import { toZonedTime, formatInTimeZone } from "date-fns-tz";
 import {
   af,
   ar,
@@ -286,5 +286,40 @@ export const formatDuration = derived([dateFnsLocale], ([$locale]) => {
     const endDate = end < 10000000000 ? new Date(end * 1000) : new Date(end);
 
     return formatDistanceStrict(startDate, endDate, { locale: $locale });
+  };
+});
+
+/**
+ * D5. The timezone a rendered time is actually being shown in.
+ *
+ * Times on the page are rendered in the viewer's own zone while a notification
+ * mail is rendered in UTC, and neither used to say so. Two unlabelled numbers
+ * for one instant read as a wrong time rather than as two views of the same one,
+ * which is what made maintenance windows look inconsistent between the page and
+ * the mail.
+ *
+ * **It must be `formatInTimeZone`, not the shift-then-format pattern above.**
+ * `toZonedTime` returns a Date whose local fields have been moved so that
+ * formatting it with the host's `format` yields the target zone's wall clock.
+ * That works for the digits and is wrong for a zone token: `format(toZonedTime(d,
+ * "Europe/Berlin"), "zzz")` prints the HOST's offset, so on a New York host it
+ * labels Berlin times "GMT-5". Verified across UTC, Berlin and the half-hour
+ * offset of Kolkata.
+ *
+ * Takes the instant because the label is not a constant: the same zone is GMT+1
+ * in January and GMT+2 in July.
+ */
+export const zoneLabel = derived([selectedTimezone], ([$tz]) => {
+  return (date: Date | number | string): string => {
+    try {
+      return formatInTimeZone(parseDateInput(date), $tz, "zzz");
+    } catch {
+      // Belt and braces: the timezone store validates a zone against
+      // `availableTimezones` before it can ever be selected, so this is not
+      // reachable through the selector and no test drives it. It is here so a
+      // future caller passing an arbitrary zone gets a label rather than an
+      // exception that would take the page down.
+      return $tz;
+    }
   };
 });
