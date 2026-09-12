@@ -13,6 +13,7 @@ import { InstallEnvProxy } from "./proxy.js";
 import { InvalidateAllSiteDataCaches } from "./cache/siteDataCache.js";
 import db from "./db/db.js";
 import { runAcrossOrgs } from "./db/orgContext.js";
+import probeWsServer from "./probes/wsServer.js";
 
 process.env.TZ = "UTC";
 
@@ -62,6 +63,13 @@ async function Startup(): Promise<void> {
   // thousand `monitoring_data` rows is scheduler work, and the web process must
   // never be the thing doing it.
   await backfillQueue.start();
+
+  // B1c. In this process and not the web one, because an assignment comes from
+  // the monitor-execute worker and a result has to reach `monitorResponseQueue`
+  // - and under `npm run dev` the web process has neither. Off unless
+  // `KENER_PROBE_WS_PORT` is set, so an instance that does not use probes opens
+  // no new listener.
+  await probeWsServer.start();
 
   const runtimeVersion = version();
 

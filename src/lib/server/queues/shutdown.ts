@@ -9,6 +9,7 @@ import backfillQueue from "./backfillQueue";
 import rollupScheduler from "../schedulers/rollupScheduler";
 import { flushAuditLog } from "../audit/writer";
 import { shutdownLiveHub } from "../live/hub";
+import probeWsServer from "../probes/wsServer";
 
 export default async () => {
   await monitorExecuteQueue.shutdown();
@@ -30,6 +31,11 @@ export default async () => {
   // G5. Closes the one subscriber this process holds. Nothing is buffered that
   // matters: an SSE stream is a courtesy and a dropped one reconnects.
   await shutdownLiveHub();
+  // B1c. Before the audit flush and after the queues: a probe holding a socket
+  // open would keep the process alive, and its assignments are already gone with
+  // the workers above. A probe that loses its connection falls back to local
+  // execution, which is the point of that fallback.
+  await probeWsServer.shutdown();
   // Last: the audit writer buffers for up to half a second, so anything the
   // shutdowns above recorded is still in memory at this point.
   await flushAuditLog();

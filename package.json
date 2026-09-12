@@ -87,6 +87,7 @@
     "@types/nodemailer": "^7.0.4",
     "@types/pdfkit": "^0.13.9",
     "@types/qrcode": "^1.5.6",
+    "@types/ws": "^8.18.1",
     "@vitest/browser-playwright": "^4.1.10",
     "autoprefixer": "^10.4.22",
     "clsx": "^2.1.1",
@@ -197,7 +198,8 @@
     "striptags": "^3.2.0",
     "style-to-object": "^1.0.14",
     "svelte-codemirror-editor": "^2.1.0",
-    "vite-plugin-package-version": "^1.1.0"
+    "vite-plugin-package-version": "^1.1.0",
+    "ws": "^8.21.3"
   },
   "overrides": {
     "fast-xml-parser": "^5.5.6",
