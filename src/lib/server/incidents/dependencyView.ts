@@ -4,6 +4,7 @@ import { activeOverride, MAX_DEPTH, type DependencyEdge, type RollupSetting } fr
 import { GetMonitorsParsed } from "../controllers/monitorsController.js";
 import {
   componentImpactFromMonitorImpact,
+  liveComponentImpactFor,
   isWorseImpact,
   worstComponentImpact,
   type ComponentImpact,
@@ -227,5 +228,5 @@ export async function getMonitorDependencyView(tag: string, nowSeconds: number):
  */
 function ownImpactOf(latest: LatestStatus[], tag: string): ComponentImpact {
   const status = latest.find((row) => row.monitor_tag === tag)?.status ?? null;
-  return componentImpactFromMonitorImpact(status);
+  return liveComponentImpactFor(status);
 }

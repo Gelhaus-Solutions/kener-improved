@@ -175,3 +175,46 @@ describe("derivePageStatus: precedence", () => {
     expect(derived.statusSummary).toBe(PAGE_STATUS_MESSAGES.PARTIAL_OUTAGE);
   });
 });
+
+describe("a degraded monitor says degraded, not outage", () => {
+  // A monitor answering in 1.34s announced "Partial System Outage" on its own
+  // public page, and through C3's rollup on every parent depending on it.
+  // Nothing was down.
+  const base = {
+    monitorTags: ["api"],
+    incidentImpacts: [],
+    maintenanceImpacts: [],
+  };
+
+  it("projects a live DEGRADED onto DEGRADED_PERFORMANCE", () => {
+    const derived = derivePageStatus({ ...base, latest: [{ monitor_tag: "api", status: GC.DEGRADED }] });
+    expect(derived.components[0].component_impact).toBe("DEGRADED_PERFORMANCE");
+    expect(derived.components[0].source).toBe("monitoring");
+  });
+
+  it("still projects a live DOWN onto MAJOR_OUTAGE", () => {
+    const derived = derivePageStatus({ ...base, latest: [{ monitor_tag: "api", status: GC.DOWN }] });
+    expect(derived.components[0].component_impact).toBe("MAJOR_OUTAGE");
+  });
+
+  it("moves the wording and nothing else", () => {
+    // The whole safety argument for the change: both impacts project onto
+    // GC.DEGRADED, so the bar, the counts and the collapse are untouched.
+    const derived = derivePageStatus({ ...base, latest: [{ monitor_tag: "api", status: GC.DEGRADED }] });
+    expect(derived.components[0].monitor_impact).toBe(GC.DEGRADED);
+    expect(derived.status).toBe(GC.DEGRADED);
+  });
+
+  it("leaves an operator's declared PARTIAL_OUTAGE exactly as declared", () => {
+    // The declared layer is somebody's deliberate word choice and must not be
+    // rewritten by this.
+    const derived = derivePageStatus({
+      ...base,
+      latest: [{ monitor_tag: "api", status: GC.UP }],
+      incidentImpacts: [
+        { monitor_tag: "api", monitor_impact: "DEGRADED", component_impact: "PARTIAL_OUTAGE", impact_override: null },
+      ],
+    });
+    expect(derived.components[0].component_impact).toBe("PARTIAL_OUTAGE");
+  });
+});

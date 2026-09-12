@@ -4,6 +4,7 @@ import { PAGE_STATUS_MESSAGES } from "../../global-constants.js";
 import { applyRollup, type DependencyEdge, type RollupSetting } from "./rollup.js";
 import {
   componentImpactFromMonitorImpact,
+  liveComponentImpactFor,
   isComponentImpact,
   monitorImpactFor,
   worstComponentImpact,
@@ -266,7 +267,10 @@ export function derivePageStatus(args: {
         });
         continue;
       }
-      impact = componentImpactFromMonitorImpact(status === GC.UP ? null : status);
+      // The live projection: this is the monitor's own current status, so a
+      // DEGRADED here is slowness being reported now, not an impact inferred
+      // for a row nobody can go back and reassess.
+      impact = liveComponentImpactFor(status === GC.UP ? null : status);
       source = "monitoring";
     }
 

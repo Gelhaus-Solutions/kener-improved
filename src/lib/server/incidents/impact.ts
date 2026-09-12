@@ -88,6 +88,36 @@ export function monitorImpactFor(impact: ComponentImpact): string | null {
 }
 
 /**
+ * The live direction: what a monitor's *current* observed status communicates.
+ *
+ * **Separate from the backfill below, and the difference is one word on a public
+ * page.** DEGRADED resolves to `DEGRADED_PERFORMANCE` here, not `PARTIAL_OUTAGE`,
+ * because there is nothing to infer: the monitor is reporting slowness right
+ * now, and "Partial System Outage" tells a customer something is down when
+ * nothing is. That was reaching the public page - a monitor answering in 1.34s
+ * announced an outage, and through C3's rollup it announced one on every parent
+ * that depends on it.
+ *
+ * Safe to change because `monitorImpactFor` projects `DEGRADED_PERFORMANCE` and
+ * `PARTIAL_OUTAGE` onto the same `GC.DEGRADED`: no bar, no count, no collapse and
+ * no page status moves. Only the wording does.
+ *
+ * The backfill keeps the weaker claim, for the reason stated on it.
+ */
+export function liveComponentImpactFor(monitorStatus: string | null | undefined): ComponentImpact {
+  switch (monitorStatus) {
+    case GC.DOWN:
+      return "MAJOR_OUTAGE";
+    case GC.DEGRADED:
+      return "DEGRADED_PERFORMANCE";
+    case GC.MAINTENANCE:
+      return "UNDER_MAINTENANCE";
+    default:
+      return "OPERATIONAL";
+  }
+}
+
+/**
  * The backfill direction. For the migration and for rows written before C2.
  *
  * DEGRADED resolves to PARTIAL_OUTAGE rather than DEGRADED_PERFORMANCE because it
