@@ -35,7 +35,7 @@ export const ROLLUP_VERSION = 1;
  * month's uptime is 40% overlay" instead of presenting an operator's account of
  * an outage as if it were measurement.
  */
-const OVERLAY_TYPES: ReadonlySet<string> = new Set([GC.INCIDENT, GC.MAINTENANCE]);
+const OVERLAY_TYPES: ReadonlySet<string> = new Set([GC.INCIDENT, GC.MAINTENANCE, GC.OPERATOR]);
 
 /**
  * Sample types whose latency is a real measurement.
@@ -46,6 +46,13 @@ const OVERLAY_TYPES: ReadonlySet<string> = new Set([GC.INCIDENT, GC.MAINTENANCE]
  * either into the distribution would make the p95 a statement about what was
  * typed. `SIGNAL` is a heartbeat receipt, not a timed request. `MANUAL` stays in
  * because a data-API push reports a latency the caller actually measured.
+ *
+ * `OPERATOR` is the one that is deliberately absent (KENER-123). It is an
+ * operator typing into the admin screen, and before the type existed those rows
+ * were MANUAL and therefore counted: thirty minutes hand-rewritten at 9000ms put
+ * thirty 9000s into the distribution, so the p95 and the max on the public page
+ * were reporting a number somebody typed. That is the half of KENER-123 that was
+ * not merely a labelling problem.
  */
 const LATENCY_TYPES: ReadonlySet<string> = new Set([GC.REALTIME, GC.TIMEOUT, GC.ERROR, GC.MANUAL]);
 

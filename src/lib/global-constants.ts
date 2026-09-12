@@ -45,6 +45,11 @@ export default {
   TIMEOUT: "TIMEOUT",
   ERROR: "ERROR",
   MANUAL: "MANUAL",
+  // An operator hand-rewriting history from the admin screen (KENER-123).
+  // Split out of MANUAL, which meant both this and "an external system pushed a
+  // measurement" - two things with opposite provenance and opposite claims about
+  // whether their latency is real. See docs/adr/0005.
+  OPERATOR: "OPERATOR",
   WEBHOOK: "WEBHOOK",
   DEFAULT_STATUS: "DEFAULT",
   SIGNAL: "SIGNAL",

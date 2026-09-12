@@ -18,7 +18,12 @@ class NoneCall {
         !!lastKnownStatus &&
         !!lastKnownStatus.status &&
         !!lastKnownStatus.type &&
-        lastKnownStatus.type === GC.MANUAL
+        // Both, since KENER-123 split them. A NONE monitor has no checks of its
+        // own, so its status is whatever was last put there - by the data API
+        // (MANUAL) or by an operator on the admin screen (OPERATOR). Before the
+        // split both wrote MANUAL and both held; accepting only one here would
+        // silently stop an operator-set NONE monitor from keeping its status.
+        (lastKnownStatus.type === GC.MANUAL || lastKnownStatus.type === GC.OPERATOR)
       ) {
         return {
           status: lastKnownStatus.status,

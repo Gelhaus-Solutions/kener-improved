@@ -23,7 +23,7 @@ import type {
  * SIGNAL rows (raw heartbeat receipts) and INCIDENT/MAINTENANCE overlays stay invisible, so the
  * alert window freezes during manual overlays instead of triggering or resolving on them.
  */
-const ALERT_VISIBLE_TYPES = [GC.REALTIME, GC.ERROR, GC.TIMEOUT, GC.MANUAL, GC.DEFAULT_STATUS];
+const ALERT_VISIBLE_TYPES = [GC.REALTIME, GC.ERROR, GC.TIMEOUT, GC.MANUAL, GC.DEFAULT_STATUS, GC.OPERATOR];
 
 /**
  * Scheduled-check sample types that count toward a monitor's Confirmation Threshold
@@ -39,6 +39,14 @@ const OBSERVED_CHECK_TYPES = [GC.REALTIME, GC.TIMEOUT, GC.ERROR];
  * which stay transparent) so the resolver can detect the boundary.
  */
 const OVERLAY_TYPES = [GC.INCIDENT, GC.MAINTENANCE];
+
+// **Not the same list as `rollupCompute`'s `OVERLAY_TYPES`, and the difference is
+// deliberate (KENER-123).** That one is about provenance - which samples are an
+// account of events rather than a measurement - and `OPERATOR` belongs in it.
+// This one freezes Confirmation Threshold counting, which is about when alerts
+// fire. Adding `OPERATOR` here would change alerting as a side effect of a
+// labelling fix, so it stays out and an operator rewrite remains transparent to
+// the threshold, exactly as it was while it wrote MANUAL.
 
 /**
  * Repository for monitoring data operations

@@ -9,13 +9,14 @@
 `monitoring_data` is not one stream. Rows arrive from several unrelated sources
 and are distinguished by `type`:
 
-| Type | Written by |
-| --- | --- |
-| `REALTIME`, `ERROR`, `TIMEOUT` | Scheduled checks: the actual probe result |
-| `DEFAULT_STATUS` | Default-status fill for a monitor with no sample in a minute |
-| `MANUAL` | Pushes through the data API |
-| `SIGNAL` | Raw heartbeat receipts |
-| `INCIDENT`, `MAINTENANCE` | Overlays written by incident and maintenance handling |
+| Type                           | Written by                                                   |
+| ------------------------------ | ------------------------------------------------------------ |
+| `REALTIME`, `ERROR`, `TIMEOUT` | Scheduled checks: the actual probe result                    |
+| `DEFAULT_STATUS`               | Default-status fill for a monitor with no sample in a minute |
+| `MANUAL`                       | Pushes through the data API                                  |
+| `OPERATOR`                     | An operator rewriting a window from the admin screen         |
+| `SIGNAL`                       | Raw heartbeat receipts                                       |
+| `INCIDENT`, `MAINTENANCE`      | Overlays written by incident and maintenance handling        |
 
 Alert evaluation asks "has this monitor been down for N consecutive minutes?"
 over a window of that table. If it reads every row, the answer depends on
@@ -36,7 +37,7 @@ invisible to it.**
  * SIGNAL rows (raw heartbeat receipts) and INCIDENT/MAINTENANCE overlays stay invisible, so the
  * alert window freezes during manual overlays instead of triggering or resolving on them.
  */
-const ALERT_VISIBLE_TYPES = [GC.REALTIME, GC.ERROR, GC.TIMEOUT, GC.MANUAL, GC.DEFAULT_STATUS];
+const ALERT_VISIBLE_TYPES = [GC.REALTIME, GC.ERROR, GC.TIMEOUT, GC.MANUAL, GC.DEFAULT_STATUS]
 ```
 
 The membership rule is precise, and worth stating as a rule rather than a list:
@@ -77,12 +78,12 @@ The same file defines two narrower sets, and the distinction matters:
 // Scheduled-check sample types that count toward Confirmation Threshold.
 // Intentionally narrower than ALERT_VISIBLE_TYPES: MANUAL pushes
 // and DEFAULT_STATUS fill stay transparent to threshold counting.
-const OBSERVED_CHECK_TYPES = [GC.REALTIME, GC.TIMEOUT, GC.ERROR];
+const OBSERVED_CHECK_TYPES = [GC.REALTIME, GC.TIMEOUT, GC.ERROR]
 
 // Overlay sample types that FREEZE Confirmation Threshold counting:
 // while one is active the count does not advance, and it acts as a hard
 // boundary the pending run cannot cross.
-const OVERLAY_TYPES = [GC.INCIDENT, GC.MAINTENANCE];
+const OVERLAY_TYPES = [GC.INCIDENT, GC.MAINTENANCE]
 ```
 
 So a type's visibility is per-question, not global. `MANUAL` is visible to
@@ -113,3 +114,36 @@ would be wrong in both directions.
 - **One shared visibility list for alerting and confirmation counting.** Would
   make `MANUAL` pushes count toward the confirmation threshold, letting an API
   client manufacture a confirmed alert.
+
+## Amendment: `OPERATOR` split out of `MANUAL` (KENER-123)
+
+`MANUAL` originally meant two things: a push through the data API, and an
+operator rewriting a window from the admin screen. Nothing on the row told them
+apart, and they disagree about the two questions that matter:
+
+- **Is the latency a measurement?** For an API push, yes - the caller timed
+  something. For an operator, no: it is a number typed into a form. While both
+  were `MANUAL` both counted, so thirty minutes hand-rewritten at 9000ms put
+  thirty 9000s into the distribution and the p95 on the public page reported it.
+- **Is the row measurement or an account of events?** F6a's `count_observed` and
+  `count_overlay` exist to answer that, and a hand-rewritten window was being
+  counted as observed.
+
+So the admin screen now writes `OPERATOR`. Where it lands, and why each is a
+separate decision rather than one sweep:
+
+| List                                 | `OPERATOR` | Why                                                                                                                                      |
+| ------------------------------------ | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `ALERT_VISIBLE_TYPES`                | **in**     | Preserves exactly what happened while it wrote `MANUAL`. An operator marking a window DOWN should still be evidence for alerting.        |
+| `OBSERVED_CHECK_TYPES`               | out        | `MANUAL` was never in it either; neither is a scheduled check.                                                                           |
+| `OVERLAY_TYPES` (`monitoring.ts`)    | **out**    | This list freezes Confirmation Threshold counting. Adding `OPERATOR` would change when alerts fire, as a side effect of a labelling fix. |
+| `OVERLAY_TYPES` (`rollupCompute.ts`) | **in**     | This one is provenance, and a hand-written window is an account of events.                                                               |
+| `LATENCY_TYPES` (`rollupCompute.ts`) | out        | A typed latency is not a measurement.                                                                                                    |
+
+The two `OVERLAY_TYPES` lists now deliberately differ, which is the thing most
+likely to look like a mistake later. One is about alerting, the other about
+provenance, and they were only ever equal by coincidence.
+
+Rows written before the split stay ambiguous: nothing distinguishes an old
+operator rewrite from an old API push, and no migration can recover it. Only new
+rows are classified correctly.

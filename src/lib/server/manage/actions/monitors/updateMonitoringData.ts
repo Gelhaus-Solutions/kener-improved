@@ -22,10 +22,14 @@ export default {
   action: "updateMonitoringData",
   schema: (data: Record<string, unknown>): LegacyPayload => {
     try {
-      // Type is fixed here, not taken from the caller: this path writes MANUAL
-      // by definition, and letting a payload choose would let it forge a
-      // REALTIME sample.
-      return { ...normaliseMonitoringDataUpdate(data as never), type: GC.MANUAL };
+      // Type is fixed here, not taken from the caller: letting a payload choose
+      // would let it forge a REALTIME sample.
+      //
+      // `OPERATOR`, not `MANUAL` (KENER-123). This screen is a person typing
+      // into a form; `/api/v4/.../data` is an external system reporting what it
+      // measured. They were the same type until now, which made the rollups call
+      // a hand-written window "observed" and fed a typed latency into the p95.
+      return { ...normaliseMonitoringDataUpdate(data as never), type: GC.OPERATOR };
     } catch (e) {
       throw new ActionError(400, e instanceof Error ? e.message : "Invalid monitoring data update");
     }
