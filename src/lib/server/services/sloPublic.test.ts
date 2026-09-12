@@ -192,3 +192,69 @@ describe("publicSloSurfacesFor", () => {
     expect(surfaces.monitorSlos).toEqual({});
   });
 });
+
+describe("a category figure on a page that does not group by category", () => {
+  const base = {
+    pageRef: "1",
+    monitors: new Set(["api", "web"]),
+    categories: new Set(["Platform"]),
+  };
+
+  const categoryTarget = row({
+    id: 9,
+    scope_type: "CATEGORY",
+    scope_ref: "Platform",
+    name: "Platform availability",
+    public_placements: ["CATEGORY_SECTION"],
+  });
+
+  it("goes on the section header when the page draws them", () => {
+    const surfaces = publicSloSurfacesFor([categoryTarget], { ...base, hasCategorySections: true });
+    expect(surfaces.categorySlos.Platform?.map((s) => s.name)).toEqual(["Platform availability"]);
+    expect(surfaces.pageSlos).toEqual([]);
+  });
+
+  it("falls back to the page-top panel when the page draws none", () => {
+    // Without this it was serialised into the hydration payload and rendered by
+    // nothing: the figure was in the HTML and invisible on the page.
+    const surfaces = publicSloSurfacesFor([categoryTarget], { ...base, hasCategorySections: false });
+    expect(surfaces.pageSlos.map((s) => s.name)).toEqual(["Platform availability"]);
+    expect(surfaces.categorySlos).toEqual({});
+  });
+
+  it("appears exactly once, never on both surfaces", () => {
+    for (const hasCategorySections of [true, false]) {
+      const surfaces = publicSloSurfacesFor([categoryTarget], { ...base, hasCategorySections });
+      const total = surfaces.pageSlos.length + Object.values(surfaces.categorySlos).flat().length;
+      expect(total).toBe(1);
+    }
+  });
+
+  it("defaults to drawing section headers when nothing says otherwise", () => {
+    // The component page and anything else with no grouping setting must keep
+    // behaving as it did, rather than silently moving every category figure.
+    const surfaces = publicSloSurfacesFor([categoryTarget], base);
+    expect(surfaces.categorySlos.Platform).toHaveLength(1);
+    expect(surfaces.pageSlos).toEqual([]);
+  });
+
+  it("still drops a category this page does not show", () => {
+    const surfaces = publicSloSurfacesFor(
+      [row({ scope_type: "CATEGORY", scope_ref: "Somebody Else", public_placements: ["CATEGORY_SECTION"] })],
+      { ...base, hasCategorySections: false },
+    );
+    expect(surfaces.pageSlos).toEqual([]);
+    expect(surfaces.categorySlos).toEqual({});
+  });
+
+  it("does not merge a page-scoped and a category-scoped figure into one entry", () => {
+    const surfaces = publicSloSurfacesFor(
+      [
+        row({ id: 1, scope_type: "PAGE", scope_ref: "1", name: "Page uptime", public_placements: ["PAGE_TOP"] }),
+        categoryTarget,
+      ],
+      { ...base, hasCategorySections: false },
+    );
+    expect(surfaces.pageSlos.map((s) => s.name).sort()).toEqual(["Page uptime", "Platform availability"]);
+  });
+});

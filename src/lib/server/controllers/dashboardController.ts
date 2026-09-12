@@ -408,6 +408,8 @@ export const GetPageDashboardData = async (
       pageRef: String(pageDetails.id),
       monitors: new Set<string>(),
       categories: new Set<string>(),
+      // A page with no components renders no sections whatever the setting says.
+      hasCategorySections: false,
     });
     return {
       pageStatus: await getPageStatus([], nowTs),
@@ -485,6 +487,9 @@ export const GetPageDashboardData = async (
     categories: new Set(
       Object.values(monitorCategoriesByTag).filter((category): category is string => category !== null),
     ),
+    // With Component Grouping off this page draws no section headers, so a
+    // category figure has nowhere to go and falls back to the page-top panel.
+    hasCategorySections: settings.group_display?.mode === "category",
   });
 
   return {

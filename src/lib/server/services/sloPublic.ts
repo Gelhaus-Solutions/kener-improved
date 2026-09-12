@@ -135,17 +135,46 @@ export interface PublicSloSurfaces {
  * `allowed` is what the page actually shows. Without it a status page would
  * carry every other page's components in its hydration payload, which is
  * published whether or not anything renders it.
+ *
+ * **`hasCategorySections` is the fix for a figure that rendered nowhere.** A
+ * category-scoped target is drawn on its section header, and a page whose
+ * Component Grouping is off has no section headers at all - so the figure was
+ * serialised into the payload and displayed by nothing. Measured, not inferred:
+ * it was in the HTML and invisible on the page. An operator who ticks a
+ * placement has asked for the figure to be public, and silently dropping it
+ * because of an unrelated layout setting is the wrong answer; so with grouping
+ * off a category figure falls back to the page-top panel, which is the nearest
+ * surface that is actually rendered. Nothing is hidden and nothing appears
+ * twice: the two cases are exclusive.
  */
 export function publicSloSurfacesFor(
   rows: ReadonlyArray<PublishedTarget>,
-  allowed: { pageRef: string; monitors: ReadonlySet<string>; categories: ReadonlySet<string> },
+  allowed: {
+    pageRef: string;
+    monitors: ReadonlySet<string>;
+    categories: ReadonlySet<string>;
+    /**
+     * Whether this page renders category section headers.
+     *
+     * Optional and defaulting to true, so the component page and anything else
+     * that has no grouping setting keeps its existing behaviour rather than
+     * silently moving every category figure to the top.
+     */
+    hasCategorySections?: boolean;
+  },
 ): PublicSloSurfaces {
   const out: PublicSloSurfaces = { pageSlos: [], categorySlos: {}, monitorSlos: {} };
+  const categorySectionsRendered = allowed.hasCategorySections !== false;
 
   const bucketFor = (row: PublishedTarget): PublicSlo[] | null => {
     const { scope_type: scope, scope_ref: ref } = row.target;
     if (scope === "PAGE") return ref === allowed.pageRef ? out.pageSlos : null;
-    if (scope === "CATEGORY") return allowed.categories.has(ref) ? (out.categorySlos[ref] ??= []) : null;
+    if (scope === "CATEGORY") {
+      if (!allowed.categories.has(ref)) return null;
+      // No section header to hang it on, so it goes to the top of the page
+      // rather than into a bucket nothing reads.
+      return categorySectionsRendered ? (out.categorySlos[ref] ??= []) : out.pageSlos;
+    }
     if (scope === "MONITOR") return allowed.monitors.has(ref) ? (out.monitorSlos[ref] ??= []) : null;
     return null;
   };

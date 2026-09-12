@@ -156,7 +156,7 @@
       {
         value: "CATEGORY_SECTION",
         label: "On its category's section header",
-        hint: "Needs the page's Component Grouping set to group by category."
+        hint: "Shown on the section header. On a page that does not group by category, it appears in the panel at the top of the page instead."
       }
     ]
   };

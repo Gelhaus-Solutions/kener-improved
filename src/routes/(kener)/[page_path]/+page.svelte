@@ -114,7 +114,8 @@
       </div>
     {/if}
     <!-- F1a: page-scoped SLOs placed at the top of this page, plus any
-         page-scoped breach wherever it was placed. Mirrored in
+         page-scoped breach wherever it was placed, plus category-scoped figures
+         when this page draws no category sections to hang them on. Mirrored in
          `(kener)/+page.svelte`: this page exists twice. -->
     <MonitorSloPanel slos={data.pageSlos} heading={$t("Service Level Agreement")} />
     <MonitorList
