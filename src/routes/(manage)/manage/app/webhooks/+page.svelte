@@ -3,6 +3,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import { Spinner } from "$lib/components/ui/spinner/index.js";
@@ -32,6 +33,9 @@
     last_success_at: number | null;
     last_failure_at: number | null;
     event_types: string[];
+    /** E11. */
+    format: "GENERIC" | "DISCORD";
+    message_template: string | null;
   }
 
   // Grouped by domain, straight from the taxonomy. This is the reason the
@@ -50,6 +54,14 @@
   let formTimeout = $state(10000);
   let formStatus = $state<"ACTIVE" | "DISABLED">("ACTIVE");
   let formEvents = $state<string[]>([]);
+  // E11. What shape this endpoint receives, and what the operator wrote in it.
+  let formFormat = $state<"GENERIC" | "DISCORD">("GENERIC");
+  let formTemplate = $state("");
+
+  // A literal, not an inline attribute: Svelte reads `{{type}}` in markup as an
+  // expression, so the Mustache braces this feature is built on have to reach
+  // the DOM as a plain string.
+  const PLACEHOLDER_TEMPLATE = "<@&123456789> {{type}}: {{object.title}}";
 
   // Shown once, after a create or a rotate, and never retrievable again.
   let revealedSecret = $state<string | null>(null);
@@ -87,6 +99,8 @@
     formTimeout = 10000;
     formStatus = "ACTIVE";
     formEvents = ["incident.*"];
+    formFormat = "GENERIC";
+    formTemplate = "";
     showDialog = true;
   }
 
@@ -99,6 +113,8 @@
     // Kener sets it. Re-enabling is what an operator does instead.
     formStatus = endpoint.status === "ACTIVE" ? "ACTIVE" : "DISABLED";
     formEvents = [...endpoint.event_types];
+    formFormat = endpoint.format === "DISCORD" ? "DISCORD" : "GENERIC";
+    formTemplate = endpoint.message_template ?? "";
     showDialog = true;
   }
 
@@ -127,7 +143,9 @@
           url: formUrl,
           timeout_ms: formTimeout,
           status: formStatus,
-          event_types: formEvents
+          event_types: formEvents,
+          format: formFormat,
+          message_template: formTemplate
         });
         toast.success("Endpoint updated");
       } else {
@@ -136,7 +154,9 @@
           url: formUrl,
           timeout_ms: formTimeout,
           status: formStatus,
-          event_types: formEvents
+          event_types: formEvents,
+          format: formFormat,
+          message_template: formTemplate
         });
         revealedSecret = result.secret;
         revealedFor = formName;
@@ -369,7 +389,45 @@
             <option value="DISABLED">Disabled</option>
           </select>
         </div>
+        <div class="flex flex-col gap-1">
+          <Label for="wh-format">Format</Label>
+          <select
+            id="wh-format"
+            bind:value={formFormat}
+            class="border-input bg-background h-9 w-40 rounded-md border px-3 text-sm"
+          >
+            <option value="GENERIC">Generic JSON</option>
+            <option value="DISCORD">Discord</option>
+          </select>
+        </div>
       </div>
+
+      {#if formFormat === "DISCORD"}
+        <div class="flex flex-col gap-2">
+          <Label for="wh-template">Message</Label>
+          <Textarea
+            id="wh-template"
+            bind:value={formTemplate}
+            rows={3}
+            placeholder={PLACEHOLDER_TEMPLATE}
+            class="font-mono text-xs"
+          />
+          <p class="text-muted-foreground text-xs">
+            The message posted to the channel. The event detail is added underneath it automatically, so this line is
+            just what you want said and who you want told. Leave it empty for the event name alone.
+          </p>
+          <p class="text-muted-foreground text-xs">
+            Variables: <code>{"{{type}}"}</code>, <code>{"{{object.title}}"}</code>,
+            <code>{"{{object.status}}"}</code>, <code>{"{{object.severity}}"}</code>,
+            <code>{"{{object.monitor_tag}}"}</code>, <code>{"{{site_name}}"}</code>.
+          </p>
+          <p class="text-muted-foreground text-xs">
+            Mention a role with <code>&lt;@&amp;ROLE_ID&gt;</code> or a person with <code>&lt;@USER_ID&gt;</code>. Only
+            mentions written here can ping: a mention arriving through a variable is shown but never notifies, so an
+            incident title cannot page your whole server.
+          </p>
+        </div>
+      {/if}
 
       <div class="flex flex-col gap-2">
         <Label>Events</Label>
