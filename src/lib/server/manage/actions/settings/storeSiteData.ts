@@ -1,6 +1,10 @@
 import { GetSiteDataByKey, InsertKeyValue } from "$lib/server/controllers/controller.js";
 import { ClearOidcConfigCache, OIDC_SECRET_PURPOSE } from "$lib/server/controllers/oidcController.js";
 import { sealIfPlain } from "$lib/server/crypto/secretBox.js";
+import {
+  SITE_DATA_KEY as LATENCY_THRESHOLD_KEY,
+  invalidateLatencyThresholdCache,
+} from "$lib/server/services/latencyThreshold.js";
 import type { ActionDefinition, LegacyPayload } from "../../types.js";
 
 async function storeSiteData(data: { [x: string]: any }) {
@@ -40,6 +44,14 @@ async function storeSiteData(data: { [x: string]: any }) {
       // pick up new credentials immediately
       if (key === "oidcSettings") {
         ClearOidcConfigCache();
+      }
+
+      // B5's threshold has its own 10-second per-process memo, because it is
+      // read on every check of every monitor. `InvalidateSiteDataCache` inside
+      // InsertKeyValue does not reach it, so without this the operator saves a
+      // rule and watches the old one keep deciding for another ten seconds.
+      if (key === LATENCY_THRESHOLD_KEY) {
+        invalidateLatencyThresholdCache();
       }
     }
   }

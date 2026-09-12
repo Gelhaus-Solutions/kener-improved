@@ -51,6 +51,44 @@ function IsValidDataRetentionPolicy(value: string): boolean {
   return true;
 }
 
+/**
+ * The instance-wide latency threshold (B5).
+ *
+ * Shape enforced here rather than left to `parseThreshold`, which falls back
+ * field by field and so cannot reject anything. The one rule it genuinely
+ * cannot express is the ordering: `down_ms` below `degraded_ms` describes a
+ * monitor that goes DOWN before it ever goes DEGRADED, which is not a
+ * conservative reading of a badly written rule, it is a rule that can never
+ * produce DEGRADED at all. The screen checks it too; this is the check that
+ * still holds for the v4 config API and for anything writing by hand.
+ *
+ * `down_ms` is nullable on purpose and null is meaningful: latency alone can
+ * never make this monitor DOWN.
+ */
+function IsValidLatencyThreshold(value: string): boolean {
+  if (!IsValidJSONString(value)) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return false;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+  const rule = parsed as Record<string, unknown>;
+  if (typeof rule.enabled !== "boolean") return false;
+  if (!["p50", "p90", "p95", "p99", "avg"].includes(String(rule.metric))) return false;
+  for (const key of ["window_minutes", "min_samples", "degraded_ms"]) {
+    const n = Number(rule[key]);
+    if (!Number.isFinite(n) || n <= 0) return false;
+  }
+  if (rule.down_ms !== undefined && rule.down_ms !== null) {
+    const down = Number(rule.down_ms);
+    if (!Number.isFinite(down) || down <= 0) return false;
+    if (down <= Number(rule.degraded_ms)) return false;
+  }
+  return true;
+}
+
 export const siteDataKeys: SiteDataKey[] = [
   {
     key: "title",
@@ -387,5 +425,14 @@ export const siteDataKeys: SiteDataKey[] = [
     key: "mfaPolicy",
     isValid: IsValidMfaPolicy,
     data_type: "string",
+  },
+  {
+    // B5's instance-wide latency rule. Its absence from this list meant every
+    // save from the Site Configurations screen threw "Invalid key" - the reader,
+    // the cache invalidator and the whole form shipped, and the one line that
+    // lets the value be written did not.
+    key: "latencyThresholdDefault",
+    isValid: IsValidLatencyThreshold,
+    data_type: "object",
   },
 ];
