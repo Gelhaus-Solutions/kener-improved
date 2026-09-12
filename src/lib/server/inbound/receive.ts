@@ -7,6 +7,8 @@ import type { InboundAlertRecord, InboundEndpointRecord } from "../db/repositori
 import { parseInboundPayload } from "./parsers.js";
 import { impactFor, parseMappingRules, resolveMonitorTag, severityFor } from "./mapping.js";
 import type { InboundProvider, NormalisedAlert } from "./types.js";
+import { signatureHeaderFor, verifySignature } from "./signature.js";
+import { open as openSealed } from "../crypto/secretBox.js";
 
 /**
  * H1. What happens when somebody else's alerting posts to Kener.
@@ -235,6 +237,16 @@ export async function receiveInboundAlert(
   token: string,
   payload: unknown,
   at: number = Math.floor(Date.now() / 1000),
+  /**
+   * The body exactly as it arrived, and the headers it arrived with.
+   *
+   * Needed only when the endpoint is configured to verify a signature, and the
+   * *raw* body specifically: re-serialising the parsed object would change key
+   * order and whitespace, so the HMAC would never match what the sender
+   * computed. Omitted by callers that have already established trust, such as a
+   * test driver.
+   */
+  signed?: { raw: string; header: (name: string) => string | null },
 ): Promise<ReceiveResult> {
   if (!token || token.trim() === "") return { ok: false, status: 401, reason: "unauthorized" };
 
@@ -250,6 +262,22 @@ export async function receiveInboundAlert(
   }
 
   return await runWithOrg(endpoint.org_id, async () => {
+    // An endpoint that holds a signing secret refuses anything unsigned. A check
+    // that can be skipped by leaving out the header is not a check.
+    if (endpoint.signing_secret_encrypted) {
+      const secret = openSealed(endpoint.signing_secret_encrypted, "inbound_signing_secret");
+      if (!secret) {
+        await db.recordEndpointRequest(endpoint.id, { ok: false, error: "signing secret unreadable", at });
+        return { ok: false as const, status: 500, reason: "this endpoint's signing secret could not be read" };
+      }
+      const header = signatureHeaderFor(endpoint.provider as InboundProvider);
+      const verdict = verifySignature(signed?.raw ?? "", signed?.header(header) ?? null, secret);
+      if (!verdict.ok) {
+        await db.recordEndpointRequest(endpoint.id, { ok: false, error: verdict.reason, at });
+        return { ok: false as const, status: 401, reason: verdict.reason };
+      }
+    }
+
     let alerts: NormalisedAlert[];
     try {
       alerts = parseInboundPayload(endpoint.provider as InboundProvider, payload);

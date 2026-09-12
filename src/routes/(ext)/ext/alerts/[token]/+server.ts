@@ -78,7 +78,12 @@ const handler: RequestHandler = async ({ params, request }) => {
 
   let result;
   try {
-    result = await receiveInboundAlert(token, payload);
+    result = await receiveInboundAlert(token, payload, undefined, {
+      // The body exactly as it arrived: re-serialising would change key order
+      // and whitespace, and the sender's HMAC is over these bytes.
+      raw,
+      header: (name: string) => request.headers.get(name),
+    });
   } catch (error) {
     // A 5xx tells the sender to retry, which is what we want when the fault is
     // ours: the alert is not lost, it arrives again in a minute.

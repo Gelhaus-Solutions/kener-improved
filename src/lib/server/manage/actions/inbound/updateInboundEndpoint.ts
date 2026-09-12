@@ -1,4 +1,5 @@
 import db from "$lib/server/db/db.js";
+import { seal, secretHint } from "$lib/server/crypto/secretBox.js";
 import {
   validateEndpointPatch,
   type EndpointFields,
@@ -11,6 +12,14 @@ interface Payload extends EndpointFields {
   id?: number;
   name?: string;
   status?: string;
+  /**
+   * The shared secret the sender signs its body with, in the clear.
+   *
+   * Sealed here and never returned. An empty string clears it, which turns
+   * signature checking off for this endpoint; absent leaves it alone, so saving
+   * the form without retyping the secret does not silently remove it.
+   */
+  signing_secret?: string | null;
 }
 
 /**
@@ -32,12 +41,30 @@ export default {
     const endpoint = await db.getInboundEndpointById(id);
     if (!endpoint) throw new ActionError(404, "That endpoint does not exist");
 
-    const patch: ValidatedEndpointPatch & { name?: string; status?: string } = await validateEndpointPatch(data);
+    const patch: ValidatedEndpointPatch & {
+      name?: string;
+      status?: string;
+      signing_secret_encrypted?: string | null;
+      signing_secret_hint?: string | null;
+    } = await validateEndpointPatch(data);
 
     if (data.name !== undefined) {
       const name = String(data.name).trim();
       if (!name) throw new ActionError(400, "A name is required");
       patch.name = name;
+    }
+
+    if (data.signing_secret !== undefined) {
+      const secret = data.signing_secret === null ? "" : String(data.signing_secret).trim();
+      if (secret === "") {
+        patch.signing_secret_encrypted = null;
+        patch.signing_secret_hint = null;
+      } else {
+        // Sealed rather than hashed, the opposite of the token: verifying a
+        // signature means recomputing it, which means reading the secret back.
+        patch.signing_secret_encrypted = seal(secret, "inbound_signing_secret");
+        patch.signing_secret_hint = secretHint(secret);
+      }
     }
 
     if (data.status !== undefined) {
