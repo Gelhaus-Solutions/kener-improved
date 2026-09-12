@@ -9,6 +9,10 @@
   import Plus from "@lucide/svelte/icons/plus";
   import SettingsIcon from "@lucide/svelte/icons/settings";
   import * as Item from "$lib/components/ui/item/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import PageStatusExplainer from "$lib/components/manage/PageStatusExplainer.svelte";
+  import HelpCircleIcon from "@lucide/svelte/icons/circle-help";
+  import type { PageExplanation } from "$lib/server/incidents/explain.js";
   import type { PageRecord } from "$lib/server/types/db.js";
   import { resolve } from "$app/paths";
   import clientResolver from "$lib/client/resolver.js";
@@ -40,6 +44,39 @@
       error = e instanceof Error ? e.message : "Failed to fetch pages";
     } finally {
       loading = false;
+    }
+  }
+
+  /**
+   * "Why is this page not green", answered where it is asked.
+   *
+   * `ComponentStatus.source` has recorded which rule decided each component
+   * since C2b and nothing ever showed it, so the answer lived in the database
+   * and took four rounds of psql to assemble.
+   */
+  let explaining = $state<PageWithMonitors | null>(null);
+  let explanation = $state<(PageExplanation & { page_name: string }) | null>(null);
+  let explainLoading = $state(false);
+  let explainError = $state<string | null>(null);
+
+  async function explain(page: PageWithMonitors) {
+    explaining = page;
+    explanation = null;
+    explainError = null;
+    explainLoading = true;
+    try {
+      const response = await fetch(clientResolver(resolve, "/manage/api"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "explainPageStatus", data: { page_id: page.id } })
+      });
+      const result = await response.json();
+      if (result.error) explainError = result.error;
+      else explanation = result;
+    } catch (e) {
+      explainError = e instanceof Error ? e.message : "Could not explain this page";
+    } finally {
+      explainLoading = false;
     }
   }
 
@@ -124,6 +161,10 @@
               </Table.Cell>
 
               <Table.Cell class="text-right">
+                <Button variant="ghost" size="sm" onclick={() => explain(page)} title="Why is this page not green?">
+                  <HelpCircleIcon class="size-4" />
+                  Why
+                </Button>
                 <Button variant="ghost" target="_blank" size="sm" href={clientResolver(resolve, `/${page.page_path}`)}>
                   View
                 </Button>
@@ -142,3 +183,16 @@
     </div>
   {/if}
 </div>
+
+<Dialog.Root open={explaining !== null} onOpenChange={(open) => (explaining = open ? explaining : null)}>
+  <Dialog.Content class="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+    <Dialog.Header>
+      <Dialog.Title>Why {explaining?.page_title} says what it says</Dialog.Title>
+      <Dialog.Description>
+        Derived now, by the same code the public page runs. Each component shows which rule decided it and the evidence
+        behind that rule.
+      </Dialog.Description>
+    </Dialog.Header>
+    <PageStatusExplainer {explanation} loading={explainLoading} error={explainError} />
+  </Dialog.Content>
+</Dialog.Root>

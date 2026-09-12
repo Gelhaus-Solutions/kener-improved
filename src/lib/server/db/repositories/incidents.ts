@@ -870,11 +870,22 @@ export class IncidentsRepository extends BaseRepository {
    * Carries `impact_override` alongside each row so the caller can apply the
    * incident-level pin without a second query.
    */
+  /**
+   * The open incidents declaring an impact on these monitors, at this instant.
+   *
+   * `id` and `title` are selected for the admin's "why is this not green"
+   * panel and ignored by `derivePageStatus`. Widening this query rather than
+   * writing a second one is deliberate: an explanation assembled from its own
+   * query eventually describes a different set of rows than the derivation
+   * used, and a wrong explanation of a correct status is worse than none.
+   */
   async getDeclaredIncidentImpacts(
     timestamp: number,
     monitorTags: string[],
   ): Promise<
     Array<{
+      id: number;
+      title: string | null;
       monitor_tag: string;
       monitor_impact: string | null;
       component_impact: string | null;
@@ -884,6 +895,8 @@ export class IncidentsRepository extends BaseRepository {
     if (monitorTags.length === 0) return [];
     return await this.table("incidents")
       .select(
+        "incidents.id",
+        "incidents.title",
         "incident_monitors.monitor_tag",
         "incident_monitors.monitor_impact",
         "incident_monitors.component_impact",

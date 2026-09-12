@@ -535,13 +535,30 @@ export class MaintenancesRepository extends BaseRepository {
    * rendering query for the same reason: page status must not depend on whether
    * the page is configured to display maintenances.
    */
+  /**
+   * The ongoing maintenances declaring an impact on these monitors.
+   *
+   * `id` and `title` ride along for the admin's "why is this not green" panel,
+   * on the same reasoning as `getDeclaredIncidentImpacts`: one query, so the
+   * explanation and the derivation can never be looking at different rows.
+   */
   async getDeclaredMaintenanceImpacts(
     timestamp: number,
     monitorTags: string[],
-  ): Promise<Array<{ monitor_tag: string; monitor_impact: string | null; component_impact: string | null }>> {
+  ): Promise<
+    Array<{
+      id: number;
+      title: string | null;
+      monitor_tag: string;
+      monitor_impact: string | null;
+      component_impact: string | null;
+    }>
+  > {
     if (monitorTags.length === 0) return [];
     return await this.table("maintenances_events")
       .select(
+        "maintenances.id",
+        "maintenances.title",
         "maintenance_monitors.monitor_tag",
         "maintenance_monitors.monitor_impact",
         "maintenance_monitors.component_impact",

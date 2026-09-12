@@ -145,6 +145,9 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   // G4. Custom domains are a property of a page, so they reuse the page
   // permissions that already exist upstream rather than inventing a pair. That
   // also keeps the upstream `allPerms.ts` untouched.
+  // "Why is this page not green": a read of the page's own derivation, so it is
+  // the same permission as reading the page.
+  explainPageStatus: "pages.read",
   getPageDomains: "pages.read",
   savePageDomain: "pages.write",
   deletePageDomain: "pages.write",
