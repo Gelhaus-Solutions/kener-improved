@@ -67,6 +67,14 @@ export const orgPermissions: Array<{ id: string; permission_name: string }> = [
   { id: "probes.read", permission_name: "View remote probe agents and their assignments" },
   { id: "probes.write", permission_name: "Create, assign, and delete remote probe agents" },
 
+  // Inbound alert webhooks (H1). Their own pair, and the token is again the
+  // reason. An inbound token lets whoever holds it open incidents on the public
+  // status page, in an org's name, with no session and no further check. That is
+  // a different and larger power than editing a monitor, so it is granted
+  // separately rather than folded into `monitors.*` or `incidents.*`.
+  { id: "inbound.read", permission_name: "View inbound alert endpoints and the alerts they have received" },
+  { id: "inbound.write", permission_name: "Create, update, and delete inbound alert endpoints" },
+
   { id: "orgs.read", permission_name: "View organisation settings" },
   { id: "orgs.write", permission_name: "Create and update organisations" },
   { id: "orgs.members.read", permission_name: "View organisation members" },
@@ -103,6 +111,12 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   // Remote probes (B1c). Reading the fleet opens the screen; everything that
   // mints a token, moves an agent between regions, or decides which monitors a
   // probe is handed is a write.
+  getInboundFleet: "inbound.read",
+  createInboundEndpoint: "inbound.write",
+  updateInboundEndpoint: "inbound.write",
+  deleteInboundEndpoint: "inbound.write",
+  rotateInboundToken: "inbound.write",
+
   getProbeFleet: "probes.read",
   createProbeAgent: "probes.write",
   updateProbeAgent: "probes.write",
@@ -334,6 +348,7 @@ export const ORG_ROUTE_PERMISSION_MAP: Record<string, string | null> = {
   // Remote probe agents (B1c). `probes.read` opens the screen; every button on
   // it is separately gated on `probes.write` by its own action.
   "/(manage)/manage/app/probes": "probes.read",
+  "/(manage)/manage/app/inbound": "inbound.read",
 
   // SLO targets and their attainment (F1a). `slo.read` opens the screen; every
   // button on it is separately gated on `slo.write` by its own action, the same

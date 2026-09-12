@@ -71,6 +71,10 @@
         // operator comes here to see whether a region is still reporting, which
         // is something watched during a bad hour, not configured once.
         { title: "Probes", url: "/manage/app/probes", icon: RadarIcon },
+        // H1. Beside Probes, and for the same reason: both answer "where are my
+        // status signals coming from". Probes are the checks Kener runs itself,
+        // inbound alerts are the ones somebody else's monitoring runs for it.
+        { title: "Inbound Alerts", url: "/manage/app/inbound", icon: WebhookIcon },
         // F1a. In Operate rather than Settings: an error budget is something an
         // operator watches during a bad week, not a preference set once.
         { title: "SLOs", url: "/manage/app/slo", icon: TargetIcon },
