@@ -102,6 +102,28 @@ describe("explainComponent", () => {
     ...over,
   });
 
+  /**
+   * "Its own check said DOWN" is true and tells an operator nothing they did not
+   * already know from the headline they are asking about. The error text is the
+   * answer, whenever the check produced one.
+   */
+  it("gives the check's own error when that is what decided the status", () => {
+    const explained = explainComponent(
+      component({ component_impact: "MAJOR_OUTAGE" }),
+      inputs({ latest: [{ monitor_tag: "api", status: "DOWN", raw_status: "DOWN", error_message: "HTTP 500" }] }),
+    );
+    expect(explained.reason).toBe("Its own check last reported DOWN: HTTP 500");
+    expect(explained.own_error).toBe("HTTP 500");
+  });
+
+  it("falls back to the plain sentence when the check said nothing", () => {
+    const explained = explainComponent(
+      component({ component_impact: "MAJOR_OUTAGE" }),
+      inputs({ latest: [{ monitor_tag: "api", status: "DOWN", raw_status: "DOWN" }] }),
+    );
+    expect(explained.reason).toBe("Its own check last reported DOWN, and nothing is declared against it.");
+  });
+
   it("says so plainly when nothing is declared and the check is up", () => {
     const explained = explainComponent(component(), inputs());
     expect(explained.reason).toBe("Its own check last reported UP, and nothing is declared against it.");

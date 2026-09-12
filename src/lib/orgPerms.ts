@@ -146,8 +146,10 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   // permissions that already exist upstream rather than inventing a pair. That
   // also keeps the upstream `allPerms.ts` untouched.
   // "Why is this page not green": a read of the page's own derivation, so it is
-  // the same permission as reading the page.
+  // the same permission as reading the page. The monitor-scoped form is the same
+  // question asked about one component, and reads monitors rather than pages.
   explainPageStatus: "pages.read",
+  explainMonitorStatus: "monitors.read",
   getPageDomains: "pages.read",
   savePageDomain: "pages.write",
   deletePageDomain: "pages.write",

@@ -40,6 +40,8 @@ export interface ComponentExplanation {
   /** The monitor's own latest published sample, and what its check observed. */
   own_status: string | null;
   own_check: string | null;
+  /** What the check itself said went wrong, which is usually the real answer. */
+  own_error: string | null;
   /** Open incidents declaring an impact on this component. */
   incidents: DeclaredEvent[];
   /** Ongoing maintenances declaring one. */
@@ -148,6 +150,7 @@ export function explainComponent(component: ComponentStatus, inputs: ExplainInpu
   const row = inputs.latest.find((l) => l.monitor_tag === tag);
   const ownStatus = row?.status ?? null;
   const ownCheck = row?.raw_status ?? null;
+  const ownError = row?.error_message ?? null;
 
   const incidents = inputs.incidentImpacts
     .filter((i) => i.monitor_tag === tag)
@@ -180,9 +183,10 @@ export function explainComponent(component: ComponentStatus, inputs: ExplainInpu
     impact: component.component_impact,
     summary: componentImpactSummary(component.component_impact, component.source === "silent"),
     source: component.source,
-    reason: reasonFor(component, { incidents, maintenances, inherited, pinned, ownStatus, ownCheck }),
+    reason: reasonFor(component, { incidents, maintenances, inherited, pinned, ownStatus, ownCheck, ownError }),
     own_status: ownStatus,
     own_check: ownCheck,
+    own_error: ownError,
     incidents,
     maintenances,
     inherited_from: inherited,
@@ -200,6 +204,7 @@ function reasonFor(
     pinned: ComponentImpact | null;
     ownStatus: string | null;
     ownCheck: string | null;
+    ownError: string | null;
   },
 ): string {
   const named = (events: DeclaredEvent[]) =>
@@ -222,8 +227,12 @@ function reasonFor(
     case "silent":
       return "This component has never reported. It is shown as having no data and is left out of the headline's arithmetic, rather than counted as healthy.";
     default:
-      return evidence.ownStatus === GC.UP
-        ? "Its own check last reported UP, and nothing is declared against it."
+      if (evidence.ownStatus === GC.UP) return "Its own check last reported UP, and nothing is declared against it.";
+      // The error text is the answer whenever there is one. "Its own check said
+      // DOWN" is true and tells an operator nothing they did not already know
+      // from the headline they are asking about.
+      return evidence.ownError
+        ? `Its own check last reported ${evidence.ownStatus ?? "nothing"}: ${evidence.ownError}`
         : `Its own check last reported ${evidence.ownStatus ?? "nothing"}, and nothing is declared against it.`;
   }
 }

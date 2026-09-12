@@ -30,6 +30,7 @@
   import ModifyDataCard from "./components/ModifyDataCard.svelte";
   import DangerZoneCard from "./components/DangerZoneCard.svelte";
   import MonitorRecentLogs from "./components/MonitorRecentLogs.svelte";
+  import WhyThisStatusCard from "./components/WhyThisStatusCard.svelte";
   import StatusHistoryDaysCard from "./components/StatusHistoryDaysCard.svelte";
   import MonitorSharingOptionsCard from "./components/MonitorSharingOptionsCard.svelte";
   import GC from "$lib/global-constants.js";
@@ -384,6 +385,14 @@
             <!-- Status History Days Card -->
 
             <StatusHistoryDaysCard bind:monitor {typeData} bind:statusHistoryDays />
+          </Accordion.Content>
+        </Accordion.Item>
+      {/if}
+      {#if !isNew}
+        <Accordion.Item value="why-this-status">
+          <Accordion.Trigger>Why This Status</Accordion.Trigger>
+          <Accordion.Content class="flex flex-col gap-4 text-balance">
+            <WhyThisStatusCard monitorTag={params.tag} />
           </Accordion.Content>
         </Accordion.Item>
       {/if}

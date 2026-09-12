@@ -17,6 +17,7 @@ const component = (over: Partial<ComponentExplanation> = {}): ComponentExplanati
   reason: "Its own check last reported UP, and nothing is declared against it.",
   own_status: "UP",
   own_check: "UP",
+  own_error: null,
   incidents: [],
   maintenances: [],
   inherited_from: [],

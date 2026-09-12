@@ -134,6 +134,8 @@ export interface LatestStatus {
    * status - that would bypass the threshold - only to explain one.
    */
   raw_status?: string | null;
+  /** What the check said went wrong. Explanation only, like `raw_status`. */
+  error_message?: string | null;
 }
 
 /**
