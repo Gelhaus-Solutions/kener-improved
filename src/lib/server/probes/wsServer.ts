@@ -1,7 +1,12 @@
 import { WebSocketServer, type WebSocket } from "ws";
+import db from "../db/db.js";
+import { runWithOrg } from "../db/orgContext.js";
+import { handleConnection } from "./session.js";
+import * as registry from "./registry.js";
+import sweeper from "./sweeper.js";
 
 /**
- * The probe WebSocket server (B1c), foundation only.
+ * The probe WebSocket server (B1c).
  *
  * **Where this runs is the constraint that decided everything else about it.**
  * An assignment originates in the monitor-execute worker and a result has to
@@ -19,12 +24,11 @@ import { WebSocketServer, type WebSocket } from "ws";
  * **Its own port, and off by default.** `KENER_PROBE_WS_PORT` unset means no
  * listener, so an instance that has never heard of probes opens nothing new.
  *
- * **Deliberately no protocol yet.** The item that introduces the protocol says
- * to prove the server comes up under both `npm run dev` and `npm run start`
- * before building anything on top of it, because the process split is the part
- * most likely to bite. So this accepts a connection, answers WS ping/pong, and
- * closes cleanly on shutdown - and nothing else. Every message type in the
- * protocol lands on top of this once it is known to run in both places.
+ * **This file stays the transport and nothing else.** It opens the port, hands
+ * each accepted socket to `session.ts` and closes everything down again. The
+ * protocol, the authentication and the registry live beside it, so that the
+ * pull-based successor - which replaces all three - can do so without touching
+ * the part that was proven to come up in both processes.
  */
 
 let server: WebSocketServer | null = null;
@@ -59,6 +63,7 @@ export async function start(): Promise<void> {
     // dies mid-frame is an ordinary event for a daemon that lives on somebody
     // else's hardware, and the fallback for a silent probe is a local check.
     socket.on("error", () => sockets.delete(socket));
+    handleConnection(socket);
   });
 
   server.on("error", (error: Error) => {
@@ -66,13 +71,46 @@ export async function start(): Promise<void> {
   });
 
   await new Promise<void>((resolve) => server!.once("listening", resolve));
+
+  // `connection_state` describes a socket held by *this* process, so every row
+  // claiming CONNECTED at startup is a claim left behind by a process that has
+  // since died. Nothing else would ever retract it: the sweeper only inspects
+  // agents it holds a connection for, and this process holds none yet.
+  await resetStaleConnectionStates();
+
+  sweeper.start();
   console.log(`Probe WS server listening on port ${port}`);
+}
+
+/**
+ * Clears CONNECTED rows left by a previous process, in every org.
+ *
+ * Across orgs because startup has no tenant context and every org's fleet is
+ * equally stale. A failure here is logged and swallowed: it would leave an
+ * admin screen showing a probe as connected when it is not, which is worth
+ * knowing about but is not a reason to refuse to start the server.
+ */
+async function resetStaleConnectionStates(): Promise<void> {
+  try {
+    for (const orgId of await db.getActiveOrgIds()) {
+      await runWithOrg(orgId, () => db.resetProbeConnectionStates());
+    }
+  } catch (error) {
+    console.error("Could not reset stale probe connection states:", error);
+  }
 }
 
 export async function shutdown(): Promise<void> {
   if (!server) return;
   const closing = server;
   server = null;
+
+  sweeper.stop();
+  // Before the sockets close, so that every assignment still outstanding is
+  // failed at once and any execute worker waiting on a probe falls straight
+  // through to a local check instead of holding the shutdown open for the length
+  // of a monitor timeout.
+  registry.clear("the server is shutting down");
 
   // Close the sockets before the server. `WebSocketServer.close` waits for
   // clients to go away on their own, and a probe is a long-lived daemon with no

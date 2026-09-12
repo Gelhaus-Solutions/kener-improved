@@ -9,10 +9,14 @@
  * whichever sample lost the race.
  *
  * **Region 0 is the merged, authoritative verdict.** It is the one every read in
- * Kener goes through, and it is what the local scheduler writes today. Probe
- * regions report alongside it at `>= 1`; nothing renders them directly, and
- * merging them down into region 0 is the probe workstream's job (P10), not this
- * layer's.
+ * Kener goes through. Probe regions report alongside it at `>= 1`; nothing
+ * renders them directly, and merging them down into region 0 is the probe
+ * workstream's job (P10), not this layer's.
+ *
+ * Region 0 is a statement about *meaning*, not about which process did the work.
+ * B1c lets a probe agent be configured at region 0, in which case it produces
+ * the verdict and the local check does not run; every read is unaffected,
+ * because what it asks for is the merged verdict and that is what it gets.
  *
  * The value of the convention is that it froze the meaning of every existing
  * query at the moment it was adopted. Each one gained exactly one predicate,

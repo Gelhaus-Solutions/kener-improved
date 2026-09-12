@@ -32,9 +32,18 @@ export async function up(knex: Knex): Promise<void> {
 
       table.string("name", 255).notNullable();
 
-      // The region this agent reports for. Its samples land at this
-      // `region_id`, which is what keeps them distinct from the merged verdict
-      // at region 0 all the way down to `monitoring_data`'s primary key.
+      // The region this agent reports for, and therefore what its samples mean.
+      // They land at this `region_id` all the way down to `monitoring_data`'s
+      // primary key, so two agents reporting one monitor's minute are two rows
+      // rather than a collision.
+      //
+      // **0 is a legal value and is the interesting one** (B1c). Region 0 is the
+      // merged, authoritative verdict every read goes through, so an agent at 0
+      // is saying "I produce the verdict" and it replaces the local check
+      // entirely - which is what moves checking off the Kener host. An agent at
+      // >= 1 adds a regional sample alongside a verdict that is still produced
+      // locally. Nothing here constrains the value, because the difference is
+      // entirely in what the scheduler does with it: see `probes/dispatch.ts`.
       table.integer("region_id").notNullable();
 
       table.text("token_hash").notNullable();

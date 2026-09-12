@@ -9,6 +9,7 @@ import db from "../db/db.js";
 import monitorResponseQueue from "./monitorResponseQueue";
 import GC from "../../global-constants.js";
 import { resolveConfirmedStatus } from "../services/confirmationThreshold.js";
+import { planProbeExecution, runOnProbe, dispatchSample } from "../probes/dispatch.js";
 
 let monitorExecuteQueue: Queue | null = null;
 let worker: Worker | null = null;
@@ -125,7 +126,33 @@ const addWorker = () => {
     const { monitor, ts } = job.data as JobData;
     const serviceClient = new Service(monitor as MonitorWithType);
 
-    const exeResult = await serviceClient.execute(ts);
+    /**
+     * B1c. Where this check actually runs.
+     *
+     * The plan is empty for every monitor nobody has assigned to a probe and for
+     * every type that can never be remote, which is almost all of them, so the
+     * ordinary path below is unchanged and costs one map lookup.
+     *
+     *   - Agents at region >= 1 are sent the check and not waited for. Their
+     *     results reach `monitorResponseQueue` at their own region, where B1b's
+     *     gate already confines them to writing a row.
+     *   - An agent at region 0 *is* the verdict, so its result replaces what the
+     *     local service call would have returned and flows through everything
+     *     below unchanged: latency escalation, the overlays, the confirmation
+     *     threshold and the merge all still apply.
+     *
+     * `runOnProbe` resolves to null for every unhappy ending - rejected, timed
+     * out, disconnected mid-check - and the local check runs in the same tick.
+     * For a status page, checking the thing yourself is the safest thing to do
+     * when the fleet is unreliable.
+     */
+    const probePlan = await planProbeExecution(monitor);
+    for (const sampleAgent of probePlan.samples) {
+      dispatchSample(sampleAgent, monitor, ts);
+    }
+
+    const remoteResult = probePlan.merged ? await runOnProbe(probePlan.merged, monitor, ts) : null;
+    const exeResult = remoteResult ?? (await serviceClient.execute(ts));
 
     // B5. Before `raw_status` is assigned below, deliberately: escalating the
     // *observed* status is what lets the confirmation threshold damp a latency

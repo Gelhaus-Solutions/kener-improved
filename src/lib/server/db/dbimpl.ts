@@ -33,6 +33,7 @@ import { SubscriptionSystemRepository } from "./repositories/subscriptionSystem.
 import { EmailTemplateConfigRepository } from "./repositories/emailTemplateConfig.js";
 import { OrgsRepository } from "./repositories/orgs.js";
 import { PageDomainsRepository } from "./repositories/pageDomains.js";
+import { ProbesRepository } from "./repositories/probes.js";
 
 // Re-export types from base
 export type { MonitorFilter, TriggerFilter, IncidentFilter, CountResult } from "./repositories/base.js";
@@ -151,6 +152,7 @@ class DbImpl {
   private webhooks!: WebhooksRepository;
   private orgs!: OrgsRepository;
   private pageDomains!: PageDomainsRepository;
+  private probes!: ProbesRepository;
   private sessions!: SessionsRepository;
   private mfa!: MfaRepository;
   private subscriptionSystem!: SubscriptionSystemRepository;
@@ -512,6 +514,25 @@ class DbImpl {
   setPrimaryPageDomain!: PageDomainsRepository["setPrimaryPageDomain"];
   deletePageDomain!: PageDomainsRepository["deletePageDomain"];
   hostnameExists!: PageDomainsRepository["hostnameExists"];
+  // B1b/B1c. Remote probe agents and their monitor assignments.
+  findProbeAgentByTokenHash!: ProbesRepository["findProbeAgentByTokenHash"];
+  getAssignableRegions!: ProbesRepository["getAssignableRegions"];
+  createRegion!: ProbesRepository["createRegion"];
+  regionCodeExists!: ProbesRepository["regionCodeExists"];
+  getProbeAgents!: ProbesRepository["getProbeAgents"];
+  getProbeAgentById!: ProbesRepository["getProbeAgentById"];
+  regionHasAgent!: ProbesRepository["regionHasAgent"];
+  createProbeAgent!: ProbesRepository["createProbeAgent"];
+  updateProbeAgent!: ProbesRepository["updateProbeAgent"];
+  setProbeAgentConnection!: ProbesRepository["setProbeAgentConnection"];
+  resetProbeConnectionStates!: ProbesRepository["resetProbeConnectionStates"];
+  deleteProbeAgent!: ProbesRepository["deleteProbeAgent"];
+  getProbeAssignments!: ProbesRepository["getProbeAssignments"];
+  getProbeTargetsForMonitor!: ProbesRepository["getProbeTargetsForMonitor"];
+  createProbeAssignment!: ProbesRepository["createProbeAssignment"];
+  deleteProbeAssignment!: ProbesRepository["deleteProbeAssignment"];
+  probeAssignmentExists!: ProbesRepository["probeAssignmentExists"];
+  deleteProbeAssignmentsForMonitor!: ProbesRepository["deleteProbeAssignmentsForMonitor"];
   getOrgById!: OrgsRepository["getOrgById"];
   getOrgBySlug!: OrgsRepository["getOrgBySlug"];
   getAllOrgs!: OrgsRepository["getAllOrgs"];
@@ -736,6 +757,7 @@ class DbImpl {
     this.webhooks = new WebhooksRepository(this.knex);
     this.orgs = new OrgsRepository(this.knex);
     this.pageDomains = new PageDomainsRepository(this.knex);
+    this.probes = new ProbesRepository(this.knex);
     this.sessions = new SessionsRepository(this.knex);
     this.mfa = new MfaRepository(this.knex);
     this.subscriptionSystem = new SubscriptionSystemRepository(this.knex);
@@ -1394,6 +1416,24 @@ class DbImpl {
     this.setPrimaryPageDomain = this.pageDomains.setPrimaryPageDomain.bind(this.pageDomains);
     this.deletePageDomain = this.pageDomains.deletePageDomain.bind(this.pageDomains);
     this.hostnameExists = this.pageDomains.hostnameExists.bind(this.pageDomains);
+    this.findProbeAgentByTokenHash = this.probes.findProbeAgentByTokenHash.bind(this.probes);
+    this.getAssignableRegions = this.probes.getAssignableRegions.bind(this.probes);
+    this.createRegion = this.probes.createRegion.bind(this.probes);
+    this.regionCodeExists = this.probes.regionCodeExists.bind(this.probes);
+    this.getProbeAgents = this.probes.getProbeAgents.bind(this.probes);
+    this.getProbeAgentById = this.probes.getProbeAgentById.bind(this.probes);
+    this.regionHasAgent = this.probes.regionHasAgent.bind(this.probes);
+    this.createProbeAgent = this.probes.createProbeAgent.bind(this.probes);
+    this.updateProbeAgent = this.probes.updateProbeAgent.bind(this.probes);
+    this.setProbeAgentConnection = this.probes.setProbeAgentConnection.bind(this.probes);
+    this.resetProbeConnectionStates = this.probes.resetProbeConnectionStates.bind(this.probes);
+    this.deleteProbeAgent = this.probes.deleteProbeAgent.bind(this.probes);
+    this.getProbeAssignments = this.probes.getProbeAssignments.bind(this.probes);
+    this.getProbeTargetsForMonitor = this.probes.getProbeTargetsForMonitor.bind(this.probes);
+    this.createProbeAssignment = this.probes.createProbeAssignment.bind(this.probes);
+    this.deleteProbeAssignment = this.probes.deleteProbeAssignment.bind(this.probes);
+    this.probeAssignmentExists = this.probes.probeAssignmentExists.bind(this.probes);
+    this.deleteProbeAssignmentsForMonitor = this.probes.deleteProbeAssignmentsForMonitor.bind(this.probes);
     this.getOrgById = this.orgs.getOrgById.bind(this.orgs);
     this.getOrgBySlug = this.orgs.getOrgBySlug.bind(this.orgs);
     this.getAllOrgs = this.orgs.getAllOrgs.bind(this.orgs);
