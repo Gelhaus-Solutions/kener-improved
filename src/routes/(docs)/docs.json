@@ -66,6 +66,10 @@
                     {
                       "title": "Redis Setup",
                       "content": "v4/setup/redis-setup"
+                    },
+                    {
+                      "title": "Upgrading and Rolling Back",
+                      "content": "v4/setup/upgrading"
                     }
                   ]
                 },

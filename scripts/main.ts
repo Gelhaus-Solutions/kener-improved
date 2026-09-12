@@ -107,6 +107,36 @@ async function start() {
     }
   }
 
+  /**
+   * Whether this container migrates the database on start (I10).
+   *
+   * **Default on, so nothing changes by upgrading.** The flag exists for the
+   * operator who wants the schema change to be a deliberate step rather than
+   * something they discover mid-deploy: with `KENER_AUTO_MIGRATE=false` the
+   * container runs `npx knex migrate:latest` never, and refuses to start on a
+   * schema that is behind rather than starting and quietly misbehaving.
+   *
+   * Refusing rather than starting is the whole point. An instance running new
+   * code against an old schema is the failure this is meant to prevent, so
+   * turning the automation off must not be a way to reach it by accident.
+   */
+  const autoMigrate = String(process.env.KENER_AUTO_MIGRATE ?? "true").toLowerCase() !== "false";
+
+  async function assertSchemaIsCurrent() {
+    const [completed, pending] = (await db.migrate.list()) as [unknown[], unknown[]];
+    if (pending.length === 0) {
+      console.log(`Schema is current (${completed.length} migrations applied, auto-migrate off).`);
+      return;
+    }
+    console.error(`KENER_AUTO_MIGRATE is off and ${pending.length} migration(s) have not been applied:`);
+    for (const item of pending) {
+      console.error(`  - ${typeof item === "string" ? item : (item as { file?: string }).file}`);
+    }
+    console.error("Run `npx knex migrate:latest` against this database, then start again.");
+    console.error("Refusing to start on a schema this release does not match.");
+    process.exit(1);
+  }
+
   // Migrate and seed *before* accepting traffic.
   //
   // These used to run inside the `listen` callback, so the port was already open
@@ -115,7 +145,14 @@ async function start() {
   // healthcheck answers 200 throughout it, because the database connection is
   // fine even when the tables are not. The orchestrator then routes real traffic
   // into a pod that cannot answer it.
-  await runMigrations();
+  if (autoMigrate) {
+    await runMigrations();
+  } else {
+    await assertSchemaIsCurrent();
+  }
+  // Seeded either way. The flag gates the *schema*, which is the irreversible
+  // half; the seeds provision an org's own rows and are idempotent, and skipping
+  // them would leave an instance that migrated cleanly and has nothing in it.
   await runSeed();
   await db.destroy();
 

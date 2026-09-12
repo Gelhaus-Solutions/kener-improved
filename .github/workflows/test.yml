@@ -95,3 +95,14 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/kener_ci
         run: npm run db:check-orgs
+
+      # I10. The step above migrates an EMPTY database, which proves a fresh
+      # install works and nothing about an upgrade: a migration that rewrites or
+      # drops rows has nothing to rewrite or drop. This one puts configuration in
+      # first, rolls the newest migration back and forward again, and then runs
+      # what the app runs afterwards. Last, because it leaves a fixture behind.
+      - name: Check that an upgrade preserves configuration
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/kener_ci
+          KENER_SECRET_KEY: ci-upgrade-check-key-not-a-real-secret
+        run: npm run db:check-upgrade

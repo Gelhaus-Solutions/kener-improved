@@ -213,6 +213,7 @@ git push
 | `scripts/rollups-backfill.ts`, `scripts/rollups-verify.ts`                         | Fork-only: build the rollup grains, and check them against raw samples (F6b)                                                         |
 | `scripts/retention-plan.ts`                                                        | Fork-only: dry-runs the per-grain retention sweep before it deletes (F6c)                                                            |
 | `scripts/check-tenancy.ts`, `scripts/check-org-provisioning.ts`                    | Fork-only: assert the tenancy registration and each org's provisioning against the live schema (Z)                                   |
+| `scripts/check-upgrade.ts`                                                         | Fork-only: migrates a populated database, rolls it back and forward, and asserts configuration survives (I10)                        |
 | `tsconfig.scripts.json`                                                            | Fork-only: puts `scripts/`, `migrations/` and `seeds/` under `npm run check`                                                         |
 | `probe/`                                                                           | Fork-only: the standalone remote probe daemon, bundled from `src/lib/server/services/` so there is one copy of the check logic (B1c) |
 | `src/lib/server/services/secretTransport.ts`                                       | Fork-only: refuses to put a resolved `$SECRET` on an unencrypted transport, and the per-monitor opt-out (I6)                         |

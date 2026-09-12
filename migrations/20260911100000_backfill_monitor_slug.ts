@@ -39,4 +39,9 @@ export async function up(knex: Knex): Promise<void> {
 // Reversing this would mean setting slugs back to NULL, and there is no way to
 // tell a slug this migration wrote from one an operator has since chosen. A
 // down() that blanks both would destroy real configuration to undo a repair.
-export async function down(): Promise<void> {}
+export async function down(): Promise<void> {
+  // Nothing to undo, and deliberately so. This backfilled a slug for every
+  // monitor that had none; the only reversal would be to null them again, which
+  // would take the public URLs down with them. The column's own migration owns
+  // whether it exists at all.
+}

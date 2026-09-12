@@ -54,6 +54,7 @@
     "rollups:verify": "vite-node scripts/rollups-verify.ts",
     "db:check-tenancy": "vite-node scripts/check-tenancy.ts",
     "db:check-orgs": "vite-node scripts/check-org-provisioning.ts",
+    "db:check-upgrade": "vite-node scripts/check-upgrade.ts",
     "retention:plan": "vite-node scripts/retention-plan.ts",
     "prettify": "prettier --write .",
     "preview": "vite preview",

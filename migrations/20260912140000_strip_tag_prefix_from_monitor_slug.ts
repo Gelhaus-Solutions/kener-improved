@@ -80,4 +80,9 @@ export async function up(knex: Knex): Promise<void> {
 // Reversing this means putting the prefix back, and there is no way to tell a
 // slug this migration stripped from one an operator chose afterwards. A down()
 // that re-prefixed both would rewrite real configuration to undo a repair.
-export async function down(): Promise<void> {}
+export async function down(): Promise<void> {
+  // Nothing to undo. Putting the org's tag prefix back into the slug would
+  // restore the wrong public URL this exists to correct, and the pre-migration
+  // value is derivable from the tag anyway rather than being state that was
+  // lost.
+}
