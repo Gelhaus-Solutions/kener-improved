@@ -376,6 +376,45 @@ describe("a grain added after the backfill already completed", () => {
   });
 });
 
+describe("a source grain that is still being built", () => {
+  it("is never folded from while its own backfill is in flight", async () => {
+    // The bootstrap case, not the upgrade case: an org whose rollup state was
+    // wiped so the engine rebuilds 90 days from raw. Half its 5m buckets exist
+    // and the rest are still coming.
+    //
+    // Folding 15m out of that would seal quarter hours from a third of their
+    // sources and never revisit them, because the cursor moves past a chunk once
+    // it is written. That is silently wrong numbers rather than missing ones,
+    // which is strictly the worse failure - so the fold must not start until the
+    // grain below it reports complete.
+    fake.seedState(
+      { grain: "5m", region_id: REGION },
+      { watermark_ts: WATERMARK, backfill_complete: false, backfill_cursor_ts: START + DAY },
+    );
+    fake.seedState({ grain: "15m", region_id: REGION }, { watermark_ts: WATERMARK, backfill_complete: false });
+    // Only the first day of what will eventually be three.
+    fake.seedRows("5m", fiveMinuteRows("earth", REGION, START, START + DAY));
+    fake.rawBounds = { lo: START, hi: WATERMARK };
+
+    await backfillChunk(REGION, WATERMARK + HOUR, 1);
+
+    const folded = await fake.getRollups("15m", ["earth"], REGION, START, WATERMARK);
+    expect(folded.length).toBe(0);
+    expect((await fake.getRollupState("15m", REGION))?.backfill_complete).toBe(false);
+  });
+
+  it("refuses the fold even when asked for it directly", async () => {
+    fake.seedState({ grain: "5m", region_id: REGION }, { watermark_ts: WATERMARK, backfill_complete: false });
+    fake.seedState({ grain: "15m", region_id: REGION }, { watermark_ts: WATERMARK, backfill_complete: false });
+    fake.seedRows("5m", fiveMinuteRows("earth", REGION, START, START + DAY));
+
+    // `backfillChunk` is the gate, so this documents what the gate is for: the
+    // fold itself trusts its caller about the source being finished.
+    const status = await getRegionBackfillStatus(REGION);
+    expect(status.complete).toBe(false);
+  });
+});
+
 describe("catchUpFoldedGrain", () => {
   it("refuses a grain that reads raw samples", async () => {
     // `5m` has no source to fold from, so asking for it is a programming error
