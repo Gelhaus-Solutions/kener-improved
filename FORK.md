@@ -214,6 +214,7 @@ git push
 | `scripts/retention-plan.ts`                                                        | Fork-only: dry-runs the per-grain retention sweep before it deletes (F6c)                                                          |
 | `scripts/check-tenancy.ts`, `scripts/check-org-provisioning.ts`                    | Fork-only: assert the tenancy registration and each org's provisioning against the live schema (Z)                                 |
 | `tsconfig.scripts.json`                                                            | Fork-only: puts `scripts/`, `migrations/` and `seeds/` under `npm run check`                                                       |
+| `probe/`                                                                           | Fork-only: the standalone remote probe daemon, bundled from `src/lib/server/services/` so there is one copy of the check logic (B1c) |
 | `.github/ISSUE_TEMPLATE/`                                                          | No upstream assignee                                                                                                               |
 | `docs/agents/issue-tracker.md`                                                     | Points at the Plane project, not GitHub Issues                                                                                     |
 | `docs/agents/triage-labels.md`                                                     | States that triage labels are unused                                                                                               |

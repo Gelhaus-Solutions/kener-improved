@@ -47,5 +47,10 @@ docs/superpowers/
 # Wayfinder scratch (local only)
 scratch/
 
+# The probe bundle is a build output, like build/. It is produced by
+# `node probe/build.js` and baked into the image by probe/Dockerfile.
+probe/dist/
+probe/node_modules/
+
 # Claude session-local state (ralph-loop etc.)
 .claude/*.local.md

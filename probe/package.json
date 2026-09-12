@@ -1,0 +1,18 @@
+{
+  "name": "kener-probe",
+  "version": "1.0.0",
+  "description": "Standalone remote probe for Kener. Runs checks from another network and reports them back over a WebSocket.",
+  "type": "module",
+  "private": true,
+  "main": "dist/probe.js",
+  "scripts": {
+    "build": "node build.js",
+    "start": "node dist/probe.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}
