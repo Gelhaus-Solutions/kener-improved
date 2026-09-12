@@ -240,6 +240,56 @@ describe("ValidateIpAddress", () => {
   });
 });
 
+describe("GetRequiredSecrets: one secret name is a prefix of another", () => {
+  // Substitution is sequential, so if `$API` is applied before `$API_KEY` it
+  // matches the first four characters of `$API_KEY` and leaves `<value>_KEY`.
+  // `process.env` iteration order is arbitrary, so which one won could differ
+  // between two machines running the same configuration.
+  const saved = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...saved };
+  });
+
+  it("orders the longer name first whatever order the environment is in", () => {
+    process.env.API = "short";
+    process.env.API_KEY = "long";
+    const secrets = GetRequiredSecrets("$API $API_KEY");
+    expect(secrets.map((s) => s.find)).toEqual(["$API_KEY", "$API"]);
+  });
+
+  it("substitutes the longer secret intact", () => {
+    process.env.API = "short";
+    process.env.API_KEY = "long";
+    const out = ApplySecretsToHeaders(
+      [{ key: "Authorization", value: "Bearer $API_KEY" }],
+      GetRequiredSecrets("$API $API_KEY"),
+    );
+    expect(out).toEqual({ Authorization: "Bearer long" });
+  });
+
+  it("still substitutes the shorter one where it genuinely appears", () => {
+    process.env.API = "short";
+    process.env.API_KEY = "long";
+    const out = ApplySecretsToHeaders(
+      [
+        { key: "X-Api", value: "$API" },
+        { key: "X-Key", value: "$API_KEY" },
+      ],
+      GetRequiredSecrets("$API $API_KEY"),
+    );
+    expect(out).toEqual({ "X-Api": "short", "X-Key": "long" });
+  });
+
+  it("handles three names nesting inside each other", () => {
+    process.env.A = "1";
+    process.env.A_B = "2";
+    process.env.A_B_C = "3";
+    const out = ApplySecretsToHeaders([{ key: "H", value: "$A $A_B $A_B_C" }], GetRequiredSecrets("$A $A_B $A_B_C"));
+    expect(out).toEqual({ H: "1 2 3" });
+  });
+});
+
 describe("ApplySecretsToHeaders", () => {
   const secret = (find: string, replace: string | undefined) => ({ find, replace });
 

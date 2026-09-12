@@ -196,6 +196,19 @@ function GetRequiredSecrets(str: string): Array<{ find: string; replace: string 
       });
     }
   }
+  // Longest name first, so a shorter secret cannot rewrite the inside of a
+  // longer one that starts with it.
+  //
+  // **This is a real defect, not a precaution.** Substitution is sequential and
+  // `process.env` iteration order is arbitrary, so with both `API` and
+  // `API_KEY` set, `$API` matched the first four characters of `$API_KEY` and
+  // turned it into `<the API value>_KEY` - producing a header that looks
+  // plausible, authenticates against nothing, and points the blame at the
+  // remote service. Which of the two won depended on the order the environment
+  // happened to be in, so it could differ between two machines running the same
+  // configuration. The same bug was fixed in `probes/secrets.ts`; this is the
+  // path every API and Prometheus monitor has always taken.
+  envSecrets.sort((a, b) => b.find.length - a.find.length);
   return envSecrets;
 }
 
