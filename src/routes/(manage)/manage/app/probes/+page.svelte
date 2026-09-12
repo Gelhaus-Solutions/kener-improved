@@ -793,7 +793,12 @@
             <div class="flex items-center justify-between gap-3 rounded-md border p-2">
               <div class="min-w-0 truncate text-sm">
                 <span class="font-medium">{assignment.monitor_tag}</span>
-                <span class="text-muted-foreground text-xs">&middot; {assignment.mode.toLowerCase()}</span>
+                <!-- `assignment.mode` deliberately not shown. It is B1c's
+                     REMOTE_PREFERRED column, which B1d stopped reading: how a
+                     source takes part is now the resolved VOTE / DISPLAY_ONLY /
+                     OFF from the cascade, set behind "Weighting". Printing the
+                     dead column beside the live one invited an operator to
+                     change the thing that no longer decides anything. -->
               </div>
               <div class="flex shrink-0 gap-2">
                 <Button
