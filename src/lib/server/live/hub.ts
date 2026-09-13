@@ -33,6 +33,25 @@ export type LiveEvent =
       status: string;
       component_impact: string;
       status_summary: string;
+    }
+  | {
+      /**
+       * B13. One probe region's own view of a monitor, for the region map.
+       *
+       * Deliberately separate from `monitor_status`, which carries the MERGED
+       * verdict and drives the bars. A region's view is not the verdict and must
+       * never be mistaken for it: a single flapping probe would otherwise appear
+       * to move the headline. The map is the only consumer.
+       *
+       * `region_id` is always >= 1 here. Region 0 is the merged verdict and is
+       * published as `monitor_status`; it is not a place and is never plotted.
+       */
+      kind: "region_status";
+      monitor_tag: string;
+      region_id: number;
+      status: string;
+      latency: number | null;
+      timestamp: number;
     };
 
 /** An event as it reaches a listener, with the id used for `Last-Event-ID`. */

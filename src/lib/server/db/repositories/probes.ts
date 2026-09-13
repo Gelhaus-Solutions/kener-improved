@@ -121,6 +121,9 @@ export interface RegionDefaultsRecord {
   default_weight: number | null;
   default_trust_rank: number | null;
   default_mode: string | null;
+  /** B13. Null means the region has no place on the map and is not plotted. */
+  latitude: number | null;
+  longitude: number | null;
 }
 
 /** One monitor's policy override. Every setting nullable: null means inherit. */
@@ -492,7 +495,21 @@ export class ProbesRepository extends BaseRepository {
         .where("org_id", orgId)
         .orWhereNull("org_id")
         .orderBy("id", "asc")
-        .select("id", "org_id", "code", "name", "is_active", "default_weight", "default_trust_rank", "default_mode"),
+        // B13 adds latitude and longitude. This projection is an allowlist: a
+        // column missing from it arrives as `undefined` at the screen, and the
+        // map then silently plots nothing while every query reports success.
+        .select(
+          "id",
+          "org_id",
+          "code",
+          "name",
+          "is_active",
+          "default_weight",
+          "default_trust_rank",
+          "default_mode",
+          "latitude",
+          "longitude",
+        ),
     );
   }
 
@@ -526,7 +543,16 @@ export class ProbesRepository extends BaseRepository {
 
   async updateRegionDefaults(
     regionId: number,
-    patch: { default_weight?: number | null; default_trust_rank?: number | null; default_mode?: string | null },
+    patch: {
+      default_weight?: number | null;
+      default_trust_rank?: number | null;
+      default_mode?: string | null;
+      // B13. Listed explicitly because this signature is an allowlist: a field
+      // missing from it is accepted by the caller, dropped by the type, and the
+      // write still reports success.
+      latitude?: number | null;
+      longitude?: number | null;
+    },
   ): Promise<number> {
     // Unscoped for the same reason as the read: the rows an operator most wants
     // to configure are `local` and `merged`, and both carry a null org.

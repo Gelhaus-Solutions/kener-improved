@@ -52,6 +52,33 @@ export async function publishMonitorStatus(
   await publish(orgId, { kind: "monitor_status", ...data });
 }
 
+/**
+ * B13. One probe region reported for a monitor.
+ *
+ * **Published on every region sample, not only on a transition**, which is the
+ * opposite of `publishMonitorStatus` and deliberate. The map shows a region's
+ * CURRENT state including freshness, and a region that keeps reporting UP is
+ * exactly the case a stale-data timer would otherwise turn grey. Skipping the
+ * unchanged samples would make a healthy region fade to "no recent data" on a
+ * viewer's open page while it was reporting perfectly well.
+ *
+ * The volume is bounded by probe regions rather than by monitors: a region is a
+ * handful per instance, not hundreds.
+ *
+ * Never called for region 0. That is the merged verdict, it is not a place, and
+ * it reaches the page as `monitor_status` like it always did.
+ */
+export async function publishRegionStatus(
+  orgId: number | null,
+  data: { monitor_tag: string; region_id: number; status: string; latency: number | null; timestamp: number },
+): Promise<void> {
+  if (orgId === null) return;
+  // Guarded here as well as at the call site: a region 0 event on this channel
+  // would put the merged verdict on the map as though it were a location.
+  if (data.region_id <= 0) return;
+  await publish(orgId, { kind: "region_status", ...data });
+}
+
 /** A status page's overall status changed. */
 export async function publishPageStatus(
   orgId: number | null,

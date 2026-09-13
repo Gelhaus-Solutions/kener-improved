@@ -198,6 +198,64 @@ export class MonitoringRepository extends BaseRepository {
       .first();
   }
 
+  /**
+   * B13. The newest sample from every region that has reported for a monitor.
+   *
+   * **Excludes region 0 and every negative region, and that is the map's central
+   * correctness rule rather than a filter.** `MERGED_REGION_ID` is the merged
+   * verdict and `LOCAL_REGION_ID` is the server checking the thing itself:
+   * neither is a PLACE, so neither may ever be drawn on a map. Region 0 belongs
+   * in the headline beside the map; plotting it would invent a location for an
+   * answer that has none.
+   *
+   * `since` bounds how far back a sample may be and still count as current. A
+   * region whose agents went offline an hour ago must not keep showing its last
+   * known colour for ever, because a stale green is the most dangerous thing a
+   * status map can display. The caller turns "no row here" into NO_DATA, which
+   * is a third state and explicitly not DOWN.
+   *
+   * One descent of the primary key per reporting region, discovered from the
+   * data rather than from the catalogue: a region that exists but has never
+   * reported for THIS monitor should not appear as though it were watching it.
+   */
+  async getLatestPerRegion(monitor_tag: string, since: number): Promise<MonitoringData[]> {
+    const regions = (await this.table("monitoring_data")
+      .distinct("region_id")
+      .where("monitor_tag", monitor_tag)
+      .where("region_id", ">", MERGED_REGION_ID)
+      .where("timestamp", ">=", since)) as Array<{ region_id: number }>;
+
+    const rows = await Promise.all(
+      regions.map((r) => this.getLatestMonitoringDataAtRegion(monitor_tag, r.region_id)),
+    );
+
+    return rows.filter((row): row is MonitoringData => row !== undefined && row.timestamp >= since);
+  }
+
+  /**
+   * B13, the admin surface. Which regions have reported for ANY monitor lately.
+   *
+   * Fleet health rather than one service's view, so it answers "is this region
+   * producing data at all". Same exclusions and the same staleness bound as
+   * `getLatestPerRegion`, for the same reasons.
+   */
+  async getReportingRegions(since: number): Promise<Array<{ region_id: number; samples: number; latest: number }>> {
+    const rows = (await this.table("monitoring_data")
+      .select("region_id")
+      .count("* as samples")
+      .max({ latest: "timestamp" })
+      .where("region_id", ">", MERGED_REGION_ID)
+      .where("timestamp", ">=", since)
+      .groupBy("region_id")) as Array<{ region_id: number; samples: string | number; latest: string | number }>;
+
+    return rows.map((r) => ({
+      region_id: Number(r.region_id),
+      // count() comes back as a string on some drivers and a number on others.
+      samples: Number(r.samples),
+      latest: Number(r.latest),
+    }));
+  }
+
   async getLatestMonitoringDataAllActive(monitor_tags: string[]): Promise<MonitoringData[]> {
     if (!monitor_tags || monitor_tags.length === 0) {
       return [];

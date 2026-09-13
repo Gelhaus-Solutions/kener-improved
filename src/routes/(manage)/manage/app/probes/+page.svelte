@@ -16,6 +16,8 @@
   import { resolve } from "$app/paths";
   import clientResolver from "$lib/client/resolver.js";
   import { onMount } from "svelte";
+  import RegionMap from "$lib/components/regions/RegionMap.svelte";
+  import type { RegionMapEntry } from "$lib/regions/mapModel";
 
   // B1c. Remote probe agents: small daemons elsewhere in the world that run a
   // check Kener asks them to run and report the result back.
@@ -85,6 +87,8 @@
   let mergedRegionId = $state(0);
   let eligibleTypes = $state<string[]>([]);
   let regions = $state<Region[]>([]);
+  // B13. The fleet map's model, built server-side by the shared builder.
+  let regionMap = $state<RegionMapEntry[]>([]);
   let agents = $state<Agent[]>([]);
   let assignments = $state<Assignment[]>([]);
   let regionRules = $state<RegionRule[]>([]);
@@ -101,6 +105,11 @@
     default_trust_rank: number | null;
     default_mode: string | null;
     configurable: boolean;
+    /** B13. Null means the region has no place on the map and is not plotted. */
+    latitude: number | null;
+    longitude: number | null;
+    /** What the built-in lookup knows for this code, or null. */
+    known_coordinates: { latitude: number; longitude: number } | null;
   }
   interface MergeDefaults {
     policy: string;
@@ -353,6 +362,7 @@
       sourceModes = result.source_modes ?? [];
       localRegionId = result.local_region_id ?? -1;
       mergeRegions = result.merge_regions ?? [];
+      regionMap = result.region_map ?? [];
       mergeSaved = result.merge_policy ?? null;
       // A separate copy, so cancelling an edit means reloading nothing.
       mergeForm = result.merge_policy ? { ...result.merge_policy } : null;
@@ -701,6 +711,31 @@
             <code class="font-mono text-xs">KENER_PROBE_WS_PORT</code> is set on the process that runs the schedulers. Until
             then every monitor below is checked locally.
           </span>
+        </Card.Content>
+      </Card.Root>
+    {/if}
+
+    <!--
+      B13 stage 1, the fleet view. Answers "is this region producing data at
+      all", which is the question this screen exists for, rather than any one
+      monitor's status. Only rendered when there is a region to plot: an
+      install with no probe agents has nothing but the merged verdict, which is
+      not a place and never appears on a map.
+    -->
+    {#if regionMap.length > 0}
+      <Card.Root>
+        <Card.Header>
+          <Card.Title>Where your probes are</Card.Title>
+          <Card.Description>
+            Regions reporting in the last five minutes. A region with no recent samples is shown as no data rather than
+            down: an agent that is switched off is not an outage.
+          </Card.Description>
+        </Card.Header>
+        <Card.Content>
+          <RegionMap
+            entries={regionMap}
+            caption="The merged verdict is not shown: it is the computed answer rather than a place."
+          />
         </Card.Content>
       </Card.Root>
     {/if}

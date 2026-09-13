@@ -6,6 +6,8 @@ import { configuredPort } from "$lib/server/probes/wsServer.js";
 import { GetSiteDataByKey } from "$lib/server/controllers/siteDataController.js";
 import { parseMergeDefaults, MERGE_POLICIES, SOURCE_MODES, LOCAL_REGION_ID } from "$lib/server/probes/merge.js";
 import { REGION_RULES } from "$lib/server/probes/assignment.js";
+import { coordinatesForCode } from "$lib/regions/coordinates.js";
+import { regionMapForFleet } from "$lib/server/regions/mapData.js";
 import type { ActionDefinition } from "../../types.js";
 
 /**
@@ -36,6 +38,11 @@ export default {
         db.getProbeRegionRules(),
         db.getMonitorRegionOverrides(),
       ]);
+
+    // After the parallel block: it reads regions and agents, which are already
+    // being fetched above, and a second concurrent read of the same rows buys
+    // nothing but another pool connection.
+    const regionMap = await regionMapForFleet();
 
     // The web process only holds probe connections when it is also the scheduler,
     // which is production's single process but never development's split one.
@@ -109,11 +116,23 @@ export default {
         default_weight: region.default_weight,
         default_trust_rank: region.default_trust_rank,
         default_mode: region.default_mode,
+        // B13. Named explicitly: this projection is an allowlist, so a column
+        // missing from it reaches the screen as `undefined` and the map plots
+        // nothing while every query reports success.
+        latitude: region.latitude,
+        longitude: region.longitude,
+        // The built-in lookup's answer for this code, so the screen can offer to
+        // fill the coordinates in rather than making an operator find them.
+        known_coordinates: coordinatesForCode(region.code),
         // Region 0 is the computed answer, so nothing observes there and it has
         // nothing to configure. Listed anyway, because an operator looking for
         // it should find it explained rather than absent.
         configurable: region.id !== MERGED_REGION_ID,
       })),
+
+      // B13. The fleet map's model, built by the shared builder both surfaces
+      // use so the public page and this screen cannot drift apart.
+      region_map: regionMap,
 
       monitors: monitors
         // Only the types a probe could ever run. Offering the rest would invite

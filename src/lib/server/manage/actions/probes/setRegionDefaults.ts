@@ -1,5 +1,6 @@
 import db from "$lib/server/db/db.js";
 import { MERGED_REGION_ID } from "$lib/server/db/regions.js";
+import { coordinatesForCode } from "$lib/regions/coordinates.js";
 import { SOURCE_MODES } from "$lib/server/probes/merge.js";
 import { ActionError } from "../../types.js";
 import type { ActionDefinition } from "../../types.js";
@@ -10,6 +11,17 @@ interface Payload {
   default_weight?: number | null;
   default_trust_rank?: number | null;
   default_mode?: string | null;
+  /**
+   * B13. Where the region is, for the map. Null clears it, and a region with no
+   * coordinates stays fully usable and simply is not plotted.
+   */
+  latitude?: number | null;
+  longitude?: number | null;
+  /**
+   * B13. Fill latitude and longitude from the built-in lookup for this region's
+   * code, when it knows the code. Ignored if explicit coordinates are also sent.
+   */
+  use_known_coordinates?: boolean;
 }
 
 /**
@@ -61,6 +73,36 @@ export default {
     }
 
     const patch: Record<string, number | string | null> = {};
+
+    // B13. Coordinates. Bounded rather than trusted: a latitude of 200 would put
+    // a pin outside the canvas, and an out-of-range number is far more likely to
+    // be a transposed pair than a real intent.
+    const coordinate = (raw: unknown, field: string, limit: number): number | null | undefined => {
+      if (raw === undefined) return undefined;
+      if (raw === null || raw === "") return null;
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < -limit || n > limit) {
+        throw new ActionError(400, `${field} must be between -${limit} and ${limit}, or empty`);
+      }
+      return n;
+    };
+
+    const latitude = coordinate(data.latitude, "latitude", 90);
+    const longitude = coordinate(data.longitude, "longitude", 180);
+    if (latitude !== undefined) patch.latitude = latitude;
+    if (longitude !== undefined) patch.longitude = longitude;
+
+    // The convenience path, and it never overrides an explicit value: an
+    // operator who typed coordinates meant them, and a lookup silently winning
+    // would be the setting that does not stick.
+    if (data.use_known_coordinates === true && latitude === undefined && longitude === undefined) {
+      const known = coordinatesForCode(region.code);
+      if (!known) {
+        throw new ActionError(400, `No built-in coordinates for the region code "${region.code}"`);
+      }
+      patch.latitude = known.latitude;
+      patch.longitude = known.longitude;
+    }
     const weight = optionalNonNegative(data.default_weight, "default_weight");
     if (weight !== undefined) patch.default_weight = weight;
     const trustRank = optionalNonNegative(data.default_trust_rank, "default_trust_rank");

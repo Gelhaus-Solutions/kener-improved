@@ -13,6 +13,9 @@
   import IncidentItem from "$lib/components/IncidentItem.svelte";
   import MaintenanceItem from "$lib/components/MaintenanceItem.svelte";
   import { page } from "$app/state";
+  import RegionMap from "$lib/components/regions/RegionMap.svelte";
+  import { liveStatus } from "$lib/client/liveStatus.svelte.js";
+  import { statusFromSample, type RegionMapEntry } from "$lib/regions/mapModel";
   let { data } = $props();
 
   // State
@@ -27,6 +30,44 @@
   function trackExternalLinkClick() {
     trackEvent("monitor_external_link_clicked", { monitorTag: data.monitorTag });
   }
+
+  /**
+   * B13 stage 1. The region map, server-rendered and then kept live.
+   *
+   * The loader's model is the first paint, so the map is correct with JavaScript
+   * off and correct before the stream connects. Each live `region_status` event
+   * then overrides its own region, and `statusFromSample` is re-applied rather
+   * than the event's status being trusted directly - that is what keeps
+   * freshness meaning the same thing on both paths, so a region that stops
+   * reporting goes grey by the same rule whether the page was just loaded or has
+   * been open for an hour.
+   */
+  // Wall clock, and one of the few things `$derived` genuinely cannot express:
+  // nothing in the component's state changes when a minute passes, and staleness
+  // depends on the passage of time rather than on any input. The autofixer flags
+  // "stateful variable assigned inside an $effect" here; this is the case its own
+  // guidance says to ignore.
+  let now = $state(Math.floor(Date.now() / 1000));
+  $effect(() => {
+    // Re-evaluated every 30s so a region that goes quiet fades to "no recent
+    // data" on an open page, rather than holding its last colour for ever.
+    const timer = setInterval(() => (now = Math.floor(Date.now() / 1000)), 30_000);
+    return () => clearInterval(timer);
+  });
+
+  const regionEntries = $derived(
+    (data.regionMap ?? []).map((entry: RegionMapEntry) => {
+      const live = liveStatus.regionStatusByKey[`${data.monitorTag}:${entry.id}`];
+      const sample = live ?? (entry.observedAt === null ? null : { status: entry.status, timestamp: entry.observedAt });
+      const status = statusFromSample(sample, now);
+      return {
+        ...entry,
+        status,
+        observedAt: status === "NO_DATA" ? null : (sample?.timestamp ?? null),
+        latencyMs: status === "NO_DATA" ? null : (live ? live.latency : entry.latencyMs)
+      } satisfies RegionMapEntry;
+    })
+  );
 </script>
 
 <svelte:head>
@@ -178,6 +219,21 @@
        figure the bar is the detail of. Renders nothing when no target on this
        component has been published. -->
   <MonitorSloPanel slos={data.publishedSlos || []} />
+
+  <!--
+    B13 stage 1. Only when probe regions are actually watching this monitor. An
+    install with no probe agents has only the merged verdict, which is not a
+    place, so there is nothing to draw and an empty map would be noise.
+  -->
+  {#if regionEntries.length > 0}
+    <div class="px-4 py-2">
+      <RegionMap
+        entries={regionEntries}
+        headline="Checked from {regionEntries.length} {regionEntries.length === 1 ? 'region' : 'regions'}"
+        caption="Each pin is one region's own view. The status at the top of this page is the merged verdict across all of them."
+      />
+    </div>
+  {/if}
 
   <!-- Calendar View (self-contained component with its own API call) -->
   <MonitorOverview

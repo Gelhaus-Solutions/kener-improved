@@ -8,7 +8,7 @@ import type { MonitoringData } from "../types/db.js";
 import db from "../db/db.js";
 import { emit } from "../events/emit.js";
 import { currentOrgId } from "../events/eventContext.js";
-import { publishMonitorStatus } from "../live/publish.js";
+import { publishMonitorStatus, publishRegionStatus } from "../live/publish.js";
 import { MERGED_REGION_ID } from "../db/regions.js";
 let monitorResponseQueue: Queue | null = null;
 let worker: Worker | null = null;
@@ -138,6 +138,26 @@ const addWorker = () => {
         monitor_tag: monitorTag,
         status,
         previous_status: previous.status,
+        timestamp: ts,
+      });
+    }
+
+    // B13. A probe region's own view, for the region map.
+    //
+    // Every sample rather than only transitions, which is the opposite of the
+    // rule above and deliberate: the map shows freshness as well as status, so a
+    // region that keeps reporting UP is exactly the case that must keep sending.
+    // Without this a healthy region fades to "no recent data" on an open page
+    // while it is reporting perfectly well.
+    //
+    // Never for region 0: that is the merged verdict and reaches the page as
+    // `monitor_status`. It is not a place and is never plotted.
+    if (!isMergedVerdict && regionId > MERGED_REGION_ID) {
+      await publishRegionStatus(currentOrgId(), {
+        monitor_tag: monitorTag,
+        region_id: regionId,
+        status,
+        latency: typeof latency === "number" ? latency : null,
         timestamp: ts,
       });
     }

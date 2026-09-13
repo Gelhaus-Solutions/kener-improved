@@ -16,6 +16,7 @@ import { getMonitorDependencyView } from "$lib/server/incidents/dependencyView";
 import { GetMonitorsParsed } from "$lib/server/controllers/monitorsController";
 import { ResolvePublicMonitorTag } from "$lib/server/controllers/publicMonitorResolver";
 import { publishedSlosFor } from "$lib/server/services/sloPublic";
+import { regionMapForMonitor } from "$lib/server/regions/mapData";
 import type { GroupMonitorTypeData } from "$lib/server/types/monitor";
 
 export const load: PageServerLoad = async ({ params, parent }) => {
@@ -48,6 +49,18 @@ export const load: PageServerLoad = async ({ params, parent }) => {
 
   const eventSettings = parentData.eventDisplaySettings;
   const showInlineEvents = eventSettings.showInlineEvents === true;
+  // B13. Never allowed to take the page down: a monitor page that fails to
+  // render because a decorative map could not be built would be a far worse
+  // outcome than a missing map, and this is the public status page.
+  // `resolvedTag`, not the URL segment. The public URL carries the per-org SLUG
+  // and `monitoring_data` is keyed on the physical TAG, so passing the segment
+  // would find no samples on any org with a tag prefix and the map would be
+  // silently empty there while working on the default org.
+  const regionMap = await regionMapForMonitor(resolvedTag).catch((error) => {
+    console.warn("region map unavailable:", error instanceof Error ? error.message : String(error));
+    return [];
+  });
+
   const [ongoingIncidents, ongoingMaintenances, upcomingMaintenances] = await Promise.all([
     showInlineEvents && eventSettings.incidents.enabled && eventSettings.incidents.ongoing.show
       ? GetOngoingIncidentsForMonitorList(monitorTags)
@@ -159,6 +172,13 @@ export const load: PageServerLoad = async ({ params, parent }) => {
       monitorGroupMembersByTag,
       publishedSlos,
       maxDays,
+      // B13 stage 1. Which probe regions are seeing this monitor, and how.
+      //
+      // Built server-side so the map is in the first paint rather than after a
+      // fetch, and by the same builder the admin screen uses so the two cannot
+      // drift. Empty on an install with no probe agents, where the only region
+      // is the merged verdict, which is not a place.
+      regionMap,
       monitorSharingOptions: {
         showShareBadgeMonitor: monitor.monitor_settings_json?.sharing_options?.showShareBadgeMonitor ?? true,
         showShareEmbedMonitor: monitor.monitor_settings_json?.sharing_options?.showShareEmbedMonitor ?? true,

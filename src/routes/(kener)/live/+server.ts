@@ -113,10 +113,29 @@ export const GET: RequestHandler = async ({ url, request }) => {
         }
       };
 
-      /** Only what this page shows. A viewer must not learn about other pages. */
+      /**
+       * Only what this page shows. A viewer must not learn about other pages.
+       *
+       * **Switched exhaustively on `kind` rather than falling through to a
+       * default**, so adding a new event kind is a compile error here rather
+       * than a silent leak. B13's `region_status` was caught by exactly that: it
+       * carries a `monitor_tag` and the old `return ... page_id === pageId`
+       * fallback would have refused every one of them, which fails closed but
+       * would equally have leaked had the fallback been permissive.
+       */
       const relevant = (message: LiveMessage): boolean => {
-        if (message.event.kind === "monitor_status") return allowedTags.has(message.event.monitor_tag);
-        return pageId !== null && message.event.page_id === pageId;
+        const event = message.event;
+        switch (event.kind) {
+          case "monitor_status":
+            return allowedTags.has(event.monitor_tag);
+          case "region_status":
+            // B13. Gated on the SAME allowlist as a monitor's own status: a
+            // region event names a monitor, so a viewer who may not see the
+            // monitor must not see where it is being checked from either.
+            return allowedTags.has(event.monitor_tag);
+          case "page_status":
+            return pageId !== null && event.page_id === pageId;
+        }
       };
 
       send(`retry: ${RETRY_MS}\n\n`);

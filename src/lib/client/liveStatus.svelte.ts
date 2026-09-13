@@ -34,6 +34,14 @@ class LiveStatus {
   monitorStatusByTag = $state<Record<string, StatusType>>({});
   /** The page's overall status, once it has changed at least once. */
   pageStatus = $state<LivePageStatus | null>(null);
+  /**
+   * B13. The latest per-region sample, keyed `<monitor_tag>:<region_id>`.
+   *
+   * A composite string key rather than a nested record because `$state`
+   * reactivity is per assignment: one flat object replaced wholesale makes every
+   * `$derived` over it recompute, while mutating an inner object would not.
+   */
+  regionStatusByKey = $state<Record<string, { status: string; latency: number | null; timestamp: number }>>({});
   /** Whether a stream is currently open. Not rendered; useful when debugging. */
   connected = $state(false);
 
@@ -95,6 +103,25 @@ class LiveStatus {
       };
     });
 
+    source.addEventListener("region_status", (event) => {
+      const data = this.#parse(event);
+      if (!data || typeof data.monitor_tag !== "string" || typeof data.status !== "string") return;
+      if (typeof data.region_id !== "number" || typeof data.timestamp !== "number") return;
+      // Region 0 is the merged verdict and arrives as `monitor_status`. Guarded
+      // here as well as on the server so a stray event can never put the verdict
+      // on the map as though it were a place.
+      if (data.region_id <= 0) return;
+
+      this.regionStatusByKey = {
+        ...this.regionStatusByKey,
+        [`${data.monitor_tag}:${data.region_id}`]: {
+          status: data.status,
+          latency: typeof data.latency === "number" ? data.latency : null,
+          timestamp: data.timestamp,
+        },
+      };
+    });
+
     source.addEventListener("error", () => {
       this.connected = false;
       this.#failures++;
@@ -115,6 +142,7 @@ class LiveStatus {
   reset(): void {
     this.monitorStatusByTag = {};
     this.pageStatus = null;
+    this.regionStatusByKey = {};
   }
 
   #parse(event: Event): Record<string, unknown> | null {
