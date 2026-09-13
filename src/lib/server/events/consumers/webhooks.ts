@@ -3,6 +3,7 @@ import { emit } from "../emit.js";
 import { serializeAggregate } from "../serializers/index.js";
 import { sendWebhook, AUTO_DISABLE_AFTER_FAILURES, type WebhookEnvelope } from "../../notification/webhook_delivery.js";
 import { isAdminEventType } from "$lib/event-taxonomy.js";
+import { endpointAcceptsEvent, resolveEventScopeSubject, type EndpointScope } from "../scope.js";
 import type { EventConsumer, OutboxEvent, DeliveryTarget, DeliveryResult } from "../types.js";
 
 // Outbound webhooks as a consumer of the event bus.
@@ -18,6 +19,9 @@ import type { EventConsumer, OutboxEvent, DeliveryTarget, DeliveryResult } from 
 // using `seq`, which the envelope carries for exactly that reason.
 
 const CONSUMER_NAME = "webhook";
+
+/** An endpoint with no scope rows. Shared so the fallback allocates nothing. */
+const EMPTY_SCOPE: EndpointScope = { monitorTags: [], pageSlugs: [] };
 
 function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
@@ -81,7 +85,33 @@ export const webhookConsumer: EventConsumer = {
     if (isAdminEventType(event.type)) return [];
 
     const endpoints = await db.getActiveWebhookEndpointsForEvent(event.org_id, event.type);
-    return endpoints.map((e) => ({ target_type: "endpoint", target_id: String(e.id) }));
+    if (endpoints.length === 0) return [];
+
+    // E11 part 3. An endpoint may be scoped to a set of monitors or pages, so a
+    // per-team channel hears about that team's services rather than the whole
+    // instance.
+    //
+    // Filtered HERE, in `targets`, rather than in `deliver`. A scoped-out event
+    // must never become a delivery row at all: doing it in `deliver` would write
+    // a row, mark it skipped, and put a permanent stream of deliberate non-events
+    // through the delivery log that an operator has to learn to ignore.
+    //
+    // Both reads are batched. `targets` runs once per event, so resolving the
+    // subject once and every scope in one query keeps the fan-out at two reads
+    // regardless of how many endpoints match.
+    const scopes = await db.getWebhookScopesForEndpoints(endpoints.map((e) => e.id));
+    const anyScoped = [...scopes.values()].some((s) => s.monitorTags.length > 0 || s.pageSlugs.length > 0);
+
+    // Nothing is scoped, which is the overwhelmingly common case: skip resolving
+    // the subject entirely rather than paying a read per event for a filter
+    // nobody configured.
+    if (!anyScoped) return endpoints.map((e) => ({ target_type: "endpoint", target_id: String(e.id) }));
+
+    const subject = await resolveEventScopeSubject(event);
+
+    return endpoints
+      .filter((e) => endpointAcceptsEvent(scopes.get(e.id) ?? EMPTY_SCOPE, subject))
+      .map((e) => ({ target_type: "endpoint", target_id: String(e.id) }));
   },
 
   async deliver(event: OutboxEvent, target: DeliveryTarget): Promise<DeliveryResult> {

@@ -114,16 +114,48 @@ export interface WebhookEndpointView extends Omit<
   "secret_encrypted" | "previous_secret_encrypted"
 > {
   event_types: string[];
+  /** E11 part 3. Empty means unscoped, which is every endpoint until one is set. */
+  scope_monitor_tags: string[];
+  scope_page_paths: string[];
 }
 
-function toView(endpoint: WebhookEndpointRecord, eventTypes: string[]): WebhookEndpointView {
+function toView(
+  endpoint: WebhookEndpointRecord,
+  eventTypes: string[],
+  scopes: { monitorTags: string[]; pageSlugs: string[] },
+): WebhookEndpointView {
   const { secret_encrypted: _s, previous_secret_encrypted: _p, ...rest } = endpoint;
-  return { ...rest, event_types: eventTypes };
+  return {
+    ...rest,
+    event_types: eventTypes,
+    scope_monitor_tags: scopes.monitorTags,
+    scope_page_paths: scopes.pageSlugs,
+  };
+}
+
+/**
+ * E11 part 3. A scope list from the screen.
+ *
+ * Absent and empty are the same answer here - "not scoped on this kind" - which
+ * is the one place the two may be conflated, because the screen sends the whole
+ * set it wants and clearing it IS removing the scope.
+ */
+function validateScopeList(input: unknown, label: string): string[] {
+  if (input === undefined || input === null) return [];
+  if (!Array.isArray(input)) throw new Error(`${label} must be a list`);
+  const values = input.map((v) => String(v).trim()).filter((v) => v.length > 0);
+  return [...new Set(values)];
 }
 
 export const GetWebhookEndpoints = async (): Promise<WebhookEndpointView[]> => {
   const endpoints = await db.getWebhookEndpoints(currentOrgId());
-  return await Promise.all(endpoints.map(async (e) => toView(e, await db.getWebhookEndpointEvents(e.id))));
+  // One scope query for the whole list rather than one per endpoint.
+  const scopes = await db.getWebhookScopesForEndpoints(endpoints.map((e) => e.id));
+  return await Promise.all(
+    endpoints.map(async (e) =>
+      toView(e, await db.getWebhookEndpointEvents(e.id), scopes.get(e.id) ?? { monitorTags: [], pageSlugs: [] }),
+    ),
+  );
 };
 
 export const GetWebhookEndpoint = async (id: number): Promise<WebhookEndpointView> => {
@@ -131,7 +163,7 @@ export const GetWebhookEndpoint = async (id: number): Promise<WebhookEndpointVie
   if (!endpoint || endpoint.org_id !== currentOrgId()) {
     throw new Error(`Webhook endpoint ${id} does not exist`);
   }
-  return toView(endpoint, await db.getWebhookEndpointEvents(id));
+  return toView(endpoint, await db.getWebhookEndpointEvents(id), await db.getWebhookEndpointScopes(id));
 };
 
 export interface CreateWebhookInput {
@@ -144,6 +176,9 @@ export interface CreateWebhookInput {
   /** E11. GENERIC when absent, so an unconfigured endpoint behaves as before. */
   format?: unknown;
   message_template?: unknown;
+  /** E11 part 3. Absent means unscoped. */
+  scope_monitor_tags?: unknown;
+  scope_page_paths?: unknown;
 }
 
 /**
@@ -165,6 +200,8 @@ export const CreateWebhookEndpoint = async (
   if (!check.allowed) throw new Error(check.reason ?? "URL is not allowed");
 
   const eventTypes = validateEventTypes(data.event_types);
+  const scopeMonitors = validateScopeList(data.scope_monitor_tags, "Monitor scope");
+  const scopePages = validateScopeList(data.scope_page_paths, "Page scope");
   const headers = normaliseHeaders(data.custom_headers);
   const secret = newSecret();
   const now = nowSeconds();
@@ -190,6 +227,7 @@ export const CreateWebhookEndpoint = async (
       updated_at: now,
     });
     await db.setWebhookEndpointEvents(created, eventTypes);
+    await db.setWebhookEndpointScopes(created, scopeMonitors, scopePages);
     await emit({
       org_id: orgId,
       type: "webhook_endpoint.created",
@@ -213,6 +251,9 @@ export interface UpdateWebhookInput {
   /** E11. */
   format?: unknown;
   message_template?: unknown;
+  /** E11 part 3. Undefined leaves the scope alone; an empty list clears it. */
+  scope_monitor_tags?: unknown;
+  scope_page_paths?: unknown;
 }
 
 export const UpdateWebhookEndpoint = async (data: UpdateWebhookInput): Promise<WebhookEndpointView> => {
@@ -246,10 +287,17 @@ export const UpdateWebhookEndpoint = async (data: UpdateWebhookInput): Promise<W
   }
 
   const eventTypes = data.event_types !== undefined ? validateEventTypes(data.event_types) : null;
+  const scopesTouched = data.scope_monitor_tags !== undefined || data.scope_page_paths !== undefined;
+  const scopeMonitors = validateScopeList(data.scope_monitor_tags, "Monitor scope");
+  const scopePages = validateScopeList(data.scope_page_paths, "Page scope");
 
   await db.withTransaction(async () => {
     await db.updateWebhookEndpoint(data.id, patch);
     if (eventTypes) await db.setWebhookEndpointEvents(data.id, eventTypes);
+    // Undefined and empty differ here, unlike inside `validateScopeList`: the
+    // screen omitting the field must leave an existing scope alone, while
+    // sending an empty list is how an operator removes one.
+    if (scopesTouched) await db.setWebhookEndpointScopes(data.id, scopeMonitors, scopePages);
     await emit({
       org_id: existing.org_id,
       type: "webhook_endpoint.updated",

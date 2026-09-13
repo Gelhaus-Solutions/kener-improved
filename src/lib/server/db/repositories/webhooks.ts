@@ -64,6 +64,78 @@ export class WebhooksRepository extends BaseRepository {
   }
 
   /**
+   * E11 part 3. Replaces an endpoint's scope wholesale.
+   *
+   * Same shape as `setEndpointEvents` and for the same reason: the screen sends
+   * the whole set it wants, so a delete-then-insert cannot leave a row the
+   * operator removed. Both kinds are replaced together, or clearing every
+   * monitor while keeping a page would need two calls that must not interleave.
+   */
+  async setEndpointScopes(endpointId: number, monitorTags: string[], pageSlugs: string[]): Promise<void> {
+    await this.table("webhook_endpoint_scopes").where("endpoint_id", endpointId).del();
+
+    const rows = [
+      ...new Set(monitorTags.filter(Boolean)),
+    ].map((scope_value) => ({ endpoint_id: endpointId, scope_type: "MONITOR", scope_value }));
+
+    for (const scope_value of new Set(pageSlugs.filter(Boolean))) {
+      rows.push({ endpoint_id: endpointId, scope_type: "PAGE", scope_value });
+    }
+
+    if (rows.length === 0) return;
+    await this.table("webhook_endpoint_scopes").insert(rows);
+  }
+
+  /**
+   * An endpoint's scope, split by kind.
+   *
+   * Always returns both arrays, empty when unscoped, because the caller's rule
+   * keys on "did the operator configure this kind at all" and a missing key and
+   * an empty list would then have to mean the same thing at every call site.
+   */
+  async getEndpointScopes(endpointId: number): Promise<{ monitorTags: string[]; pageSlugs: string[] }> {
+    const rows = (await this.table("webhook_endpoint_scopes")
+      .select("scope_type", "scope_value")
+      .where("endpoint_id", endpointId)
+      .orderBy("scope_value", "asc")) as { scope_type: string; scope_value: string }[];
+
+    return {
+      monitorTags: rows.filter((r) => r.scope_type === "MONITOR").map((r) => r.scope_value),
+      pageSlugs: rows.filter((r) => r.scope_type === "PAGE").map((r) => r.scope_value),
+    };
+  }
+
+  /**
+   * Every scope row for a set of endpoints, in one query.
+   *
+   * **The relay calls this once per event, so the N+1 is the thing to avoid.**
+   * Fanning out to twenty endpoints must not become twenty scope reads on top of
+   * the twenty the subscription match already cost.
+   */
+  async getScopesForEndpoints(endpointIds: number[]): Promise<Map<number, { monitorTags: string[]; pageSlugs: string[] }>> {
+    const result = new Map<number, { monitorTags: string[]; pageSlugs: string[] }>();
+    for (const id of endpointIds) result.set(id, { monitorTags: [], pageSlugs: [] });
+    if (endpointIds.length === 0) return result;
+
+    const rows = (await this.table("webhook_endpoint_scopes")
+      .select("endpoint_id", "scope_type", "scope_value")
+      .whereIn("endpoint_id", endpointIds)) as {
+      endpoint_id: number;
+      scope_type: string;
+      scope_value: string;
+    }[];
+
+    for (const row of rows) {
+      const entry = result.get(row.endpoint_id);
+      if (!entry) continue;
+      if (row.scope_type === "MONITOR") entry.monitorTags.push(row.scope_value);
+      else if (row.scope_type === "PAGE") entry.pageSlugs.push(row.scope_value);
+    }
+
+    return result;
+  }
+
+  /**
    * Every ACTIVE endpoint in an org that subscribes to `eventType`, either
    * exactly or through its domain wildcard.
    *

@@ -598,6 +598,9 @@ class DbImpl {
   getWebhookEndpointsCount!: WebhooksRepository["getEndpointsCount"];
   setWebhookEndpointEvents!: WebhooksRepository["setEndpointEvents"];
   getWebhookEndpointEvents!: WebhooksRepository["getEndpointEvents"];
+  setWebhookEndpointScopes!: WebhooksRepository["setEndpointScopes"];
+  getWebhookEndpointScopes!: WebhooksRepository["getEndpointScopes"];
+  getWebhookScopesForEndpoints!: WebhooksRepository["getScopesForEndpoints"];
   getActiveWebhookEndpointsForEvent!: WebhooksRepository["getActiveEndpointsForEvent"];
   recordWebhookEndpointOutcome!: WebhooksRepository["recordEndpointOutcome"];
   autoDisableWebhookEndpoint!: WebhooksRepository["autoDisableEndpoint"];
@@ -1534,6 +1537,9 @@ class DbImpl {
     this.getWebhookEndpointsCount = this.webhooks.getEndpointsCount.bind(this.webhooks);
     this.setWebhookEndpointEvents = this.webhooks.setEndpointEvents.bind(this.webhooks);
     this.getWebhookEndpointEvents = this.webhooks.getEndpointEvents.bind(this.webhooks);
+    this.setWebhookEndpointScopes = this.webhooks.setEndpointScopes.bind(this.webhooks);
+    this.getWebhookEndpointScopes = this.webhooks.getEndpointScopes.bind(this.webhooks);
+    this.getWebhookScopesForEndpoints = this.webhooks.getScopesForEndpoints.bind(this.webhooks);
     this.getActiveWebhookEndpointsForEvent = this.webhooks.getActiveEndpointsForEvent.bind(this.webhooks);
     this.recordWebhookEndpointOutcome = this.webhooks.recordEndpointOutcome.bind(this.webhooks);
     this.autoDisableWebhookEndpoint = this.webhooks.autoDisableEndpoint.bind(this.webhooks);

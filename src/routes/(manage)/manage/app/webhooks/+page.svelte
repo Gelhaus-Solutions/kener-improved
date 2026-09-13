@@ -36,6 +36,9 @@
     /** E11. */
     format: "GENERIC" | "DISCORD";
     message_template: string | null;
+    /** E11 part 3. Empty means unscoped: the endpoint takes the whole org. */
+    scope_monitor_tags: string[];
+    scope_page_paths: string[];
   }
 
   // Grouped by domain, straight from the taxonomy. This is the reason the
@@ -57,6 +60,11 @@
   // E11. What shape this endpoint receives, and what the operator wrote in it.
   let formFormat = $state<"GENERIC" | "DISCORD">("GENERIC");
   let formTemplate = $state("");
+  // E11 part 3. Which services this endpoint cares about. Empty is unscoped.
+  let formMonitorScope = $state<string[]>([]);
+  let formPageScope = $state<string[]>([]);
+  let allMonitors = $state<{ tag: string; name: string }[]>([]);
+  let allPages = $state<{ page_path: string; page_title: string }[]>([]);
 
   // A literal, not an inline attribute: Svelte reads `{{type}}` in markup as an
   // expression, so the Mustache braces this feature is built on have to reach
@@ -85,6 +93,14 @@
     loading = true;
     try {
       endpoints = await call("getWebhookEndpoints");
+      // For the scope picker. Loaded alongside rather than on dialog open, so
+      // the list is already there when an operator starts ticking boxes.
+      const [monitors, pages] = await Promise.all([
+        call("getMonitors", { status: "ACTIVE" }).catch(() => []),
+        call("getPages").catch(() => [])
+      ]);
+      allMonitors = Array.isArray(monitors) ? monitors : [];
+      allPages = Array.isArray(pages) ? pages : [];
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to load endpoints");
     } finally {
@@ -101,6 +117,8 @@
     formEvents = ["incident.*"];
     formFormat = "GENERIC";
     formTemplate = "";
+    formMonitorScope = [];
+    formPageScope = [];
     showDialog = true;
   }
 
@@ -115,8 +133,22 @@
     formEvents = [...endpoint.event_types];
     formFormat = endpoint.format === "DISCORD" ? "DISCORD" : "GENERIC";
     formTemplate = endpoint.message_template ?? "";
+    formMonitorScope = [...(endpoint.scope_monitor_tags ?? [])];
+    formPageScope = [...(endpoint.scope_page_paths ?? [])];
     showDialog = true;
   }
+
+  function toggleMonitorScope(tag: string, checked: boolean) {
+    formMonitorScope = checked
+      ? [...new Set([...formMonitorScope, tag])]
+      : formMonitorScope.filter((t) => t !== tag);
+  }
+
+  function togglePageScope(path: string, checked: boolean) {
+    formPageScope = checked ? [...new Set([...formPageScope, path])] : formPageScope.filter((p) => p !== path);
+  }
+
+  const isScoped = $derived(formMonitorScope.length > 0 || formPageScope.length > 0);
 
   function toggleEvent(type: string, checked: boolean) {
     formEvents = checked ? [...new Set([...formEvents, type])] : formEvents.filter((t) => t !== type);
@@ -145,7 +177,9 @@
           status: formStatus,
           event_types: formEvents,
           format: formFormat,
-          message_template: formTemplate
+          message_template: formTemplate,
+          scope_monitor_tags: formMonitorScope,
+          scope_page_paths: formPageScope
         });
         toast.success("Endpoint updated");
       } else {
@@ -156,7 +190,9 @@
           status: formStatus,
           event_types: formEvents,
           format: formFormat,
-          message_template: formTemplate
+          message_template: formTemplate,
+          scope_monitor_tags: formMonitorScope,
+          scope_page_paths: formPageScope
         });
         revealedSecret = result.secret;
         revealedFor = formName;
@@ -373,6 +409,65 @@
           Private and loopback addresses are refused unless <code>KENER_ALLOW_PRIVATE_WEBHOOKS=true</code>.
         </p>
       </div>
+      <!--
+        E11 part 3. Which services this endpoint hears about.
+
+        Ticking nothing is the default and means the whole org, which is what
+        every endpoint did before this existed. The note below is not decoration:
+        an operator who scopes to two monitors needs to know that a page or probe
+        event still arrives, because otherwise the first one to land reads as the
+        scope being broken.
+      -->
+      <div class="flex flex-col gap-2">
+        <Label>Scope</Label>
+        <p class="text-muted-foreground text-xs">
+          {#if isScoped}
+            Only events about the selected services. Events that are not about any monitor or page, such as probe and
+            report events, still arrive.
+          {:else}
+            Everything in this organisation. Select monitors or pages to narrow it.
+          {/if}
+        </p>
+
+        {#if allMonitors.length > 0}
+          <div class="max-h-32 overflow-y-auto rounded-md border p-2">
+            <p class="text-muted-foreground mb-1 text-xs font-medium">Monitors</p>
+            <div class="flex flex-col gap-1">
+              {#each allMonitors as monitor (monitor.tag)}
+                <label class="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={formMonitorScope.includes(monitor.tag)}
+                    onchange={(e) => toggleMonitorScope(monitor.tag, e.currentTarget.checked)}
+                  />
+                  <span>{monitor.name}</span>
+                  <span class="text-muted-foreground font-mono text-xs">{monitor.tag}</span>
+                </label>
+              {/each}
+            </div>
+          </div>
+        {/if}
+
+        {#if allPages.length > 0}
+          <div class="max-h-32 overflow-y-auto rounded-md border p-2">
+            <p class="text-muted-foreground mb-1 text-xs font-medium">Pages</p>
+            <div class="flex flex-col gap-1">
+              {#each allPages as page (page.page_path)}
+                <label class="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={formPageScope.includes(page.page_path)}
+                    onchange={(e) => togglePageScope(page.page_path, e.currentTarget.checked)}
+                  />
+                  <span>{page.page_title}</span>
+                  <span class="text-muted-foreground font-mono text-xs">{page.page_path}</span>
+                </label>
+              {/each}
+            </div>
+          </div>
+        {/if}
+      </div>
+
       <div class="flex flex-wrap gap-4">
         <div class="flex flex-col gap-1">
           <Label for="wh-timeout">Timeout (ms)</Label>
