@@ -384,6 +384,71 @@ export class EventsRepository extends BaseRepository {
     return row !== undefined;
   }
 
+  /**
+   * E11 part 4. How busy one webhook endpoint has been in a trailing window.
+   *
+   * Counts ATTEMPTS, by `last_attempt_at`, rather than rows created: the
+   * ceiling exists to protect the receiving channel, and what reaches a channel
+   * is a request that actually went out. Counting created rows would throttle an
+   * endpoint for deliveries still sitting in its own batch window, which is the
+   * opposite of the intent.
+   *
+   * Returns the oldest attempt in the window too, so the caller can say when the
+   * ceiling frees rather than guessing a whole minute.
+   */
+  async getRecentAttemptStats(
+    consumer: string,
+    targetType: string,
+    targetId: string,
+    since: number,
+  ): Promise<{ count: number; oldestAt: number | null }> {
+    const rows = (await this.table("event_deliveries")
+      .where("consumer", consumer)
+      .andWhere("target_type", targetType)
+      .andWhere("target_id", targetId)
+      .andWhere("last_attempt_at", ">=", since)
+      .select("last_attempt_at")) as { last_attempt_at: number | null }[];
+
+    const times = rows.map((r) => r.last_attempt_at).filter((t): t is number => typeof t === "number");
+    return { count: times.length, oldestAt: times.length > 0 ? Math.min(...times) : null };
+  }
+
+  /**
+   * E11 part 4. Other deliveries for the same endpoint that are due to go out.
+   *
+   * The batch. Ordered oldest first so a combined request carries the events in
+   * the order they happened, which is what a reader of a chat channel expects
+   * and what `seq` already promises a programmatic receiver.
+   *
+   * Excludes `exceptId`, the delivery already claimed by the caller, and takes
+   * only rows that are still PENDING and already due: a row whose window has not
+   * closed belongs to the next batch, not this one.
+   */
+  async getBatchableDeliveries(
+    consumer: string,
+    targetType: string,
+    targetId: string,
+    exceptId: number,
+    now: number,
+    limit: number,
+  ): Promise<EventDeliveryRecord[]> {
+    return (await this.table("event_deliveries")
+      .where("consumer", consumer)
+      .andWhere("target_type", targetType)
+      .andWhere("target_id", targetId)
+      .andWhere("status", "PENDING")
+      .andWhere("next_attempt_at", "<=", now)
+      .andWhereNot("id", exceptId)
+      .orderBy("id", "asc")
+      .limit(limit)) as EventDeliveryRecord[];
+  }
+
+  /** E11 part 4. Stamps the shared batch id onto every row that travelled together. */
+  async setDeliveryBatchId(ids: number[], batchId: string): Promise<void> {
+    if (ids.length === 0) return;
+    await this.table("event_deliveries").whereIn("id", ids).update({ batch_id: batchId });
+  }
+
   async getDeliveryById(id: number): Promise<EventDeliveryRecord | undefined> {
     const row = await this.table("event_deliveries").select("*").where("id", id).first();
     return row ? this.mapDelivery(row as Record<string, unknown>) : undefined;

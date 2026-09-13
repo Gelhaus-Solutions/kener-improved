@@ -202,7 +202,7 @@ export async function runDelivery(deliveryId: number): Promise<DispatchOutcome> 
       result = await consumer.deliver(
         event,
         { target_type: delivery.target_type, target_id: delivery.target_id },
-        { dryRun },
+        { dryRun, deliveryId: delivery.id },
       );
     } catch (error) {
       // A thrown consumer is a retryable failure, not a permanent one: the

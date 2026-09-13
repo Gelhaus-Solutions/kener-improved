@@ -470,6 +470,9 @@ class DbImpl {
   setEventDeliveryStatus!: EventsRepository["setDeliveryStatus"];
   reviveStuckDeliveries!: EventsRepository["reviveStuckDeliveries"];
   getEventDeliveryById!: EventsRepository["getDeliveryById"];
+  getRecentWebhookAttemptStats!: EventsRepository["getRecentAttemptStats"];
+  getBatchableDeliveries!: EventsRepository["getBatchableDeliveries"];
+  setDeliveryBatchId!: EventsRepository["setDeliveryBatchId"];
   getEventDeliveriesByEventId!: EventsRepository["getDeliveriesByEventId"];
   getEventDeliveriesPaginated!: EventsRepository["getDeliveriesPaginated"];
   getEventDeliveriesCount!: EventsRepository["getDeliveriesCount"];
@@ -1424,6 +1427,9 @@ class DbImpl {
     this.setEventDeliveryStatus = this.events.setDeliveryStatus.bind(this.events);
     this.reviveStuckDeliveries = this.events.reviveStuckDeliveries.bind(this.events);
     this.getEventDeliveryById = this.events.getDeliveryById.bind(this.events);
+    this.getRecentWebhookAttemptStats = this.events.getRecentAttemptStats.bind(this.events);
+    this.getBatchableDeliveries = this.events.getBatchableDeliveries.bind(this.events);
+    this.setDeliveryBatchId = this.events.setDeliveryBatchId.bind(this.events);
     this.getEventDeliveriesByEventId = this.events.getDeliveriesByEventId.bind(this.events);
     this.getEventDeliveriesPaginated = this.events.getDeliveriesPaginated.bind(this.events);
     this.getEventDeliveriesCount = this.events.getDeliveriesCount.bind(this.events);

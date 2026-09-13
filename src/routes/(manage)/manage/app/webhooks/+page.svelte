@@ -39,6 +39,9 @@
     /** E11 part 3. Empty means unscoped: the endpoint takes the whole org. */
     scope_monitor_tags: string[];
     scope_page_paths: string[];
+    /** E11 part 4. Null means no batching and no ceiling. */
+    batch_window_seconds: number | null;
+    max_per_minute: number | null;
   }
 
   // Grouped by domain, straight from the taxonomy. This is the reason the
@@ -65,6 +68,10 @@
   let formPageScope = $state<string[]>([]);
   let allMonitors = $state<{ tag: string; name: string }[]>([]);
   let allPages = $state<{ page_path: string; page_title: string }[]>([]);
+  // E11 part 4. Empty string is "off", which is why these are strings rather
+  // than numbers: a number input bound to 0 cannot express "no ceiling".
+  let formBatchWindow = $state("");
+  let formMaxPerMinute = $state("");
 
   // A literal, not an inline attribute: Svelte reads `{{type}}` in markup as an
   // expression, so the Mustache braces this feature is built on have to reach
@@ -119,6 +126,8 @@
     formTemplate = "";
     formMonitorScope = [];
     formPageScope = [];
+    formBatchWindow = "";
+    formMaxPerMinute = "";
     showDialog = true;
   }
 
@@ -135,6 +144,8 @@
     formTemplate = endpoint.message_template ?? "";
     formMonitorScope = [...(endpoint.scope_monitor_tags ?? [])];
     formPageScope = [...(endpoint.scope_page_paths ?? [])];
+    formBatchWindow = endpoint.batch_window_seconds ? String(endpoint.batch_window_seconds) : "";
+    formMaxPerMinute = endpoint.max_per_minute ? String(endpoint.max_per_minute) : "";
     showDialog = true;
   }
 
@@ -179,7 +190,9 @@
           format: formFormat,
           message_template: formTemplate,
           scope_monitor_tags: formMonitorScope,
-          scope_page_paths: formPageScope
+          scope_page_paths: formPageScope,
+          batch_window_seconds: formBatchWindow,
+          max_per_minute: formMaxPerMinute
         });
         toast.success("Endpoint updated");
       } else {
@@ -192,7 +205,9 @@
           format: formFormat,
           message_template: formTemplate,
           scope_monitor_tags: formMonitorScope,
-          scope_page_paths: formPageScope
+          scope_page_paths: formPageScope,
+          batch_window_seconds: formBatchWindow,
+          max_per_minute: formMaxPerMinute
         });
         revealedSecret = result.secret;
         revealedFor = formName;
@@ -467,6 +482,45 @@
           </div>
         {/if}
       </div>
+
+      <!--
+        E11 part 4. Noise control. Both are empty by default, which is no
+        batching and no ceiling, so an endpoint nobody configures behaves exactly
+        as it did before these existed.
+
+        The note says "nothing is ever dropped" because that is the question an
+        operator actually has about a rate limit, and the answer here is unusual
+        enough to be worth stating on the screen rather than in the docs.
+      -->
+      <div class="flex flex-wrap gap-4">
+        <div class="flex flex-col gap-1">
+          <Label for="wh-batch">Batch window (s)</Label>
+          <Input
+            id="wh-batch"
+            type="number"
+            bind:value={formBatchWindow}
+            min={0}
+            max={3600}
+            placeholder="off"
+            class="w-40"
+          />
+        </div>
+        <div class="flex flex-col gap-1">
+          <Label for="wh-ceiling">Max per minute</Label>
+          <Input
+            id="wh-ceiling"
+            type="number"
+            bind:value={formMaxPerMinute}
+            min={0}
+            placeholder="no limit"
+            class="w-40"
+          />
+        </div>
+      </div>
+      <p class="text-muted-foreground -mt-2 text-xs">
+        A batch window collects events and sends them as one request. A ceiling postpones deliveries over the limit.
+        Neither ever drops an event.
+      </p>
 
       <div class="flex flex-wrap gap-4">
         <div class="flex flex-col gap-1">

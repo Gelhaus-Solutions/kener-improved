@@ -4,6 +4,7 @@ import {
   allowedMentionsFor,
   colourFor,
   formatEnvelope,
+  formatEnvelopeBatch,
   isWebhookFormat,
   normaliseTemplate,
   parseFormat,
@@ -204,5 +205,65 @@ describe("normaliseTemplate", () => {
 
   it("bounds what is stored", () => {
     expect(normaliseTemplate("x".repeat(MAX_TEMPLATE_LENGTH + 500))).toHaveLength(MAX_TEMPLATE_LENGTH);
+  });
+});
+
+/**
+ * E11 part 4. The batched body.
+ *
+ * **The single-event case must be byte-identical to what it was**, and that is
+ * the assertion that matters most here. An endpoint with no batch window is the
+ * overwhelmingly common case, its receiver was written against the unwrapped
+ * shape, and a batching feature that changed the payload of every unbatched
+ * delivery would be a breaking change dressed up as an option.
+ */
+describe("formatEnvelopeBatch", () => {
+  it("is byte for byte the unbatched body for a single event", () => {
+    for (const format of ["GENERIC", "DISCORD"] as const) {
+      const one = JSON.stringify(formatEnvelope(format, envelope(), "<@&7> {{type}}"));
+      const batched = JSON.stringify(formatEnvelopeBatch(format, [envelope()], "<@&7> {{type}}"));
+      expect(batched).toBe(one);
+    }
+  });
+
+  // A receiver can tell a batch from a single event by SHAPE rather than by
+  // counting, which is what lets it branch without guessing.
+  it("wraps a real GENERIC batch in a batch key", () => {
+    const body = formatEnvelopeBatch("GENERIC", [envelope(), envelope({ id: "evt_2" })], null) as {
+      batch: unknown[];
+    };
+    expect(Array.isArray(body.batch)).toBe(true);
+    expect(body.batch).toHaveLength(2);
+  });
+
+  // One message mentioning on-call once and listing what happened is the entire
+  // point of batching a chat channel. Repeating the mention per event would be
+  // the noise this exists to fix.
+  it("sends one Discord message with one embed per event and one mention", () => {
+    const body = formatEnvelopeBatch(
+      "DISCORD",
+      [envelope(), envelope({ id: "evt_2", type: "incident.resolved" })],
+      "<@&7> alert",
+    ) as { content: string; embeds: unknown[]; allowed_mentions: { roles: string[] } };
+
+    expect(body.embeds).toHaveLength(2);
+    expect(body.content).toBe("<@&7> alert");
+    expect(body.allowed_mentions.roles).toEqual(["7"]);
+  });
+
+  // The delivery log will mark every event in the batch delivered, so the
+  // message has to account for every one of them rather than silently truncate.
+  it("accounts for events past Discord's ten-embed limit", () => {
+    const many = Array.from({ length: 14 }, (_, i) => envelope({ id: `evt_${i}` }));
+    const body = formatEnvelopeBatch("DISCORD", many, "<@&7>") as {
+      embeds: { footer?: { text: string } }[];
+    };
+
+    expect(body.embeds).toHaveLength(10);
+    expect(body.embeds[9].footer?.text).toContain("+4 more");
+  });
+
+  it("returns null for an empty batch rather than an empty message", () => {
+    expect(formatEnvelopeBatch("GENERIC", [], null)).toBeNull();
   });
 });

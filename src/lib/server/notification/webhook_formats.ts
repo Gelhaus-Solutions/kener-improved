@@ -203,6 +203,62 @@ export function toDiscordBody(
   };
 }
 
+/**
+ * E11 part 4. Discord accepts at most ten embeds in one message.
+ *
+ * A batch larger than this is split across the embed list and the overflow is
+ * summarised rather than dropped, because the delivery log will claim every
+ * event in the batch was delivered and that claim has to be true of what the
+ * channel can actually see.
+ */
+const MAX_DISCORD_EMBEDS = 10;
+
+/**
+ * The body for a batch of events going to one endpoint in one request.
+ *
+ * **A single-event batch must serialise byte for byte as it did before**, which
+ * is why this delegates rather than always wrapping: an endpoint with no batch
+ * window configured is the overwhelmingly common case, its receiver was written
+ * against the unwrapped shape, and a batching feature that changed the payload
+ * of every unbatched delivery would be a breaking change dressed as an option.
+ *
+ * For GENERIC a real batch is `{ batch: [...] }`, so a receiver can tell one
+ * from the other by shape alone rather than by counting.
+ *
+ * For DISCORD the operator's template still authors the `content`, taken from
+ * the FIRST event, and each event contributes an embed. One message mentioning
+ * on-call once and listing what happened is the entire point of batching a chat
+ * channel; repeating the mention per event would be the noise being fixed.
+ */
+export function formatEnvelopeBatch(
+  format: WebhookFormat,
+  envelopes: WebhookEnvelope[],
+  template: string | null,
+  extra?: { site_name?: string; site_url?: string },
+): unknown {
+  if (envelopes.length === 0) return null;
+  if (envelopes.length === 1) return formatEnvelope(format, envelopes[0], template, extra);
+
+  if (format !== "DISCORD") {
+    return { batch: envelopes };
+  }
+
+  const head = toDiscordBody(envelopes[0], template, extra);
+  const embeds = envelopes.slice(0, MAX_DISCORD_EMBEDS).map((e) => toDiscordBody(e, template, extra).embeds[0]);
+
+  const hidden = envelopes.length - embeds.length;
+  if (hidden > 0) {
+    // Named rather than silently truncated: the delivery rows for those events
+    // are about to be marked delivered, so the message has to account for them.
+    embeds[embeds.length - 1] = {
+      ...embeds[embeds.length - 1],
+      footer: { text: `${embeds[embeds.length - 1].footer?.text ?? ""} (+${hidden} more)`.trim() },
+    };
+  }
+
+  return { content: head.content, embeds, allowed_mentions: head.allowed_mentions };
+}
+
 /** The body for an endpoint, given its format. GENERIC is the envelope itself. */
 export function formatEnvelope(
   format: WebhookFormat,

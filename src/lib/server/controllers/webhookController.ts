@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { parseFormat, normaliseTemplate } from "../notification/webhook_formats.js";
+import { normaliseBatchWindow, normaliseMaxPerMinute } from "../events/noiseControl.js";
 import db from "../db/db.js";
 import { seal, secretHint, openOrPlain } from "../crypto/secretBox.js";
 import { WEBHOOK_SECRET_PURPOSE, checkWebhookUrl, sendWebhook } from "../notification/webhook_delivery.js";
@@ -179,6 +180,9 @@ export interface CreateWebhookInput {
   /** E11 part 3. Absent means unscoped. */
   scope_monitor_tags?: unknown;
   scope_page_paths?: unknown;
+  /** E11 part 4. Null or absent means no batching and no ceiling. */
+  batch_window_seconds?: unknown;
+  max_per_minute?: unknown;
 }
 
 /**
@@ -221,6 +225,11 @@ export const CreateWebhookEndpoint = async (
       // still reports success.
       format: parseFormat(data.format),
       message_template: normaliseTemplate(data.message_template),
+      // E11 part 4. Named explicitly for the same reason the format is: this
+      // insert lists its columns, so a field missing from it is accepted by the
+      // caller, dropped here, and the write still reports success.
+      batch_window_seconds: normaliseBatchWindow(data.batch_window_seconds),
+      max_per_minute: normaliseMaxPerMinute(data.max_per_minute),
       custom_headers: headers,
       timeout_ms: clampTimeout(data.timeout_ms),
       created_at: now,
@@ -254,6 +263,9 @@ export interface UpdateWebhookInput {
   /** E11 part 3. Undefined leaves the scope alone; an empty list clears it. */
   scope_monitor_tags?: unknown;
   scope_page_paths?: unknown;
+  /** E11 part 4. Undefined leaves it alone; null or empty turns it off. */
+  batch_window_seconds?: unknown;
+  max_per_minute?: unknown;
 }
 
 export const UpdateWebhookEndpoint = async (data: UpdateWebhookInput): Promise<WebhookEndpointView> => {
@@ -273,6 +285,10 @@ export const UpdateWebhookEndpoint = async (data: UpdateWebhookInput): Promise<W
   if (data.format !== undefined) patch.format = parseFormat(data.format);
   if (data.message_template !== undefined) patch.message_template = normaliseTemplate(data.message_template);
   if (data.timeout_ms !== undefined) patch.timeout_ms = clampTimeout(data.timeout_ms);
+  if (data.batch_window_seconds !== undefined) {
+    patch.batch_window_seconds = normaliseBatchWindow(data.batch_window_seconds);
+  }
+  if (data.max_per_minute !== undefined) patch.max_per_minute = normaliseMaxPerMinute(data.max_per_minute);
   if (data.status !== undefined) {
     if (!["ACTIVE", "DISABLED"].includes(data.status)) {
       // DISABLED_AUTO is Kener's to set, never a caller's: it means "we stopped

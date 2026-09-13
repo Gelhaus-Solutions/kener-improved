@@ -1459,6 +1459,13 @@ export interface WebhookEndpointRecord {
   format: WebhookFormatType;
   /** E11. The message body an operator authored. Null means the format's default. */
   message_template: string | null;
+  /**
+   * E11 part 4. Collapse a burst into one request. Null means no batching, which
+   * is every endpoint until an operator sets one.
+   */
+  batch_window_seconds: number | null;
+  /** E11 part 4. A hard ceiling on deliveries a minute. Null means no ceiling. */
+  max_per_minute: number | null;
   custom_headers: string | null;
   timeout_ms: number;
   consecutive_failures: number;
@@ -1483,6 +1490,9 @@ export interface WebhookEndpointInsert {
   api_version: string;
   format?: WebhookFormatType;
   message_template?: string | null;
+  /** E11 part 4. Null means no batching and no ceiling. */
+  batch_window_seconds?: number | null;
+  max_per_minute?: number | null;
   custom_headers: string | null;
   timeout_ms: number;
   created_at: number;

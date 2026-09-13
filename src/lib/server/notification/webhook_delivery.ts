@@ -6,7 +6,7 @@ import { GetRequiredSecrets, ReplaceAllOccurrences } from "../tool.js";
 import { openOrPlain } from "../crypto/secretBox.js";
 import version from "../../version.js";
 import type { WebhookEndpointRecord } from "../types/db.js";
-import { formatEnvelope } from "./webhook_formats.js";
+import { formatEnvelope, formatEnvelopeBatch } from "./webhook_formats.js";
 
 // The event-bus webhook sender.
 //
@@ -251,6 +251,14 @@ export async function sendWebhook(
   endpoint: WebhookEndpointRecord,
   envelope: WebhookEnvelope,
   now: number,
+  /**
+   * E11 part 4. The rest of the batch this envelope leads, if any.
+   *
+   * Absent means an ordinary single delivery, which serialises byte for byte as
+   * it always did. Present means one request carries all of them, signed over
+   * the combined bytes like any other body.
+   */
+  batch?: WebhookEnvelope[],
 ): Promise<WebhookSendResult> {
   const check = await checkWebhookUrl(endpoint.url);
   if (!check.allowed) {
@@ -291,7 +299,10 @@ export async function sendWebhook(
   // bothered to run. Discord ignores the header, which is not a reason to omit
   // it - an endpoint that silently stops being signed because of its format is a
   // footgun for whoever changes the format later.
-  const rawBody = JSON.stringify(formatEnvelope(endpoint.format ?? "GENERIC", envelope, endpoint.message_template));
+  const envelopes = batch && batch.length > 0 ? [envelope, ...batch] : [envelope];
+  const rawBody = JSON.stringify(
+    formatEnvelopeBatch(endpoint.format ?? "GENERIC", envelopes, endpoint.message_template),
+  );
   const timestamp = now;
 
   // Same `{{ENV_VAR}}` substitution the trigger sender supports, so a header can

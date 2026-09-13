@@ -140,7 +140,11 @@ export async function deliveriesFor(event: OutboxEvent, now: number): Promise<Ev
         target_id: target.target_id,
         status: dispatchable ? "PENDING" : terminalStatus,
         attempts: 0,
-        next_attempt_at: dispatchable ? now : null,
+        // E11 part 4. A consumer may hold a delivery back - a webhook endpoint
+        // with a batch window or a rate ceiling - by naming the earliest moment
+        // it may go out. Never earlier than now, so a stale or hostile value
+        // cannot make a delivery retroactively overdue.
+        next_attempt_at: dispatchable ? Math.max(now, target.not_before ?? now) : null,
         last_attempt_at: null,
         response_code: null,
         response_body: null,

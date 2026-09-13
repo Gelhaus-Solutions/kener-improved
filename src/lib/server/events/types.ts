@@ -155,6 +155,18 @@ export interface EventDeliveryFilter {
 export interface DeliveryTarget {
   target_type: string;
   target_id: string;
+  /**
+   * E11 part 4. The earliest this delivery may be attempted, as UTC seconds.
+   *
+   * Set by a consumer that wants the row created but not sent yet: a webhook
+   * endpoint with a batch window or a rate ceiling. Absent means "due now",
+   * which is what every consumer meant before this existed.
+   *
+   * It is a FLOOR on the first attempt, not a schedule. The retry ladder still
+   * owns everything after the first attempt, so a postponed delivery that then
+   * fails backs off exactly like any other.
+   */
+  not_before?: number;
 }
 
 /** The outcome of one delivery attempt. */
@@ -194,6 +206,16 @@ export interface DeliveryOptions {
    * template variable that silently stopped resolving.
    */
   dryRun?: boolean;
+
+  /**
+   * E11 part 4. The id of the delivery row being attempted.
+   *
+   * A consumer that batches needs it for two reasons: to exclude itself when it
+   * gathers the siblings travelling in the same request, and to stamp the shared
+   * batch id onto every row including its own. Optional, because no other
+   * consumer has any business knowing it.
+   */
+  deliveryId?: number;
 }
 
 /**

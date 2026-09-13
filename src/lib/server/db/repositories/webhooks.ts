@@ -214,6 +214,15 @@ export class WebhooksRepository extends BaseRepository {
       org_id: Number(row.org_id),
       timeout_ms: Number(row.timeout_ms),
       consecutive_failures: Number(row.consecutive_failures),
+      // E11 part 4. Null stays null - it means "no policy" - so these cannot go
+      // through Number(), which would turn it into 0 and read as a window of
+      // zero seconds rather than as no window at all.
+      batch_window_seconds: row.batch_window_seconds === null || row.batch_window_seconds === undefined
+        ? null
+        : Number(row.batch_window_seconds),
+      max_per_minute: row.max_per_minute === null || row.max_per_minute === undefined
+        ? null
+        : Number(row.max_per_minute),
     };
   }
 }

@@ -1,10 +1,18 @@
 import db from "../../db/db.js";
 import { emit } from "../emit.js";
+import { ulid } from "../ulid.js";
 import { serializeAggregate } from "../serializers/index.js";
 import { sendWebhook, AUTO_DISABLE_AFTER_FAILURES, type WebhookEnvelope } from "../../notification/webhook_delivery.js";
 import { isAdminEventType } from "$lib/event-taxonomy.js";
 import { endpointAcceptsEvent, resolveEventScopeSubject, type EndpointScope } from "../scope.js";
-import type { EventConsumer, OutboxEvent, DeliveryTarget, DeliveryResult } from "../types.js";
+import { hasNoisePolicy, nextAttemptAt, type NoisePolicy } from "../noiseControl.js";
+import type {
+  EventConsumer,
+  OutboxEvent,
+  DeliveryTarget,
+  DeliveryResult,
+  DeliveryOptions,
+} from "../types.js";
 
 // Outbound webhooks as a consumer of the event bus.
 //
@@ -22,6 +30,49 @@ const CONSUMER_NAME = "webhook";
 
 /** An endpoint with no scope rows. Shared so the fallback allocates nothing. */
 const EMPTY_SCOPE: EndpointScope = { monitorTags: [], pageSlugs: [] };
+
+/**
+ * E11 part 4. The most events one request may carry.
+ *
+ * A cap on the blast radius of a long quiet window: an endpoint with an hour's
+ * window that accumulated ten thousand events must not try to serialise all of
+ * them into one body. The remainder stays PENDING and goes in the next request,
+ * so nothing is lost, it just takes two.
+ */
+const MAX_BATCH_SIZE = 50;
+
+/** How far back the rate ceiling looks. */
+const CEILING_WINDOW_SECONDS = 60;
+
+/**
+ * The delivery target for one endpoint, carrying when it may first go out.
+ *
+ * An endpoint with neither knob set returns no `not_before` at all, so the relay
+ * writes exactly the row it always did and pays no extra query.
+ */
+async function targetFor(endpoint: {
+  id: number;
+  batch_window_seconds: number | null;
+  max_per_minute: number | null;
+}): Promise<DeliveryTarget> {
+  const target: DeliveryTarget = { target_type: "endpoint", target_id: String(endpoint.id) };
+
+  const policy: NoisePolicy = {
+    batchWindowSeconds: endpoint.batch_window_seconds ?? null,
+    maxPerMinute: endpoint.max_per_minute ?? null,
+  };
+  if (!hasNoisePolicy(policy)) return target;
+
+  const now = nowSeconds();
+  // Only asked for when a ceiling is set: the batch window needs no history.
+  const stats = policy.maxPerMinute
+    ? await db.getRecentWebhookAttemptStats(CONSUMER_NAME, "endpoint", String(endpoint.id), now - CEILING_WINDOW_SECONDS)
+    : { count: 0, oldestAt: null };
+
+  const due = nextAttemptAt(now, policy, stats.count, stats.oldestAt);
+  if (due > now) target.not_before = due;
+  return target;
+}
 
 function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
@@ -70,6 +121,109 @@ async function buildEnvelope(event: OutboxEvent, apiVersion: string): Promise<We
   };
 }
 
+/**
+ * E11 part 4. Claims the other deliveries that should travel in this request.
+ *
+ * **Claimed with the same compare-and-set the dispatcher uses**, which is what
+ * makes this safe to run in two workers at once. `beginEventDeliveryAttempt`
+ * moves a row from PENDING to IN_FLIGHT and reports whether it was the one that
+ * moved it, so a sibling can be picked up by exactly one batch. A worker that
+ * loses the race simply gets a smaller batch, and the row it lost goes out in
+ * the other request rather than twice or not at all.
+ *
+ * Returns nothing at all for an endpoint with no batch window, so the ordinary
+ * single delivery path costs no extra query.
+ *
+ * A dry run claims nothing: a shadow rehearsal that moved real rows to IN_FLIGHT
+ * would be sending for real in the only sense that matters to the delivery log.
+ */
+async function claimBatch(
+  endpoint: { id: number; batch_window_seconds: number | null; api_version: string },
+  options: DeliveryOptions | undefined,
+  now: number,
+): Promise<{ envelopes: WebhookEnvelope[]; deliveryIds: number[] }> {
+  const empty = { envelopes: [] as WebhookEnvelope[], deliveryIds: [] as number[] };
+
+  if (!endpoint.batch_window_seconds || endpoint.batch_window_seconds <= 0) return empty;
+  if (options?.dryRun) return empty;
+  const selfId = options?.deliveryId;
+  if (selfId === undefined) return empty;
+
+  const candidates = await db.getBatchableDeliveries(
+    CONSUMER_NAME,
+    "endpoint",
+    String(endpoint.id),
+    selfId,
+    now,
+    MAX_BATCH_SIZE,
+  );
+
+  const envelopes: WebhookEnvelope[] = [];
+  const deliveryIds: number[] = [];
+
+  for (const candidate of candidates) {
+    // The claim. Losing it is normal, not an error.
+    if (!(await db.beginEventDeliveryAttempt(candidate.id, now))) continue;
+
+    const siblingEvent = await db.getEventByEventId(candidate.event_id);
+    if (!siblingEvent) {
+      // The event aged out from under its delivery. Release it as DEAD rather
+      // than leaving it IN_FLIGHT for the stuck-delivery sweeper to revive into
+      // the same dead end every minute.
+      await db.setEventDeliveryStatus(candidate.id, "DEAD", now);
+      continue;
+    }
+
+    envelopes.push(await buildEnvelope(siblingEvent, endpoint.api_version));
+    deliveryIds.push(candidate.id);
+  }
+
+  return { envelopes, deliveryIds };
+}
+
+/**
+ * Applies one request's outcome to every row that travelled in it.
+ *
+ * The leading delivery is deliberately NOT settled here: the dispatcher owns
+ * that row's status, its attempt count and its place in the retry ladder, and
+ * writing it from inside the consumer would race the dispatcher's own write.
+ * Only the siblings, which the dispatcher does not know about, are settled here.
+ *
+ * A failed batch sends its siblings back to PENDING rather than into the retry
+ * ladder. They were never individually attempted - one request carried all of
+ * them - so charging each an attempt would spend their ladders on one endpoint
+ * outage, and the next pass will batch them again anyway.
+ */
+async function settleBatch(
+  siblingIds: number[],
+  selfId: number | undefined,
+  result: { ok: boolean; status?: number | null; body?: string | null; error?: string | null },
+  now: number,
+): Promise<void> {
+  const batchId = ulid();
+  const all = selfId === undefined ? siblingIds : [...siblingIds, selfId];
+
+  for (const id of siblingIds) {
+    if (result.ok) {
+      await db.completeEventDeliveryAttempt(id, {
+        status: "DELIVERED",
+        attempts: 1,
+        next_attempt_at: null,
+        response_code: result.status ?? null,
+        response_body: result.body ?? null,
+        error: null,
+        updated_at: now,
+      });
+    } else {
+      await db.setEventDeliveryStatus(id, "PENDING", now);
+    }
+  }
+
+  // Stamped on success and on failure: knowing which events were in a request
+  // that failed is exactly what an operator needs to read the log afterwards.
+  await db.setDeliveryBatchId(all, batchId);
+}
+
 export const webhookConsumer: EventConsumer = {
   name: CONSUMER_NAME,
   mode: "live",
@@ -102,19 +256,23 @@ export const webhookConsumer: EventConsumer = {
     const scopes = await db.getWebhookScopesForEndpoints(endpoints.map((e) => e.id));
     const anyScoped = [...scopes.values()].some((s) => s.monitorTags.length > 0 || s.pageSlugs.length > 0);
 
-    // Nothing is scoped, which is the overwhelmingly common case: skip resolving
-    // the subject entirely rather than paying a read per event for a filter
-    // nobody configured.
-    if (!anyScoped) return endpoints.map((e) => ({ target_type: "endpoint", target_id: String(e.id) }));
+    // Resolved once for the event and only when something is actually scoped:
+    // it costs a read, and the answer cannot differ between two endpoints
+    // looking at the same event.
+    const subject = anyScoped ? await resolveEventScopeSubject(event) : null;
+    const accepted =
+      subject === null
+        ? endpoints
+        : endpoints.filter((e) => endpointAcceptsEvent(scopes.get(e.id) ?? EMPTY_SCOPE, subject));
 
-    const subject = await resolveEventScopeSubject(event);
-
-    return endpoints
-      .filter((e) => endpointAcceptsEvent(scopes.get(e.id) ?? EMPTY_SCOPE, subject))
-      .map((e) => ({ target_type: "endpoint", target_id: String(e.id) }));
+    // E11 part 4. An endpoint may ask for its deliveries to be held: a batch
+    // window collapses a burst into one request, a ceiling stops a flapping
+    // agent drowning a channel. Neither ever drops an event, so this only ever
+    // moves `not_before` forward.
+    return await Promise.all(accepted.map(async (e) => await targetFor(e)));
   },
 
-  async deliver(event: OutboxEvent, target: DeliveryTarget): Promise<DeliveryResult> {
+  async deliver(event: OutboxEvent, target: DeliveryTarget, options?: DeliveryOptions): Promise<DeliveryResult> {
     const endpoint = await db.getWebhookEndpointById(Number(target.target_id));
     if (!endpoint) {
       // Deleted between the relay creating the delivery row and now. Nothing to
@@ -127,7 +285,18 @@ export const webhookConsumer: EventConsumer = {
 
     const now = nowSeconds();
     const envelope = await buildEnvelope(event, endpoint.api_version);
-    const result = await sendWebhook(endpoint, envelope, now);
+
+    // E11 part 4. The rest of this batch, if this endpoint batches at all.
+    const batch = await claimBatch(endpoint, options, now);
+    const result = await sendWebhook(endpoint, envelope, now, batch.envelopes);
+
+    // Every row that travelled in this request gets the same outcome and the
+    // same batch id. Enno's decision was one row per EVENT rather than one per
+    // request, so each event stays individually traceable and the delivery
+    // screen keeps working unchanged, while the id says what went together.
+    if (batch.deliveryIds.length > 0) {
+      await settleBatch(batch.deliveryIds, options?.deliveryId, result, now);
+    }
 
     // Health is tracked per endpoint, not per delivery: one failed delivery is
     // noise, twenty in a row is an endpoint that has gone away.
