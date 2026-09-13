@@ -56,6 +56,70 @@ function escapeLikePattern(term: string): string {
   return term.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
 }
 
+/** The lifecycle columns this backfill can derive. `acknowledged_at` cannot be. */
+export type LifecycleColumn = "detected_at" | "identified_at" | "mitigated_at" | "resolved_at";
+
+/**
+ * What one backfill run filled.
+ *
+ * Per column rather than a single total, because "it wrote 40 values" does not
+ * tell an operator whether detection was recovered or only resolution was, and
+ * those come from different evidence with very different coverage.
+ *
+ * `acknowledged_at` is absent deliberately: it records that a *human* took
+ * ownership, and no historical source for that exists. Deriving it from
+ * anything available would be inventing the MTTA number rather than measuring
+ * it, so history keeps null and the Acknowledge action fills it going forward.
+ */
+export interface LifecycleBackfillCounts {
+  /** Incidents that were missing at least one column before the run. */
+  incidents_considered: number;
+  detected_at: number;
+  identified_at: number;
+  mitigated_at: number;
+  resolved_at: number;
+}
+
+/** `whereIn` has a practical ceiling on every driver, and SQLite's is 999. */
+const ID_CHUNK = 500;
+
+function* chunked(ids: number[]): Generator<number[]> {
+  for (let i = 0; i < ids.length; i += ID_CHUNK) yield ids.slice(i, i + ID_CHUNK);
+}
+
+/**
+ * `monitor_alerts_v2.created_at` as UTC seconds, whatever the driver returned.
+ *
+ * Transcribed from the migration rather than shared with `parseDbTimestamp`, and
+ * the difference is deliberate: `parseDbTimestamp` reads every number as
+ * milliseconds, while this distinguishes seconds from milliseconds by
+ * magnitude. Changing which one this backfill uses would let a re-run disagree
+ * with the value the migration already wrote on an older install.
+ *
+ * The regex branch is the part that matters. SQLite stores `knex.fn.now()` as
+ * `YYYY-MM-DD HH:MM:SS` with no zone marker, and `new Date()` reads a string in
+ * that shape as **local** time. On a machine in Europe/Berlin that shifts every
+ * `detected_at` by an hour or two, in the direction that makes detection look
+ * like it happened before the outage did. Postgres hands back a real Date and
+ * needs none of this, which is exactly why the bug would survive a
+ * Postgres-only test.
+ */
+export function alertCreatedAtSeconds(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Date) return Math.floor(value.getTime() / 1000);
+  if (typeof value === "number") {
+    // Already seconds if it is small enough to be, milliseconds otherwise.
+    return value > 1e11 ? Math.floor(value / 1000) : Math.floor(value);
+  }
+  if (typeof value === "string") {
+    const naive = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value);
+    const parsed = new Date(naive ? value.replace(" ", "T") + "Z" : value);
+    const ms = parsed.getTime();
+    return Number.isNaN(ms) ? null : Math.floor(ms / 1000);
+  }
+  return null;
+}
+
 // Raw row type from DB query before grouping
 interface IncidentRowWithMonitor {
   id: number;
@@ -1449,5 +1513,179 @@ export class IncidentsRepository extends BaseRepository {
     }
 
     return Array.from(incidentMap.values());
+  }
+
+  // ============ C2c lifecycle timestamps: re-runnable backfill ============
+
+  /**
+   * Recomputes the lifecycle timestamps from evidence still in the database.
+   *
+   * **Why this exists at all, which is the whole point of the bug it fixes.**
+   * The original backfill lived inside migration
+   * `20260909170000_add_incident_lifecycle_timestamps`, and migrations run
+   * before seeds everywhere - `preseed`, `predev`, and `scripts/main.ts`. On a
+   * fresh install it therefore swept an *empty* `incidents` table, wrote
+   * nothing, and knex marked it done forever. Every incident that arrived
+   * afterwards - by seed, by C7 import, by restoring a dump onto an already
+   * migrated schema - kept null timestamps permanently, and nothing could ever
+   * recompute them. The Response Timeline read "Not recorded" on every row.
+   *
+   * **The general lesson, worth more than the fix:** a data backfill inside a
+   * migration is only ever correct for a database that already held the data
+   * when that one migration ran. Any backfill that could matter to an install
+   * populated later belongs in a re-runnable routine like this one.
+   *
+   * **Only ever fills a column that is currently NULL.** That is what makes
+   * re-running it safe, and it is what lets it be a button: it can never
+   * overwrite a stamp that a live transition or a human produced, so a second
+   * run cannot disagree with the first.
+   *
+   * The derivation rules are transcribed from the migration deliberately
+   * unchanged, including the `end_date_time` fallback, so an instance that did
+   * get the migration's backfill and an instance that gets this one hold the
+   * same values.
+   *
+   * Org scoping comes from `this.table`: the admin action runs inside one org
+   * and touches only that org's incidents, while the CLI sweeps every org by
+   * wrapping the call in `runAcrossOrgs`.
+   */
+  async backfillLifecycleTimestamps(incidentId?: number): Promise<LifecycleBackfillCounts> {
+    const counts: LifecycleBackfillCounts = {
+      incidents_considered: 0,
+      detected_at: 0,
+      identified_at: 0,
+      mitigated_at: 0,
+      resolved_at: 0,
+    };
+
+    // Only incidents actually missing something. Narrowing the candidate set
+    // changes no computed value - it skips rows the writes would no-op on - and
+    // keeps a whole-instance sweep from loading every alert ever raised.
+    const pendingQuery = this.table("incidents")
+      .where((q) =>
+        q
+          .whereNull("detected_at")
+          .orWhereNull("identified_at")
+          .orWhereNull("mitigated_at")
+          .orWhereNull("resolved_at"),
+      )
+      .select("id");
+    if (incidentId !== undefined) pendingQuery.where("id", incidentId);
+
+    const pending: Array<{ id: number }> = await pendingQuery;
+    const ids = pending.map((row) => row.id);
+    counts.incidents_considered = ids.length;
+    if (ids.length === 0) return counts;
+
+    counts.detected_at = await this.fillDetectedAt(ids);
+
+    const commentRules: Array<[string, LifecycleColumn, "min" | "max"]> = [
+      [GC.IDENTIFIED, "identified_at", "min"],
+      [GC.MONITORING, "mitigated_at", "min"],
+      [GC.RESOLVED, "resolved_at", "max"],
+    ];
+    for (const [state, column, aggregate] of commentRules) {
+      counts[column] += await this.fillFromComments(ids, state, column, aggregate);
+    }
+
+    // An incident closed without a RESOLVED comment - closed from the API, or by
+    // an alert that set the end time directly - still resolved, and
+    // `end_date_time` is when. After the comment pass and guarded on null, so a
+    // real RESOLVED comment always wins over the coarser fallback.
+    for (const chunk of chunked(ids)) {
+      counts.resolved_at += await this.table("incidents")
+        .whereIn("id", chunk)
+        .whereNull("resolved_at")
+        .whereNotNull("end_date_time")
+        .update({ resolved_at: this.knexUnscoped.ref("end_date_time") });
+    }
+
+    return counts;
+  }
+
+  /**
+   * `detected_at` from the earliest alert, and only the earliest.
+   *
+   * An incident may have collected several alert rows over its life - a config
+   * that re-fires, a second monitor joining the same incident - and detection is
+   * the first of them, not the last.
+   *
+   * A dashboard-created incident gets null, because no machine observed it.
+   * `metrics.ts` falls back to `start_date_time` for the MTTR arithmetic, so a
+   * manual incident still produces a number, and MTTD stays null for it because
+   * there genuinely was no detection to measure.
+   *
+   * Folded in JavaScript rather than with SQL `min()` because `created_at` is a
+   * driver-dependent shape: a `Date` on Postgres and MySQL, naive text on
+   * SQLite, epoch milliseconds where a `Date` was bound on insert. See
+   * `alertCreatedAtSeconds`.
+   */
+  private async fillDetectedAt(ids: number[]): Promise<number> {
+    const earliest = new Map<number, number>();
+
+    for (const chunk of chunked(ids)) {
+      const alerts = await this.table<{ incident_id: number; created_at: unknown }>("monitor_alerts_v2")
+        .whereIn("incident_id", chunk)
+        .select("incident_id", "created_at");
+
+      for (const row of alerts) {
+        const seconds = alertCreatedAtSeconds(row.created_at);
+        if (seconds === null) continue;
+        const current = earliest.get(row.incident_id);
+        if (current === undefined || seconds < current) earliest.set(row.incident_id, seconds);
+      }
+    }
+
+    let filled = 0;
+    for (const [id, seconds] of earliest) {
+      filled += await this.table("incidents").where("id", id).whereNull("detected_at").update({ detected_at: seconds });
+    }
+    return filled;
+  }
+
+  /**
+   * One lifecycle column from the incident's own comments.
+   *
+   * **MIN for the first two, MAX for resolution, and the asymmetry is the
+   * point.** An incident that went IDENTIFIED, slipped back to INVESTIGATING and
+   * was identified again was identified at the first one: identification is a
+   * thing you learn and do not unlearn. Resolution is not - an incident that was
+   * resolved, reopened and resolved again was actually over at the *second* one,
+   * and taking the first would report an MTTR that ends before the outage did.
+   */
+  private async fillFromComments(
+    ids: number[],
+    state: string,
+    column: LifecycleColumn,
+    aggregate: "min" | "max",
+  ): Promise<number> {
+    let filled = 0;
+
+    for (const chunk of chunked(ids)) {
+      const base = this.table("incident_comments")
+        .whereIn("incident_id", chunk)
+        .where("state", state)
+        .groupBy("incident_id")
+        .select("incident_id");
+      const rows: Array<{ incident_id: number; at: number | string }> =
+        aggregate === "min" ? await base.min({ at: "commented_at" }) : await base.max({ at: "commented_at" });
+
+      for (const row of rows) {
+        const seconds = typeof row.at === "string" ? parseInt(row.at, 10) : row.at;
+        if (!Number.isFinite(seconds)) continue;
+
+        const query = this.table("incidents").where("id", row.incident_id).whereNull(column);
+        // Only for an incident that is actually closed. A reopened incident has
+        // a RESOLVED comment in its history and is not resolved now; writing
+        // `resolved_at` on it would make an open incident report an MTTR, and
+        // every "incidents resolved this month" count would include one that is
+        // still running.
+        if (column === "resolved_at") query.whereNotNull("end_date_time");
+
+        filled += await query.update({ [column]: seconds });
+      }
+    }
+
+    return filled;
   }
 }

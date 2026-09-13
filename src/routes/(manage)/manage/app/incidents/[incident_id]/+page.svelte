@@ -19,6 +19,7 @@
   import XIcon from "@lucide/svelte/icons/x";
   import MoreVerticalIcon from "@lucide/svelte/icons/more-vertical";
   import CheckIcon from "@lucide/svelte/icons/check";
+  import RefreshIcon from "@lucide/svelte/icons/refresh-cw";
   import AlertTriangleIcon from "@lucide/svelte/icons/alert-triangle";
   import FileTextIcon from "@lucide/svelte/icons/file-text";
   import type { PageProps } from "./$types";
@@ -244,6 +245,24 @@
   let metrics = $state<IncidentMetrics | null>(null);
   let loadingMetrics = $state(false);
   let acknowledging = $state(false);
+  let recomputing = $state(false);
+
+  /**
+   * Whether anything this recompute can actually derive is still missing.
+   *
+   * `acknowledged_at` is deliberately not counted: it records that a human took
+   * ownership, no historical source for it exists, and the backfill never fills
+   * it. Including it would leave the button on screen permanently for every
+   * incident nobody acknowledged, promising work it cannot do.
+   */
+  const recomputableMissing = $derived(
+    metrics !== null &&
+      metrics !== undefined &&
+      (metrics.timestamps.detected_at === null ||
+        metrics.timestamps.identified_at === null ||
+        metrics.timestamps.mitigated_at === null ||
+        metrics.timestamps.resolved_at === null)
+  );
 
   /**
    * Seconds as something a human reads at a glance.
@@ -381,6 +400,45 @@
       toast.error(e instanceof Error ? e.message : "Failed to acknowledge incident");
     } finally {
       acknowledging = false;
+    }
+  }
+
+  /**
+   * KENER-150. Recompute this incident's lifecycle timestamps from the evidence.
+   *
+   * The backfill only ever ran inside a migration, and migrations run before
+   * seeds, so on a fresh install it swept an empty table and was marked done for
+   * ever. This is the operator's way out of a timeline reading "Not recorded"
+   * without going to a shell. Safe to press repeatedly: it only fills columns
+   * that are currently NULL, so it can never overwrite a live stamp.
+   */
+  async function recomputeTimeline() {
+    recomputing = true;
+    try {
+      const response = await fetch(clientResolver(resolve, "/manage/api"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "recomputeIncidentTimeline", data: { id: parseInt(params.incident_id) } })
+      });
+      const result = await response.json();
+      if (result.error) {
+        toast.error(result.error);
+        return;
+      }
+      // Naming the count matters: "nothing to recompute" and "recovered four
+      // timestamps" are very different answers to the same press, and a generic
+      // success message would leave the operator unable to tell them apart.
+      const filled = result.filled ?? 0;
+      if (filled === 0) {
+        toast.info("Nothing left to recompute: no evidence for the missing timestamps");
+      } else {
+        toast.success(`Recovered ${filled} timestamp${filled === 1 ? "" : "s"}`);
+      }
+      await fetchMetrics();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to recompute the timeline");
+    } finally {
+      recomputing = false;
     }
   }
 
@@ -1263,6 +1321,22 @@
                   <CheckIcon class="size-4" />
                 {/if}
                 Acknowledge
+              </Button>
+            {/if}
+            <!--
+              KENER-150. Shown only while something is actually missing, and
+              acknowledged_at is excluded from that test on purpose: it has no
+              historical source and this never fills it, so counting it would
+              leave the button on the screen for ever with nothing to do.
+            -->
+            {#if metrics && recomputableMissing}
+              <Button size="sm" variant="outline" onclick={recomputeTimeline} disabled={recomputing}>
+                {#if recomputing}
+                  <Loader class="size-4 animate-spin" />
+                {:else}
+                  <RefreshIcon class="size-4" />
+                {/if}
+                Recompute
               </Button>
             {/if}
           </div>

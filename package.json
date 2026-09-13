@@ -51,6 +51,7 @@
     "preseed": "vite-node scripts/fix-migration-ext.ts && npx knex migrate:latest",
     "pg:partition-monitoring-data": "vite-node scripts/pg-partition-monitoring-data.ts",
     "rollups:backfill": "vite-node scripts/rollups-backfill.ts",
+    "backfill:incident-timeline": "vite-node scripts/backfill-incident-timeline.ts",
     "rollups:verify": "vite-node scripts/rollups-verify.ts",
     "db:check-tenancy": "vite-node scripts/check-tenancy.ts",
     "db:check-orgs": "vite-node scripts/check-org-provisioning.ts",

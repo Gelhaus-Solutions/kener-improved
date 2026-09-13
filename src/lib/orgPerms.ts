@@ -175,6 +175,10 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   // acting on an incident, and anybody who may comment on one may take it.
   acknowledgeIncident: "incidents.write",
   getIncidentMetrics: "incidents.read",
+  // KENER-150. Write, though it only ever fills columns that are NULL: it
+  // changes what the incident record says, and the audit trail should name who
+  // pressed it.
+  recomputeIncidentTimeline: "incidents.write",
 
   // Postmortems (C1). Deliberately mapped onto the *incident* permissions rather
   // than a new pair. A postmortem is the incident's published account of itself,
