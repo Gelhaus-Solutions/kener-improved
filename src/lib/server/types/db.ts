@@ -966,7 +966,7 @@ export interface MaintenanceEventsMonitorList {
 // SLO_BURN_RATE (F1b) watches an `sla_targets` row rather than monitors, so a
 // config carrying it uses `sla_target_id` and the burn_* columns instead of the
 // `monitor_alerts_config_monitors` junction and `alert_value`.
-export type AlertForType = "STATUS" | "LATENCY" | "UPTIME" | "SLO_BURN_RATE";
+export type AlertForType = "STATUS" | "LATENCY" | "UPTIME" | "SLO_BURN_RATE" | "CERT_EXPIRY";
 export type AlertSeverityType = "CRITICAL" | "WARNING";
 export type YesNoType = "YES" | "NO";
 

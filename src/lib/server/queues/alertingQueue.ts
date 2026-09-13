@@ -32,7 +32,15 @@ import { parseDbTimestamp } from "../tool.js";
 import GC from "../../global-constants.js";
 import { windowsAffecting, suppressesAlerts } from "../maintenance/cascade.js";
 import { dispatchTrigger } from "../notification/dispatchTrigger.js";
-import { incidentSeverityFromAlertSeverity } from "../incidents/impact.js";
+import { alertIncidentComponentImpact, incidentSeverityFromAlertSeverity } from "../incidents/impact.js";
+import { inspectCertificate } from "../services/certificateInspector.js";
+import {
+  assessCertificate,
+  isFiring as isCertFiring,
+  isRecovered as isCertRecovered,
+  tlsEndpointFor,
+  type CertVerdict,
+} from "../services/certAssessment.js";
 import { alertToVariables, siteDataToVariables } from "../notification/notification_utils.js";
 
 import type { SiteDataForNotification } from "../notification/types.js";
@@ -108,7 +116,16 @@ async function createNewIncident(
     incidentInput,
     update,
     monitorTag,
-    config.alert_value,
+    // NOT `config.alert_value`, which is what this passed until B7.
+    //
+    // The threshold is only a component impact for a STATUS alert. For LATENCY
+    // it is milliseconds, for UPTIME a percentage, for CERT_EXPIRY days - and
+    // `AddIncidentMonitor` rejects anything that is not one of its five values,
+    // so it THREW. The throw lands before `notifyQuietly` below, so turning on
+    // "create an incident" for a latency or uptime alert silently turned off
+    // being notified about it: the alert row was already committed, so the alert
+    // looked active while nobody was told.
+    alertIncidentComponentImpact(config.alert_for, config.alert_value),
   );
 
   return incidentCreated;
@@ -320,6 +337,54 @@ async function sloBurnVerdict(config: MonitorAlertConfigRecord): Promise<"FIRING
 }
 
 /**
+ * B7. The certificate verdict for a CERT_EXPIRY config, or null when the
+ * certificate cannot be read at all.
+ *
+ * **Resolved from the monitor rather than from a second piece of config**, so an
+ * operator who has already said where the service is does not say it twice and
+ * there is no second copy to keep in step when it moves.
+ *
+ * Three separate reasons to answer null, and all three mean "do nothing" rather
+ * than "fire": a monitor that has gone away, a monitor with no TLS to inspect
+ * (a certificate alert on a PING monitor is a configuration mistake, not an
+ * outage), and a host that would not complete a handshake. The last is the
+ * important one - see `assessCertificate` on why UNREACHABLE must neither fire
+ * nor resolve.
+ *
+ * Cached per tick is deliberately NOT done: this runs once a day per config, so
+ * a handshake is cheap here in a way it never was in `monitorResponseQueue`.
+ */
+async function certVerdict(
+  config: MonitorAlertConfigRecord,
+): Promise<{ verdict: CertVerdict; detail: string } | null> {
+  if (!config.monitor_tag) return null;
+
+  const monitors = await GetMonitorsParsed({ tag: config.monitor_tag });
+  const monitor = monitors[0];
+  if (!monitor) return null;
+
+  const endpoint = tlsEndpointFor(
+    monitor.monitor_type,
+    (monitor.type_data ?? {}) as unknown as Record<string, unknown>,
+  );
+  if (!endpoint) {
+    // Said out loud rather than swallowed: this is an alert that can never fire,
+    // and silence would leave the operator believing it is watching something.
+    console.warn(
+      `alerting: CERT_EXPIRY config ${config.id} watches monitor "${config.monitor_tag}", which has no TLS endpoint to inspect`,
+    );
+    return null;
+  }
+
+  const thresholdDays = parseInt(config.alert_value, 10);
+  if (!Number.isFinite(thresholdDays)) return null;
+
+  const inspection = await inspectCertificate(endpoint.host, endpoint.port);
+  const assessment = assessCertificate(inspection, thresholdDays);
+  return { verdict: assessment.verdict, detail: assessment.detail };
+}
+
+/**
  * Evaluates whether the monitor currently violates the alert condition.
  *
  * Returns null for a config whose alert_for this build does not handle, which
@@ -365,6 +430,13 @@ async function evaluateIsAffected(
     // notifying on alternating five-minute ticks.
     return verdict === "FIRING";
   }
+  if (monitor_alerts_configured.alert_for === GC.CERT_EXPIRY) {
+    const result = await certVerdict(monitor_alerts_configured);
+    if (result === null) return null;
+    // `isFiring` answers null for UNREACHABLE, which is the same "cannot tell"
+    // contract the burn rule uses and the caller already handles.
+    return isCertFiring(result.verdict);
+  }
   return null;
 }
 
@@ -399,6 +471,12 @@ async function evaluateIsRecovered(job: JobData, threshold: number, unmaskMainte
     // alert: "we can no longer tell" is not "it got better", and resolving there
     // would close every burn alert the moment monitoring broke.
     return (await sloBurnVerdict(monitor_alerts_configured)) === "RECOVERED";
+  }
+  if (monitor_alerts_configured.alert_for === GC.CERT_EXPIRY) {
+    // Same reasoning, same shape: only a certificate we could actually read and
+    // found healthy closes the alert. An unreachable host does not.
+    const result = await certVerdict(monitor_alerts_configured);
+    return result !== null && isCertRecovered(result.verdict);
   }
   return false;
 }
@@ -744,6 +822,70 @@ export const pushSloBurnRate = async (ts: number, options?: JobsOptions) => {
   if (pushed > 0) console.log(`SLO: pushed ${pushed} burn-rate evaluation(s)`);
 };
 
+/**
+ * Enqueues a certificate evaluation for every active CERT_EXPIRY config (B7).
+ *
+ * **Scheduled daily rather than pushed by a sample, and that is the whole
+ * reason this exists separately from `push`.** STATUS and LATENCY are evaluated
+ * from each monitoring sample, which for a certificate would mean a TLS
+ * handshake per monitor per minute: hundreds of thousands of pointless
+ * handshakes a day against other people's servers, to re-read a value that
+ * changes about once a quarter. The SLO_BURN_RATE path already established the
+ * shape for an alert whose clock is not the sample clock, and this follows it.
+ *
+ * Deduplicated on `(config, ts)`, so a scheduler tick delivered twice evaluates
+ * once. The monitor is resolved inside the worker rather than here: a handshake
+ * belongs in the job, not in the loop that queues them.
+ */
+export const pushCertExpiry = async (ts: number, options?: JobsOptions) => {
+  const configs = await GetMonitorAlertConfigs({
+    alert_for: GC.CERT_EXPIRY as MonitorAlertConfigRecord["alert_for"],
+    is_active: GC.YES,
+  });
+  if (configs.length === 0) return;
+
+  const queue = getQueue();
+  addWorker();
+
+  const jobOptions: JobsOptions = {
+    ...(options ?? {}),
+    removeOnComplete: { age: 300, count: 100 },
+    removeOnFail: { age: 24 * 3600 },
+  };
+
+  let pushed = 0;
+  for (const config of configs) {
+    if (!config.monitor_tag) continue;
+    const monitors = await GetMonitorsParsed({ tag: config.monitor_tag });
+    const monitor = monitors[0];
+    // A config whose monitor was deleted is skipped rather than queued: the
+    // worker would answer null and do nothing anyway.
+    if (!monitor) continue;
+
+    await queue.add(
+      jobNamePrefix + "_cert_" + config.id,
+      {
+        monitor_name: monitor.name,
+        monitor_tag: config.monitor_tag,
+        monitor_settings: (monitor.monitor_settings_json ?? {}) as MonitorSettings,
+        monitor_alerts_configured: config,
+        monitor_type: monitor.monitor_type,
+        monitor_image: monitor.image ?? "",
+        monitor_id: monitor.id,
+        monitor_description: monitor.description ?? "",
+        numerator: GC.defaultNumeratorStr,
+        denominator: GC.defaultDenominatorStr,
+        ts,
+        // No status: this alert does not read the monitor's samples at all.
+        status: "",
+      },
+      { ...jobOptions, deduplication: { id: `cert-${config.id}-${ts}` } },
+    );
+    pushed++;
+  }
+  if (pushed > 0) console.log(`Certificates: pushed ${pushed} expiry evaluation(s)`);
+};
+
 //graceful shutdown
 export const shutdown = async () => {
   if (worker) {
@@ -755,5 +897,6 @@ export const shutdown = async () => {
 export default {
   push,
   pushSloBurnRate,
+  pushCertExpiry,
   shutdown,
 };

@@ -160,6 +160,50 @@ export function isWorseImpact(a: ComponentImpact, b: ComponentImpact): boolean {
   return IMPACT_RANK[a] > IMPACT_RANK[b];
 }
 
+/**
+ * What an alert-opened incident should say about the monitor it names.
+ *
+ * **This exists because the alert's threshold was being used as the impact.**
+ * `createNewIncident` passed `config.alert_value` straight through to
+ * `AddIncidentMonitor`, which is only ever meaningful for a STATUS alert, where
+ * the value genuinely is DOWN or DEGRADED. For every other kind it is a number:
+ * milliseconds for LATENCY, a percentage for UPTIME, days for CERT_EXPIRY. None
+ * of those is a component impact, so `AddIncidentMonitor` threw.
+ *
+ * **And the throw was silent in the worst way.** It happens before
+ * `notifyQuietly`, so a LATENCY or UPTIME alert with `create_incident` turned on
+ * produced no incident AND no notification: the alert row was committed in the
+ * transaction above, so the alert looked active while nobody was told about it.
+ * Turning on "create an incident" silently turned off being paged.
+ *
+ * The mapping, and why each one:
+ *
+ *   STATUS       the value IS the status being alerted on, so it is used as
+ *                before and this function changes nothing for it.
+ *   LATENCY      the service answers, slowly. DEGRADED_PERFORMANCE is what a
+ *                customer is experiencing, and it is the honest claim: nothing
+ *                is down.
+ *   UPTIME       uptime under a threshold is a period of unreliability rather
+ *                than a present outage, so the same.
+ *   CERT_EXPIRY  OPERATIONAL. The service is up; it will not be in three weeks.
+ *                B7 is explicit that this must not mark the monitor down, and
+ *                OPERATIONAL projects onto a null `monitor_impact`, which is
+ *                "write no overlay row" rather than "assert health".
+ */
+export function alertIncidentComponentImpact(alertFor: string, alertValue: string): ComponentImpact {
+  if (alertFor === GC.STATUS) {
+    // The one case where the threshold really is a status. Left going through
+    // the same inference `AddIncidentMonitor` would have applied.
+    return isComponentImpact(alertValue) ? alertValue : componentImpactFromMonitorImpact(alertValue);
+  }
+  if (alertFor === GC.CERT_EXPIRY) return "OPERATIONAL";
+  if (alertFor === GC.LATENCY || alertFor === GC.UPTIME) return "DEGRADED_PERFORMANCE";
+
+  // Anything added later gets the cautious answer rather than a throw: an
+  // unknown alert kind should still open a readable incident.
+  return "DEGRADED_PERFORMANCE";
+}
+
 // ---------------------------------------------------------------- severity
 
 /** Incident severity, worst last. About customer impact, not about the rule. */

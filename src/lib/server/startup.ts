@@ -5,6 +5,7 @@ import maintenanceScheduler from "./schedulers/maintenanceScheduler.js";
 import dailyCleanupScheduler from "./schedulers/dailyCleanup.js";
 import rollupScheduler from "./schedulers/rollupScheduler.js";
 import slaScheduler from "./schedulers/slaScheduler.js";
+import certificateScheduler from "./schedulers/certificateScheduler.js";
 import reportScheduler from "./schedulers/reportScheduler.js";
 import eventRelayQueue from "./queues/eventRelayQueue.js";
 import backfillQueue from "./queues/backfillQueue.js";
@@ -44,6 +45,7 @@ async function Startup(): Promise<void> {
   // SLO target every five minutes, and the web process must never be doing that
   // on a page load.
   await slaScheduler.start();
+  await certificateScheduler.start();
   // F4. Scheduler process only, like the rollups and the SLO evaluations it
   // renders from: the hourly tick enqueues due schedules and sweeps expired
   // artifacts, and neither is work the web process should duplicate.

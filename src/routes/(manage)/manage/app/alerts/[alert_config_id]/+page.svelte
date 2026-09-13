@@ -74,7 +74,8 @@
     { value: GC.STATUS, label: GC.STATUS },
     { value: GC.LATENCY, label: GC.LATENCY },
     { value: GC.UPTIME, label: GC.UPTIME },
-    { value: GC.SLO_BURN_RATE as AlertForType, label: "SLO BURN RATE" }
+    { value: GC.SLO_BURN_RATE as AlertForType, label: "SLO BURN RATE" },
+    { value: GC.CERT_EXPIRY as AlertForType, label: "CERTIFICATE" }
   ];
 
   /** The windows `sla_evaluations` stores, so the pair below can only name real ones. */
@@ -91,6 +92,15 @@
    * place.
    */
   let isBurnRate = $derived(form.alert_for === GC.SLO_BURN_RATE);
+
+  /**
+   * B7. A certificate alert is checked once a day on its own schedule, so the
+   * consecutive-check thresholds mean nothing to it: there is no run of samples
+   * to count. Hiding them is the honest thing, because leaving them on screen
+   * invites an operator to set "3 consecutive failures" and wait three days for
+   * a warning they expected immediately.
+   */
+  let isCertExpiry = $derived(form.alert_for === GC.CERT_EXPIRY);
 
   const statusValueOptions = [
     { value: GC.DOWN, label: GC.DOWN },
@@ -129,6 +139,20 @@
       form.alert_value = "1000";
     } else if (newValue === GC.UPTIME) {
       form.alert_value = "99";
+    } else if (newValue === GC.CERT_EXPIRY) {
+      // Thirty days is the first of the standard 30/14/7 ladder, and the one an
+      // operator creating a single certificate alert almost always wants.
+      form.alert_value = "30";
+      // One reading is the whole evidence: there is no flapping to smooth out,
+      // and a threshold above 1 would silently delay every warning by that many
+      // days.
+      form.failure_threshold = 1;
+      form.success_threshold = 1;
+      // B7 is explicit that a certificate warning must not mark the monitor
+      // down. It still cannot, because the impact is OPERATIONAL either way,
+      // but defaulting this to NO means the common case never creates an
+      // incident for something that is not an outage.
+      form.create_incident = GC.NO as YesNoType;
     } else if (newValue === GC.SLO_BURN_RATE) {
       // The classic fast-burn rule, so the standard rule is what somebody gets
       // without having to know the numbers.
@@ -527,28 +551,35 @@
             <Input
               id="alert-value"
               type="number"
-              min={form.alert_for === GC.UPTIME ? "0" : "1"}
-              max={form.alert_for === GC.UPTIME ? "100" : undefined}
+              min={form.alert_for === GC.UPTIME || isCertExpiry ? "0" : "1"}
+              max={form.alert_for === GC.UPTIME ? "100" : isCertExpiry ? "365" : undefined}
               bind:value={form.alert_value}
             />
           {/if}
           <p class="text-muted-foreground text-xs">{alertValueHelp}</p>
         </div>
 
-        <!-- Thresholds -->
-        <div class="grid grid-cols-2 gap-4">
-          <div class="flex flex-col gap-2">
-            <Label for="failure-threshold">Failure Threshold</Label>
-            <Input id="failure-threshold" type="number" min="1" bind:value={form.failure_threshold} />
-            <p class="text-muted-foreground text-xs">Consecutive failures before alert</p>
-          </div>
+        <!--
+          Thresholds. Hidden for a certificate alert, which is checked once a day
+          on its own schedule and has no run of consecutive samples to count.
+          Leaving them visible would invite "3 consecutive failures" and a
+          warning that arrives three days late.
+        -->
+        {#if !isCertExpiry}
+          <div class="grid grid-cols-2 gap-4">
+            <div class="flex flex-col gap-2">
+              <Label for="failure-threshold">Failure Threshold</Label>
+              <Input id="failure-threshold" type="number" min="1" bind:value={form.failure_threshold} />
+              <p class="text-muted-foreground text-xs">Consecutive failures before alert</p>
+            </div>
 
-          <div class="flex flex-col gap-2">
-            <Label for="success-threshold">Success Threshold</Label>
-            <Input id="success-threshold" type="number" min="1" bind:value={form.success_threshold} />
-            <p class="text-muted-foreground text-xs">Consecutive successes to resolve</p>
+            <div class="flex flex-col gap-2">
+              <Label for="success-threshold">Success Threshold</Label>
+              <Input id="success-threshold" type="number" min="1" bind:value={form.success_threshold} />
+              <p class="text-muted-foreground text-xs">Consecutive successes to resolve</p>
+            </div>
           </div>
-        </div>
+        {/if}
 
         <!-- Generated Alert Text -->
         <div class="flex flex-col gap-2">

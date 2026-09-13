@@ -36,10 +36,20 @@ export type {
 
 // ============ Validation ============
 
-const VALID_ALERT_FOR: AlertForType[] = ["STATUS", "LATENCY", "UPTIME", "SLO_BURN_RATE"];
+const VALID_ALERT_FOR: AlertForType[] = ["STATUS", "LATENCY", "UPTIME", "SLO_BURN_RATE", "CERT_EXPIRY"];
 const VALID_SEVERITY: AlertSeverityType[] = ["CRITICAL", "WARNING"];
 const VALID_YES_NO: YesNoType[] = ["YES", "NO"];
 const VALID_STATUS_VALUES = ["DOWN", "DEGRADED", "UP"];
+
+/**
+ * B7. The longest certificate warning worth offering.
+ *
+ * Public CAs issue for 398 days at most, and the industry is moving shorter. A
+ * threshold above that would be satisfied on the day a certificate is issued, so
+ * the alert would fire immediately and permanently on a perfectly healthy
+ * service - which an operator reads as the feature being broken.
+ */
+const MAX_CERT_EXPIRY_DAYS = 365;
 
 function validateAlertFor(value: string): asserts value is AlertForType {
   if (!VALID_ALERT_FOR.includes(value as AlertForType)) {
@@ -76,6 +86,24 @@ function validateAlertValue(alertFor: AlertForType, alertValue: string): void {
     if (isNaN(numValue) || numValue < 0 || numValue > 100) {
       throw new Error(
         `Invalid alert_value for UPTIME alert: ${alertValue}. Must be a number between 0 and 100 (percentage)`,
+      );
+    }
+  } else if (alertFor === "CERT_EXPIRY") {
+    // B7. Days of warning. Whole days only, because that is the unit the
+    // assessment counts in - a threshold of 7.5 would behave as 7 and read as a
+    // setting that was ignored.
+    const numValue = Number(alertValue);
+    if (!Number.isInteger(numValue) || numValue < 0) {
+      throw new Error(
+        `Invalid alert_value for CERT_EXPIRY alert: ${alertValue}. Must be a whole number of days (0 or more)`,
+      );
+    }
+    if (numValue > MAX_CERT_EXPIRY_DAYS) {
+      // A threshold longer than a typical certificate's whole life fires the
+      // moment it is created and never stops, which reads as the alert being
+      // broken rather than as the threshold being wrong.
+      throw new Error(
+        `Invalid alert_value for CERT_EXPIRY alert: ${alertValue}. ${MAX_CERT_EXPIRY_DAYS} days is the longest useful warning`,
       );
     }
   }
@@ -187,8 +215,16 @@ export async function CreateMonitorAlertConfig(
   const insertData: MonitorAlertConfigInsert = {
     alert_for: data.alert_for,
     alert_value: data.alert_value,
-    failure_threshold: data.failure_threshold,
-    success_threshold: data.success_threshold,
+    // Defaulted rather than passed through. Both columns are NOT NULL with a
+    // database default of 1, and knex writes an explicit NULL for an undefined
+    // field - which OVERRIDES the default and fails the constraint. So a caller
+    // omitting them got a raw SQL error rather than the documented default.
+    //
+    // B7 makes this reachable from the product rather than only from the API:
+    // a certificate alert is checked once a day and has no run of consecutive
+    // samples to count, so the screen hides both fields.
+    failure_threshold: data.failure_threshold ?? 1,
+    success_threshold: data.success_threshold ?? 1,
     alert_description: data.alert_description || null,
     create_incident: data.create_incident || "NO",
     is_active: data.is_active || "YES",
