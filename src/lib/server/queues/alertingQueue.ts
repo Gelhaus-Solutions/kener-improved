@@ -139,6 +139,19 @@ async function sloBurnDetail(config: MonitorAlertConfigRecord): Promise<string> 
   return rows.length > 0 ? describeBurnRule(rule, rows[0]) : "burn-rate threshold exceeded";
 }
 
+/**
+ * What a burn-rate incident declares about the monitors in its scope.
+ *
+ * **Named and exported so the decision can be tested rather than trusted.** The
+ * property that matters is not the word: it is that this impact projects onto a
+ * null `monitor_impact`, so no synthetic sample is ever written over the
+ * monitors' realtime data. `sloImpactWritesNoOverlay` in the test file pins
+ * exactly that, because the failure it guards against is silent - the page
+ * simply starts showing an outage nobody observed, and the SLO that raised the
+ * alert gets worse because of it.
+ */
+export const SLO_INCIDENT_COMPONENT_IMPACT = "OPERATIONAL" as const;
+
 async function createSloIncident(
   alert: MonitorAlertV2Record,
   config: MonitorAlertConfigRecord,
@@ -165,7 +178,28 @@ async function createSloIncident(
   const created = await CreateIncident(incidentInput);
   await AddIncidentComment(created.incident_id, body, GC.INVESTIGATING, startDateTime);
   for (const tag of monitorTags) {
-    await AddIncidentMonitor(created.incident_id, tag, GC.DOWN);
+    // OPERATIONAL, and this is a correctness fix rather than a wording choice.
+    //
+    // A burn-rate alert says the error budget is being consumed too fast. It
+    // does NOT say these monitors are failing right now: the burn is computed
+    // from their own history, and the service is very often up at the moment
+    // the rule fires. Declaring MAJOR_OUTAGE here, which is what GC.DOWN
+    // resolves to, asserted an outage nothing had observed.
+    //
+    // **And it fed back into the number it was reporting on.** An open incident
+    // with a non-null `monitor_impact` makes `monitorExecuteQueue` write a
+    // synthetic row over the monitor's realtime data every minute it stays
+    // open. `slaEvaluator` reads exactly that data, through the hourly rollups
+    // and the raw tail. So the incident manufactured the downtime that kept its
+    // own burn rate high, and left the invented outage in ninety days of bars
+    // and in every uptime percentage afterwards.
+    //
+    // OPERATIONAL projects onto a null `monitor_impact`, which `impact.ts`
+    // documents as "write no overlay row at all" rather than "write an UP row",
+    // so the monitors keep showing whatever they actually reported. The
+    // incident still opens, still carries its severity, and still names these
+    // components; only the false claim about their status is gone.
+    await AddIncidentMonitor(created.incident_id, tag, SLO_INCIDENT_COMPONENT_IMPACT);
   }
   return created;
 }
