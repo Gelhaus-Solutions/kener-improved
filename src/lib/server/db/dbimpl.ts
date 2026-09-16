@@ -34,6 +34,7 @@ import { EmailTemplateConfigRepository } from "./repositories/emailTemplateConfi
 import { OrgsRepository } from "./repositories/orgs.js";
 import { PageDomainsRepository } from "./repositories/pageDomains.js";
 import { ProbesRepository } from "./repositories/probes.js";
+import { RegionTargetsRepository } from "./repositories/regionTargets.js";
 import { InboundRepository } from "./repositories/inbound.js";
 
 // Re-export types from base
@@ -155,6 +156,7 @@ class DbImpl {
   private orgs!: OrgsRepository;
   private pageDomains!: PageDomainsRepository;
   private probes!: ProbesRepository;
+  private regionTargets!: RegionTargetsRepository;
   private inbound!: InboundRepository;
   private sessions!: SessionsRepository;
   private mfa!: MfaRepository;
@@ -575,6 +577,15 @@ class DbImpl {
   setMonitorSourcePolicy!: ProbesRepository["setMonitorSourcePolicy"];
   deleteMonitorSourcePolicy!: ProbesRepository["deleteMonitorSourcePolicy"];
   deleteMergePoliciesForMonitor!: ProbesRepository["deleteMergePoliciesForMonitor"];
+
+  // B12a. Which regional endpoints make up one multi-region service.
+  getRegionTargets!: RegionTargetsRepository["getRegionTargets"];
+  getRegionTargetsForParents!: RegionTargetsRepository["getRegionTargetsForParents"];
+  getRegionTargetByChild!: RegionTargetsRepository["getRegionTargetByChild"];
+  getAllRegionTargetChildTags!: RegionTargetsRepository["getAllRegionTargetChildTags"];
+  addRegionTarget!: RegionTargetsRepository["addRegionTarget"];
+  removeRegionTarget!: RegionTargetsRepository["removeRegionTarget"];
+  removeRegionTargetsForParent!: RegionTargetsRepository["removeRegionTargetsForParent"];
   getOrgById!: OrgsRepository["getOrgById"];
   getOrgBySlug!: OrgsRepository["getOrgBySlug"];
   getAllOrgs!: OrgsRepository["getAllOrgs"];
@@ -804,6 +815,7 @@ class DbImpl {
     this.orgs = new OrgsRepository(this.knex);
     this.pageDomains = new PageDomainsRepository(this.knex);
     this.probes = new ProbesRepository(this.knex);
+    this.regionTargets = new RegionTargetsRepository(this.knex);
     this.inbound = new InboundRepository(this.knex);
     this.findEndpointByTokenHash = this.inbound.findEndpointByTokenHash.bind(this.inbound);
     this.tokenHashExists = this.inbound.tokenHashExists.bind(this.inbound);
@@ -1520,6 +1532,13 @@ class DbImpl {
     this.setMonitorSourcePolicy = this.probes.setMonitorSourcePolicy.bind(this.probes);
     this.deleteMonitorSourcePolicy = this.probes.deleteMonitorSourcePolicy.bind(this.probes);
     this.deleteMergePoliciesForMonitor = this.probes.deleteMergePoliciesForMonitor.bind(this.probes);
+    this.getRegionTargets = this.regionTargets.getRegionTargets.bind(this.regionTargets);
+    this.getRegionTargetsForParents = this.regionTargets.getRegionTargetsForParents.bind(this.regionTargets);
+    this.getRegionTargetByChild = this.regionTargets.getRegionTargetByChild.bind(this.regionTargets);
+    this.getAllRegionTargetChildTags = this.regionTargets.getAllRegionTargetChildTags.bind(this.regionTargets);
+    this.addRegionTarget = this.regionTargets.addRegionTarget.bind(this.regionTargets);
+    this.removeRegionTarget = this.regionTargets.removeRegionTarget.bind(this.regionTargets);
+    this.removeRegionTargetsForParent = this.regionTargets.removeRegionTargetsForParent.bind(this.regionTargets);
     this.getOrgById = this.orgs.getOrgById.bind(this.orgs);
     this.getOrgBySlug = this.orgs.getOrgBySlug.bind(this.orgs);
     this.getAllOrgs = this.orgs.getAllOrgs.bind(this.orgs);

@@ -104,6 +104,12 @@ export const TENANT_TABLES: ReadonlySet<string> = new Set([
   "monitor_merge_policies",
   "monitor_source_policies",
 
+  // B12a. Which regional endpoints make up one multi-region service. Scoped
+  // because it names two monitor tags and a region, all three of which are one
+  // tenant's, and because an unscoped read here would let one org enumerate
+  // another's service topology from a table that looks like plumbing.
+  "monitor_region_targets",
+
   // The big one. Scoped like the rest even though `monitor_tag` is globally
   // unique, because "it is safe by accident" is not a property to rely on.
   "monitoring_data",

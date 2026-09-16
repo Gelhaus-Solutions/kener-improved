@@ -22,3 +22,4 @@ export { WebhooksRepository } from "./webhooks.js";
 export { SessionsRepository } from "./sessions.js";
 export { MfaRepository } from "./mfa.js";
 export { ProbesRepository, type ProbeAgentRecord, type ProbeAssignmentRecord, type ProbeTarget } from "./probes.js";
+export { RegionTargetsRepository, type RegionTargetRecord } from "./regionTargets.js";

@@ -124,6 +124,16 @@ export interface RegionDefaultsRecord {
   /** B13. Null means the region has no place on the map and is not plotted. */
   latitude: number | null;
   longitude: number | null;
+  /**
+   * B12a. Which axis this region may serve.
+   *
+   * Independent bits, not a three-way choice: "both" and "neither" are real and
+   * equally legitimate states. `boolean | number` because SQLite hands booleans
+   * back as 0 and 1 and Postgres as true and false, which is the same shape
+   * `is_active` above already has to carry.
+   */
+  usable_as_probe: boolean | number;
+  usable_as_target: boolean | number;
 }
 
 /** One monitor's policy override. Every setting nullable: null means inherit. */
@@ -495,9 +505,10 @@ export class ProbesRepository extends BaseRepository {
         .where("org_id", orgId)
         .orWhereNull("org_id")
         .orderBy("id", "asc")
-        // B13 adds latitude and longitude. This projection is an allowlist: a
-        // column missing from it arrives as `undefined` at the screen, and the
-        // map then silently plots nothing while every query reports success.
+        // B13 adds latitude and longitude; B12a adds the two axis markers. This
+        // projection is an allowlist: a column missing from it arrives as
+        // `undefined` at the screen, and the map then silently plots nothing
+        // while every query reports success.
         .select(
           "id",
           "org_id",
@@ -509,6 +520,8 @@ export class ProbesRepository extends BaseRepository {
           "default_mode",
           "latitude",
           "longitude",
+          "usable_as_probe",
+          "usable_as_target",
         ),
     );
   }
@@ -552,6 +565,11 @@ export class ProbesRepository extends BaseRepository {
       // write still reports success.
       latitude?: number | null;
       longitude?: number | null;
+      // B12a. Not nullable, unlike everything above it: the axis markers are
+      // NOT NULL with a default, and "inherit" is not one of their states. A
+      // region either may serve an axis or may not.
+      usable_as_probe?: boolean;
+      usable_as_target?: boolean;
     },
   ): Promise<number> {
     // Unscoped for the same reason as the read: the rows an operator most wants
