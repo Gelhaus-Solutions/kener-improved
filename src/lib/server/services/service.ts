@@ -3,6 +3,7 @@ import PingCall from "./pingCall.js";
 import TcpCall from "./tcpCall.js";
 import DnsCall from "./dnsCall.js";
 import GroupCall from "./groupCall.js";
+import MultiRegionCall from "./multiRegionCall.js";
 import SSLCall from "./sslCall.js";
 import SqlCall from "./sqlCall.js";
 import HeartbeatCall from "./heartbeatCall.js";
@@ -42,6 +43,7 @@ type ServiceCall =
   | GrpcCall
   | PrometheusCall
   | DockerCall
+  | MultiRegionCall
   | NoneCall;
 
 export interface MonitorWithType {
@@ -65,6 +67,11 @@ class Service {
       this.service = new DnsCall(monitor as DnsMonitor);
     } else if (monitor.monitor_type === "GROUP") {
       this.service = new GroupCall(monitor as GroupMonitor);
+    } else if (monitor.monitor_type === "MULTI_REGION") {
+      // B12b. Takes the whole `MonitorWithType`, not a narrowed monitor: it needs
+      // the tag to find its regional endpoints and the cron to decide how stale
+      // one of their samples may be before it stops believing it.
+      this.service = new MultiRegionCall(monitor);
     } else if (monitor.monitor_type === "SSL") {
       this.service = new SSLCall(monitor as SslMonitor);
     } else if (monitor.monitor_type === "SQL") {

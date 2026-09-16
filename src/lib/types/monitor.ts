@@ -18,6 +18,10 @@ export const MONITOR_TYPES = [
   "GRPC",
   "PROMETHEUS",
   "DOCKER",
+  // B12. One service deployed in several places, each with its own endpoint.
+  // Computes rather than checks, like GROUP: its regional endpoints are ordinary
+  // monitors and this rolls their statuses up by a fixed rule.
+  "MULTI_REGION",
 ] as const;
 export type MonitorType = (typeof MONITOR_TYPES)[number];
 

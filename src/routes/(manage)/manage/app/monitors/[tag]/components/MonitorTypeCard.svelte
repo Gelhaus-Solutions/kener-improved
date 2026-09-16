@@ -120,7 +120,8 @@
     GAMEDIG: "Game Server",
     GRPC: "gRPC Health",
     PROMETHEUS: "Prometheus",
-    DOCKER: "Docker Container"
+    DOCKER: "Docker Container",
+    MULTI_REGION: "Multi-region Service"
   };
 
   // Validation for each monitor type

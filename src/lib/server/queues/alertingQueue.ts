@@ -27,6 +27,7 @@ import type { IncidentInput } from "../controllers/incidentController.js";
 import { GetMonitorAlertsV2 } from "../controllers/monitorAlertConfigController.js";
 import db from "../db/db.js";
 import { MayHaveAlertConfig } from "../cache/alertConfigTags.js";
+import { isRegionalEndpoint } from "../regions/multiRegion.js";
 import { getUnixTime, differenceInSeconds } from "date-fns";
 import { parseDbTimestamp } from "../tool.js";
 import GC from "../../global-constants.js";
@@ -710,6 +711,28 @@ export const push = async (monitor_tag: string, ts: number, status: string, opti
   // below. Answers true whenever it cannot be certain, so a Redis problem costs
   // queries rather than alerts.
   if (!(await MayHaveAlertConfig(monitor_tag))) {
+    return;
+  }
+
+  /**
+   * B12b. A regional endpoint does not alert on its own behalf.
+   *
+   * Enno's Q3 decision: alerting fires per SERVICE and names the region. Every
+   * endpoint is an ordinary monitor with its own tag and `monitor_alerts_config`
+   * is keyed on `monitor_tag`, so without this a correlated outage on a
+   * twelve-region service pages twelve times. B12d makes it concrete rather than
+   * theoretical: folding an existing set of regional monitors carries over the
+   * alert configs they are already watched by.
+   *
+   * **Placed AFTER the `MayHaveAlertConfig` gate on purpose.** That gate is the
+   * cheap one and it eliminates the overwhelming majority of monitor-minutes, so
+   * this query only runs for a monitor that genuinely has an alert configured.
+   * Ahead of it, this would be an indexed read per monitor per minute for
+   * nothing.
+   *
+   * Fails open; see `isRegionalEndpoint`.
+   */
+  if (await isRegionalEndpoint(monitor_tag)) {
     return;
   }
 
