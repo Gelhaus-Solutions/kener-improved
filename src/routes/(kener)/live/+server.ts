@@ -1,6 +1,6 @@
 import type { RequestHandler } from "./$types";
 import { currentOrgId } from "$lib/server/events/eventContext";
-import { GetPageByPathWithMonitors } from "$lib/server/controllers/pagesController";
+import { resolveLiveScope } from "$lib/server/live/scope";
 import { addListener, connectionCount, replaySince, type LiveMessage } from "$lib/server/live/hub";
 
 // G5: the public live-update stream.
@@ -52,13 +52,9 @@ export const GET: RequestHandler = async ({ url, request }) => {
   // Resolved here, inside the org context. See the header.
   const orgId = currentOrgId();
 
-  // Which page the viewer has open, so a stream carries that page's monitors and
-  // nothing else. Absent means the home page, whose `page_path` is "".
-  const pagePath = url.searchParams.get("page") ?? "";
-  const pageData = await GetPageByPathWithMonitors(pagePath);
-
-  const allowedTags = new Set((pageData?.monitors ?? []).map((m) => m.monitor_tag));
-  const pageId = pageData?.page.id ?? null;
+  // What this stream may hear: one monitor, or one page's monitors. Resolved
+  // here, inside the org context, and tested in isolation. See scope.ts.
+  const { allowedTags, pageId } = await resolveLiveScope(url.searchParams);
 
   const headers = {
     "content-type": "text/event-stream",

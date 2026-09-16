@@ -150,6 +150,18 @@ export const load: PageServerLoad = async ({ params, parent }) => {
   return {
     ...{
       monitorTag: monitor_tag,
+      // B13. The PHYSICAL tag, alongside the URL segment above rather than
+      // instead of it.
+      //
+      // `monitorTag` is the per-org SLUG, because it is what the embed, the
+      // badge and every public link this page renders have to carry. The live
+      // stream is the other way round: `monitoring_data` is keyed by tag and
+      // `publishRegionStatus` puts the tag on the wire, so keying the region
+      // overrides by `monitorTag` matched nothing on any org with a `tag_prefix`
+      // - a map that stayed at its load-time colours for ever while the stream
+      // sat there delivering perfectly good events. Identical strings on the
+      // default org, which is exactly why it is invisible until it is not.
+      monitorPhysicalTag: monitor.tag,
       monitorName: monitor.name,
       monitorImage: monitor.image,
       monitorDescription: monitor.description,

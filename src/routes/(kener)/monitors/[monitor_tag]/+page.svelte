@@ -55,9 +55,31 @@
     return () => clearInterval(timer);
   });
 
+  /**
+   * B13. The stream this page's map is kept live by.
+   *
+   * **`connectMonitor`, never `connect`.** `connect` scopes by status page, and
+   * a monitor page is not a page: it would be handed the home page's monitor
+   * allowlist and this monitor's events would be refused unless it happened to
+   * be listed there. The argument is the URL segment, the per-org slug, which is
+   * what the server resolves and checks visibility on.
+   *
+   * `reset` before connecting because the store is a singleton shared with the
+   * monitor list: navigating from a page to a monitor must not leave the
+   * previous scope's region overrides sitting in it.
+   */
+  $effect(() => {
+    const name = data.monitorTag;
+    liveStatus.reset();
+    liveStatus.connectMonitor(name);
+    return () => liveStatus.disconnect();
+  });
+
   const regionEntries = $derived(
     (data.regionMap ?? []).map((entry: RegionMapEntry) => {
-      const live = liveStatus.regionStatusByKey[`${data.monitorTag}:${entry.id}`];
+      // Keyed by the PHYSICAL tag. The events carry the tag and the URL carries
+      // the slug; see `monitorPhysicalTag` in the loader.
+      const live = liveStatus.regionStatusByKey[`${data.monitorPhysicalTag}:${entry.id}`];
       const sample = live ?? (entry.observedAt === null ? null : { status: entry.status, timestamp: entry.observedAt });
       const status = statusFromSample(sample, now);
       return {

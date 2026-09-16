@@ -47,24 +47,53 @@ class LiveStatus {
 
   #source: EventSource | null = null;
   #failures = 0;
-  #path: string | null = null;
+  #scope: string | null = null;
 
   /**
    * Opens the stream for `pagePath`, or does nothing if already open for it.
    *
-   * Idempotent on the path so an effect that re-runs for an unrelated reason
+   * Idempotent on the scope so an effect that re-runs for an unrelated reason
    * does not drop and reopen a working connection.
    */
   connect(pagePath: string): void {
+    this.#open(`page:${pagePath}`, `page=${encodeURIComponent(pagePath)}`);
+  }
+
+  /**
+   * B13. Opens the stream for one monitor, for `/monitors/<slug>`.
+   *
+   * **A monitor page is not a page**, and calling `connect` there was the bug
+   * this method exists to make impossible: `?page=` resolves a status page's
+   * monitor list, `/monitors/<slug>` is not in that table, and the default
+   * therefore hands the monitor page the HOME page's allowlist - allowing
+   * whatever is listed there and refusing the monitor actually on screen.
+   *
+   * The argument is the name in the URL, which is the per-org SLUG. The server
+   * resolves it to the physical tag and every event still arrives keyed by tag,
+   * so callers must not try to be helpful and translate it first.
+   */
+  connectMonitor(monitorName: string): void {
+    this.#open(`monitor:${monitorName}`, `monitor=${encodeURIComponent(monitorName)}`);
+  }
+
+  /**
+   * The shared body of both scopes.
+   *
+   * `scopeKey` is prefixed by kind rather than being the bare name, so a page at
+   * path "api" and a monitor with slug "api" are not mistaken for the same open
+   * stream - which would leave whichever connected second reading the first
+   * one's allowlist.
+   */
+  #open(scopeKey: string, query: string): void {
     if (!browser) return;
     if (typeof EventSource === "undefined") return;
-    if (this.#source && this.#path === pagePath) return;
+    if (this.#source && this.#scope === scopeKey) return;
 
     this.disconnect();
-    this.#path = pagePath;
+    this.#scope = scopeKey;
     this.#failures = 0;
 
-    const url = clientResolver(resolve, "/live") + `?page=${encodeURIComponent(pagePath)}`;
+    const url = clientResolver(resolve, "/live") + `?${query}`;
 
     let source: EventSource;
     try {
@@ -135,7 +164,7 @@ class LiveStatus {
       this.#source = null;
     }
     this.connected = false;
-    this.#path = null;
+    this.#scope = null;
   }
 
   /** Clears every live override, for a navigation to a different page. */
