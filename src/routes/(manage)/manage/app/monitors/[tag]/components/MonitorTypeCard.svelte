@@ -32,6 +32,7 @@
     MonitorSql,
     MonitorHeartbeat,
     MonitorGroup,
+    MonitorMultiRegion,
     MonitorGamedig,
     MonitorNone,
     MonitorGrpc,
@@ -387,6 +388,8 @@
         <MonitorPrometheus bind:data={typeData} />
       {:else if monitor.monitor_type === "DOCKER"}
         <MonitorDocker bind:data={typeData} />
+      {:else if monitor.monitor_type === "MULTI_REGION"}
+        <MonitorMultiRegion bind:data={typeData} tag={monitor.tag} />
       {:else if monitor.monitor_type === "NONE"}
         <MonitorNone bind:data={typeData} />
       {/if}

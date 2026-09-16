@@ -124,6 +124,14 @@ export default {
         // The built-in lookup's answer for this code, so the screen can offer to
         // fill the coordinates in rather than making an operator find them.
         known_coordinates: coordinatesForCode(region.code),
+        // B12a. The same allowlist trap, and it bit: without these the screen
+        // read both axes as `undefined`, sent `false` for each on the next save,
+        // and silently turned OFF the probe axis of every region an operator
+        // touched. Normalised to real booleans because SQLite hands them back as
+        // 0 and 1 while Postgres uses true and false, and the screen compares
+        // them against checkbox state.
+        usable_as_probe: !!region.usable_as_probe,
+        usable_as_target: !!region.usable_as_target,
         // Region 0 is the computed answer, so nothing observes there and it has
         // nothing to configure. Listed anyway, because an operator looking for
         // it should find it explained rather than absent.

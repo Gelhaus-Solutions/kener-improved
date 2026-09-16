@@ -3,6 +3,7 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
+  import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import { Spinner } from "$lib/components/ui/spinner/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
@@ -111,6 +112,13 @@
     longitude: number | null;
     /** What the built-in lookup knows for this code, or null. */
     known_coordinates: { latitude: number; longitude: number } | null;
+    /**
+     * B12a. Which axis this region may serve. Independent bits: a region can be
+     * somewhere checks run FROM, somewhere a service is deployed IN, both, or
+     * neither. SQLite hands these back as 0 and 1, Postgres as booleans.
+     */
+    usable_as_probe: boolean | number;
+    usable_as_target: boolean | number;
   }
   interface MergeDefaults {
     policy: string;
@@ -478,7 +486,11 @@
         // empty number input binds to null, and null is what the action reads as
         // "this region has no place on the map" rather than as "leave it alone".
         latitude: region.latitude,
-        longitude: region.longitude
+        longitude: region.longitude,
+        // B12c. Normalised to real booleans: the two dialects disagree about the
+        // shape of a boolean column, and the action only accepts `boolean`.
+        usable_as_probe: !!region.usable_as_probe,
+        usable_as_target: !!region.usable_as_target
       });
       toast.success(`${region.name} saved`);
     } catch (e) {
@@ -944,9 +956,9 @@
               <p class="text-sm font-medium">Per region</p>
               <p class="text-muted-foreground text-xs">
                 Leave a field empty to inherit from above. A weight of 0 is not empty: it means the region is counted
-                and carries no weight. Coordinates are separate from all of that: they place the region on the map
-                above and change nothing about how it is counted, and a region without them stays fully usable and
-                simply is not drawn.
+                and carries no weight. Coordinates are separate from all of that: they place the region on the map above
+                and change nothing about how it is counted, and a region without them stays fully usable and simply is
+                not drawn.
               </p>
               {#each mergeRegions.filter((r) => r.configurable && r.id !== localRegionId) as region (region.id)}
                 <div class="flex flex-wrap items-end gap-2 rounded-md border p-2">
@@ -993,6 +1005,29 @@
                       placeholder="inherit"
                       bind:value={region.default_trust_rank}
                     />
+                  </div>
+                  <!-- B12a. Which axis this region serves. Two checkboxes rather
+                       than one choice, because "both" and "neither" are real
+                       states: a region with neither ticked is configured and
+                       unused, which is legible rather than broken. -->
+                  <div class="flex flex-col gap-1">
+                    <Label class="text-xs">Used for</Label>
+                    <div class="flex items-center gap-3 pb-2">
+                      <label class="flex items-center gap-1.5 text-xs">
+                        <Checkbox
+                          checked={!!region.usable_as_probe}
+                          onCheckedChange={(v) => (region.usable_as_probe = v === true)}
+                        />
+                        checks run from here
+                      </label>
+                      <label class="flex items-center gap-1.5 text-xs">
+                        <Checkbox
+                          checked={!!region.usable_as_target}
+                          onCheckedChange={(v) => (region.usable_as_target = v === true)}
+                        />
+                        services deployed here
+                      </label>
+                    </div>
                   </div>
                   <!-- B13. Where the region is, for the map. `step="any"` because
                        a coordinate is not an integer and the default step of 1

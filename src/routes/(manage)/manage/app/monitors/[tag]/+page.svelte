@@ -168,7 +168,9 @@
       const response = await fetch(clientResolver(resolve, "/manage/api"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "getMonitors", data: { status: "ACTIVE" } })
+        // B12c. A picker: the regional endpoints of a multi-region service must
+        // not be offered here, or one service comes back as three entries.
+        body: JSON.stringify({ action: "getMonitors", data: { status: "ACTIVE", exclude_region_endpoints: true } })
       });
       const result = await response.json();
       if (!result.error) {

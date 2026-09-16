@@ -22,6 +22,15 @@ interface Payload {
    * code, when it knows the code. Ignored if explicit coordinates are also sent.
    */
   use_known_coordinates?: boolean;
+  /**
+   * B12a/B12c. Which axis this region may serve.
+   *
+   * Two independent bits rather than a choice: a region can be somewhere checks
+   * run FROM, somewhere a service is deployed IN, both, or neither. "Neither" is
+   * a real state, not a mistake, which is why this is not an enum.
+   */
+  usable_as_probe?: boolean;
+  usable_as_target?: boolean;
 }
 
 /**
@@ -103,6 +112,12 @@ export default {
       patch.latitude = known.latitude;
       patch.longitude = known.longitude;
     }
+    // B12c. Booleans, and absent means "leave it alone" as everywhere else here.
+    // Unlike the three defaults above, null is NOT a state: a region either may
+    // serve an axis or may not, and there is no instance default to inherit.
+    if (typeof data.usable_as_probe === "boolean") patch.usable_as_probe = data.usable_as_probe ? 1 : 0;
+    if (typeof data.usable_as_target === "boolean") patch.usable_as_target = data.usable_as_target ? 1 : 0;
+
     const weight = optionalNonNegative(data.default_weight, "default_weight");
     if (weight !== undefined) patch.default_weight = weight;
     const trustRank = optionalNonNegative(data.default_trust_rank, "default_trust_rank");

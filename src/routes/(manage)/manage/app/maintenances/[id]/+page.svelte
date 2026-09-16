@@ -337,7 +337,9 @@
       const response = await fetch(clientResolver(resolve, "/manage/api"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "getMonitors", data: { status: "ACTIVE" } })
+        // B12c. A picker: the regional endpoints of a multi-region service must
+        // not be offered here, or one service comes back as three entries.
+        body: JSON.stringify({ action: "getMonitors", data: { status: "ACTIVE", exclude_region_endpoints: true } })
       });
       const result = await response.json();
       if (!result.error) {
@@ -696,8 +698,8 @@
           <div class="flex flex-col gap-1">
             <Label for="suppress-alerts">Silence alerts</Label>
             <p class="text-muted-foreground text-xs">
-              On by default. While this window is open, the components it covers, and anything depending on them, do
-              not trigger alerts or open incidents. Turn it off to keep being paged through work you are watching.
+              On by default. While this window is open, the components it covers, and anything depending on them, do not
+              trigger alerts or open incidents. Turn it off to keep being paged through work you are watching.
             </p>
           </div>
           <Switch

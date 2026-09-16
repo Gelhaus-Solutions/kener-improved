@@ -165,6 +165,13 @@ export const ORG_ACTION_PERMISSION_MAP: Record<string, string | null> = {
   // question asked about one component, and reads monitors rather than pages.
   explainPageStatus: "pages.read",
   explainMonitorStatus: "monitors.read",
+
+  // B12c. A multi-region service's regional endpoints. `monitors.write` rather
+  // than `probes.write`: this creates and deactivates MONITORS, which is what
+  // that permission has always meant, and the region it names is a place the
+  // service is deployed rather than a place a check runs from.
+  getMultiRegionEndpoints: "monitors.read",
+  setMultiRegionEndpoints: "monitors.write",
   getPageDomains: "pages.read",
   savePageDomain: "pages.write",
   deletePageDomain: "pages.write",
