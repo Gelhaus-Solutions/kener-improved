@@ -15,9 +15,10 @@
   import { toast } from "svelte-sonner";
   import { resolve } from "$app/paths";
   import clientResolver from "$lib/client/resolver.js";
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import RegionMap from "$lib/components/regions/RegionMap.svelte";
-  import type { RegionMapEntry } from "$lib/regions/mapModel";
+  import { statusFromSample, type RegionMapEntry } from "$lib/regions/mapModel";
+  import { fleetLive } from "$lib/client/fleetLive.svelte.js";
 
   // B1c. Remote probe agents: small daemons elsewhere in the world that run a
   // check Kener asks them to run and report the result back.
@@ -374,7 +375,56 @@
     }
   }
 
-  onMount(load);
+  /**
+   * B13. The fleet map, kept live.
+   *
+   * Wall clock, and one of the few things `$derived` genuinely cannot express:
+   * nothing in this screen's state changes when a minute passes, and staleness
+   * depends on the passage of time rather than on any input.
+   */
+  let now = $state(Math.floor(Date.now() / 1000));
+  $effect(() => {
+    // Re-evaluated every 30s so a region that goes quiet fades to "no recent
+    // data" on an open screen rather than holding its colour until a reload.
+    const timer = setInterval(() => (now = Math.floor(Date.now() / 1000)), 30_000);
+    return () => clearInterval(timer);
+  });
+
+  /**
+   * The loaded map with each region's live reports applied.
+   *
+   * **`statusFromSample` is re-applied rather than the event being trusted**, so
+   * freshness means the same thing whether the screen was just opened or has
+   * been open for an hour. The fleet question is only "is this region reporting
+   * at all", so a report is fed in as UP and the shared freshness rule turns
+   * silence into NO_DATA - which is emphatically not DOWN: an agent that has not
+   * been started yet is not an outage.
+   */
+  const liveRegionMap = $derived(
+    regionMap.map((entry) => {
+      const reported = fleetLive.reportedAt[entry.id];
+      // The newer of the two, never whichever arrived last. A page loaded during
+      // a reconnect can hold a fresher sample than the first event that follows.
+      const observedAt = Math.max(entry.observedAt ?? 0, reported ?? 0) || null;
+      const status = statusFromSample(observedAt === null ? null : { status: "UP", timestamp: observedAt }, now);
+      return {
+        ...entry,
+        status,
+        observedAt: status === "NO_DATA" ? null : observedAt
+      } satisfies RegionMapEntry;
+    })
+  );
+
+  onMount(() => {
+    void load();
+    // `reset` first: the store is module-level, so a second visit to this screen
+    // would otherwise start from the reports of the first one, some of which may
+    // by now be older than the freshness window.
+    fleetLive.reset();
+    fleetLive.connect();
+  });
+
+  onDestroy(() => fleetLive.disconnect());
 
   async function saveMergePolicy() {
     if (!mergeForm) return;
@@ -401,6 +451,21 @@
    * An empty field is sent as null, not as 0: null means "inherit the instance
    * default" and 0 is a real weight meaning "this region cannot carry a vote".
    */
+  /**
+   * B13. Fills a region's coordinates from the built-in lookup for its code.
+   *
+   * Fills the fields rather than saving, so the operator sees what is about to
+   * be written and can correct it first. The action has a `use_known_coordinates`
+   * flag that does the same server-side for API callers; on a screen, a button
+   * that silently writes a location you never saw is the setting you later
+   * cannot explain.
+   */
+  function useKnownCoordinates(region: MergeRegion) {
+    if (!region.known_coordinates) return;
+    region.latitude = region.known_coordinates.latitude;
+    region.longitude = region.known_coordinates.longitude;
+  }
+
   async function saveRegionDefaults(region: MergeRegion) {
     busy = true;
     try {
@@ -408,7 +473,12 @@
         region_id: region.id,
         default_weight: region.default_weight,
         default_trust_rank: region.default_trust_rank,
-        default_mode: region.default_mode
+        default_mode: region.default_mode,
+        // B13. Sent every time, so clearing a field clears the coordinate: an
+        // empty number input binds to null, and null is what the action reads as
+        // "this region has no place on the map" rather than as "leave it alone".
+        latitude: region.latitude,
+        longitude: region.longitude
       });
       toast.success(`${region.name} saved`);
     } catch (e) {
@@ -722,7 +792,7 @@
       install with no probe agents has nothing but the merged verdict, which is
       not a place and never appears on a map.
     -->
-    {#if regionMap.length > 0}
+    {#if liveRegionMap.length > 0}
       <Card.Root>
         <Card.Header>
           <Card.Title>Where your probes are</Card.Title>
@@ -733,7 +803,7 @@
         </Card.Header>
         <Card.Content>
           <RegionMap
-            entries={regionMap}
+            entries={liveRegionMap}
             caption="The merged verdict is not shown: it is the computed answer rather than a place."
           />
         </Card.Content>
@@ -874,7 +944,9 @@
               <p class="text-sm font-medium">Per region</p>
               <p class="text-muted-foreground text-xs">
                 Leave a field empty to inherit from above. A weight of 0 is not empty: it means the region is counted
-                and carries no weight.
+                and carries no weight. Coordinates are separate from all of that: they place the region on the map
+                above and change nothing about how it is counted, and a region without them stays fully usable and
+                simply is not drawn.
               </p>
               {#each mergeRegions.filter((r) => r.configurable && r.id !== localRegionId) as region (region.id)}
                 <div class="flex flex-wrap items-end gap-2 rounded-md border p-2">
@@ -922,6 +994,46 @@
                       bind:value={region.default_trust_rank}
                     />
                   </div>
+                  <!-- B13. Where the region is, for the map. `step="any"` because
+                       a coordinate is not an integer and the default step of 1
+                       makes a browser reject 52.52. -->
+                  <div class="flex flex-col gap-1">
+                    <Label for={`region-lat-${region.id}`} class="text-xs">Latitude</Label>
+                    <Input
+                      id={`region-lat-${region.id}`}
+                      type="number"
+                      step="any"
+                      min="-90"
+                      max="90"
+                      class="w-28"
+                      placeholder="not set"
+                      bind:value={region.latitude}
+                    />
+                  </div>
+                  <div class="flex flex-col gap-1">
+                    <Label for={`region-lon-${region.id}`} class="text-xs">Longitude</Label>
+                    <Input
+                      id={`region-lon-${region.id}`}
+                      type="number"
+                      step="any"
+                      min="-180"
+                      max="180"
+                      class="w-28"
+                      placeholder="not set"
+                      bind:value={region.longitude}
+                    />
+                  </div>
+                  {#if region.known_coordinates}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={busy}
+                      onclick={() => useKnownCoordinates(region)}
+                      title={`Fill in the known location for ${region.code}`}
+                    >
+                      Use {region.code}
+                    </Button>
+                  {/if}
                   <Button variant="outline" size="sm" disabled={busy} onclick={() => saveRegionDefaults(region)}>
                     Save
                   </Button>
