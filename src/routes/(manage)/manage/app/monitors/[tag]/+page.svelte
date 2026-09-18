@@ -33,6 +33,7 @@
   import WhyThisStatusCard from "./components/WhyThisStatusCard.svelte";
   import StatusHistoryDaysCard from "./components/StatusHistoryDaysCard.svelte";
   import MonitorSharingOptionsCard from "./components/MonitorSharingOptionsCard.svelte";
+  import MonitorRegionMapCard from "./components/MonitorRegionMapCard.svelte";
   import GC from "$lib/global-constants.js";
 
   let { params }: PageProps = $props();
@@ -425,6 +426,18 @@
             <!-- Monitor Sharing Options Card -->
 
             <MonitorSharingOptionsCard bind:monitor {typeData} {subMenuOptions} />
+          </Accordion.Content>
+        </Accordion.Item>
+      {/if}
+      {#if !isNew}
+        <!-- B13. Its own section rather than a switch tucked inside Sharing
+             Options: the coordinates that feed this map were buried in another
+             card once already and were, in practice, unfindable. A setting
+             nobody can locate is a setting that does not exist. -->
+        <Accordion.Item value="region-map">
+          <Accordion.Trigger>Region Map</Accordion.Trigger>
+          <Accordion.Content class="flex flex-col gap-4 text-balance">
+            <MonitorRegionMapCard bind:monitor {typeData} />
           </Accordion.Content>
         </Accordion.Item>
       {/if}

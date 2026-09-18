@@ -18,6 +18,7 @@ import { ResolvePublicMonitorTag } from "$lib/server/controllers/publicMonitorRe
 import { publishedSlosFor } from "$lib/server/services/sloPublic";
 import { regionMapForMonitor } from "$lib/server/regions/mapData";
 import type { GroupMonitorTypeData } from "$lib/server/types/monitor";
+import type { MonitorSettings } from "$lib/server/types/db";
 
 export const load: PageServerLoad = async ({ params, parent }) => {
   const { monitor_tag } = params;
@@ -56,10 +57,19 @@ export const load: PageServerLoad = async ({ params, parent }) => {
   // and `monitoring_data` is keyed on the physical TAG, so passing the segment
   // would find no samples on any org with a tag prefix and the map would be
   // silently empty there while working on the default org.
-  const regionMap = await regionMapForMonitor(resolvedTag).catch((error) => {
-    console.warn("region map unavailable:", error instanceof Error ? error.message : String(error));
-    return [];
-  });
+  //
+  // Turned off per monitor, because the monitor page is where the map is
+  // actually displayed. Absent means shown, so a monitor that already has probe
+  // regions keeps the map it has. Checked HERE rather than in the component so a
+  // hidden map costs no query and ships no region list to the browser: "not
+  // rendered" and "not sent" are different amounts of not showing something.
+  const showRegionMap = (monitor.monitor_settings_json as MonitorSettings | undefined)?.show_region_map !== false;
+  const regionMap = showRegionMap
+    ? await regionMapForMonitor(resolvedTag).catch((error) => {
+        console.warn("region map unavailable:", error instanceof Error ? error.message : String(error));
+        return [];
+      })
+    : [];
 
   const [ongoingIncidents, ongoingMaintenances, upcomingMaintenances] = await Promise.all([
     showInlineEvents && eventSettings.incidents.enabled && eventSettings.incidents.ongoing.show

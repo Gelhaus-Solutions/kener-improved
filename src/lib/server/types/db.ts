@@ -234,6 +234,18 @@ export interface MonitorSettings {
     mobile: number;
   };
   sharing_options?: MonitorSharingOptions;
+  /**
+   * B13. Whether this monitor's public page draws the region map.
+   *
+   * Per monitor because that is where the map is actually displayed. Absent
+   * means shown, so every monitor that already has probe regions keeps the map
+   * it has; an operator who does not want a world map on a particular service
+   * turns it off there rather than instance-wide.
+   *
+   * It only ever suppresses. A monitor with no probe regions draws no map
+   * whatever this says, because there is nothing to draw.
+   */
+  show_region_map?: boolean;
 }
 
 export interface TimestampStatusCount {
