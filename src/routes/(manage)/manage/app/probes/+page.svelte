@@ -474,6 +474,39 @@
     region.longitude = region.known_coordinates.longitude;
   }
 
+  /**
+   * B13. A region's place, its axes and the name visitors see.
+   *
+   * Two calls because they are two different permissions-shaped concerns in the
+   * action layer: `renameRegion` owns the identifier and the display name,
+   * `setRegionDefaults` owns everything the merge and the map read. The name goes
+   * first, so a rename that is refused - the merged verdict, or a duplicate code -
+   * stops before anything else is written and the screen still shows the old
+   * name rather than a half-applied row.
+   */
+  async function saveRegionPlace(region: MergeRegion) {
+    busy = true;
+    try {
+      await call("renameRegion", { region_id: region.id, name: region.name });
+      await call("setRegionDefaults", {
+        region_id: region.id,
+        latitude: region.latitude,
+        longitude: region.longitude,
+        usable_as_probe: !!region.usable_as_probe,
+        usable_as_target: !!region.usable_as_target
+      });
+      toast.success(`${region.name} saved`);
+      // Reloaded rather than trusted: the name is normalised server-side and the
+      // map above is built from what was actually stored.
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save the region");
+      await load();
+    } finally {
+      busy = false;
+    }
+  }
+
   async function saveRegionDefaults(region: MergeRegion) {
     busy = true;
     try {
@@ -831,6 +864,107 @@
       </Card.Root>
     {/if}
 
+    <!--
+      B13. Where each region is, what it is used for, and what visitors call it.
+      Its own card and NOT gated on the merge policy: these are map and naming
+      settings, they were previously buried inside "How several answers become
+      one status", and an install with no merge policy row therefore had no way
+      to set a coordinate at all.
+    -->
+    {#if mergeRegions.some((r) => r.configurable)}
+      <Card.Root>
+        <Card.Header>
+          <Card.Title>Where your regions are</Card.Title>
+          <Card.Description>
+            A region is a place. Give it coordinates to put it on the map above, and a name that reads well: the name is
+            shown to visitors on the public status page, not just here. A region without coordinates stays completely
+            usable and simply is not drawn.
+          </Card.Description>
+        </Card.Header>
+        <Card.Content class="flex flex-col gap-2">
+          {#each mergeRegions.filter((r) => r.configurable) as region (region.id)}
+            <div class="flex flex-wrap items-end gap-2 rounded-md border p-2">
+              <div class="flex min-w-48 flex-1 flex-col gap-1">
+                <Label for={`region-name-${region.id}`} class="text-xs">
+                  Name
+                  {#if region.id === localRegionId}
+                    <span class="text-muted-foreground">&middot; this server</span>
+                  {/if}
+                </Label>
+                <Input id={`region-name-${region.id}`} bind:value={region.name} />
+                <p class="text-muted-foreground text-xs break-all">{region.code}</p>
+              </div>
+
+              <!-- B12a. Which axis this region serves. Two checkboxes rather than
+                   one choice, because "both" and "neither" are real states: a
+                   region with neither ticked is configured and unused, which is
+                   legible rather than broken. -->
+              <div class="flex flex-col gap-1">
+                <Label class="text-xs">Used for</Label>
+                <div class="flex items-center gap-3 pb-2">
+                  <label class="flex items-center gap-1.5 text-xs">
+                    <Checkbox
+                      checked={!!region.usable_as_probe}
+                      onCheckedChange={(v) => (region.usable_as_probe = v === true)}
+                    />
+                    checks run from here
+                  </label>
+                  <label class="flex items-center gap-1.5 text-xs">
+                    <Checkbox
+                      checked={!!region.usable_as_target}
+                      onCheckedChange={(v) => (region.usable_as_target = v === true)}
+                    />
+                    services deployed here
+                  </label>
+                </div>
+              </div>
+
+              <!-- `step="any"` because a coordinate is not an integer and the
+                   default step of 1 makes a browser reject 52.52. -->
+              <div class="flex flex-col gap-1">
+                <Label for={`region-lat-${region.id}`} class="text-xs">Latitude</Label>
+                <Input
+                  id={`region-lat-${region.id}`}
+                  type="number"
+                  step="any"
+                  min="-90"
+                  max="90"
+                  class="w-28"
+                  placeholder="not set"
+                  bind:value={region.latitude}
+                />
+              </div>
+              <div class="flex flex-col gap-1">
+                <Label for={`region-lon-${region.id}`} class="text-xs">Longitude</Label>
+                <Input
+                  id={`region-lon-${region.id}`}
+                  type="number"
+                  step="any"
+                  min="-180"
+                  max="180"
+                  class="w-28"
+                  placeholder="not set"
+                  bind:value={region.longitude}
+                />
+              </div>
+              {#if region.known_coordinates}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={busy}
+                  onclick={() => useKnownCoordinates(region)}
+                  title={`Fill in the known location for ${region.code}`}
+                >
+                  Use {region.code}
+                </Button>
+              {/if}
+              <Button variant="outline" size="sm" disabled={busy} onclick={() => saveRegionPlace(region)}>Save</Button>
+            </div>
+          {/each}
+        </Card.Content>
+      </Card.Root>
+    {/if}
+
     {#if mergeForm}
       <Card.Root>
         <Card.Header>
@@ -956,9 +1090,7 @@
               <p class="text-sm font-medium">Per region</p>
               <p class="text-muted-foreground text-xs">
                 Leave a field empty to inherit from above. A weight of 0 is not empty: it means the region is counted
-                and carries no weight. Coordinates are separate from all of that: they place the region on the map above
-                and change nothing about how it is counted, and a region without them stays fully usable and simply is
-                not drawn.
+                and carries no weight. Where a region <i>is</i>, and what it is used for, are set further up.
               </p>
               {#each mergeRegions.filter((r) => r.configurable && r.id !== localRegionId) as region (region.id)}
                 <div class="flex flex-wrap items-end gap-2 rounded-md border p-2">
@@ -1006,69 +1138,6 @@
                       bind:value={region.default_trust_rank}
                     />
                   </div>
-                  <!-- B12a. Which axis this region serves. Two checkboxes rather
-                       than one choice, because "both" and "neither" are real
-                       states: a region with neither ticked is configured and
-                       unused, which is legible rather than broken. -->
-                  <div class="flex flex-col gap-1">
-                    <Label class="text-xs">Used for</Label>
-                    <div class="flex items-center gap-3 pb-2">
-                      <label class="flex items-center gap-1.5 text-xs">
-                        <Checkbox
-                          checked={!!region.usable_as_probe}
-                          onCheckedChange={(v) => (region.usable_as_probe = v === true)}
-                        />
-                        checks run from here
-                      </label>
-                      <label class="flex items-center gap-1.5 text-xs">
-                        <Checkbox
-                          checked={!!region.usable_as_target}
-                          onCheckedChange={(v) => (region.usable_as_target = v === true)}
-                        />
-                        services deployed here
-                      </label>
-                    </div>
-                  </div>
-                  <!-- B13. Where the region is, for the map. `step="any"` because
-                       a coordinate is not an integer and the default step of 1
-                       makes a browser reject 52.52. -->
-                  <div class="flex flex-col gap-1">
-                    <Label for={`region-lat-${region.id}`} class="text-xs">Latitude</Label>
-                    <Input
-                      id={`region-lat-${region.id}`}
-                      type="number"
-                      step="any"
-                      min="-90"
-                      max="90"
-                      class="w-28"
-                      placeholder="not set"
-                      bind:value={region.latitude}
-                    />
-                  </div>
-                  <div class="flex flex-col gap-1">
-                    <Label for={`region-lon-${region.id}`} class="text-xs">Longitude</Label>
-                    <Input
-                      id={`region-lon-${region.id}`}
-                      type="number"
-                      step="any"
-                      min="-180"
-                      max="180"
-                      class="w-28"
-                      placeholder="not set"
-                      bind:value={region.longitude}
-                    />
-                  </div>
-                  {#if region.known_coordinates}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={busy}
-                      onclick={() => useKnownCoordinates(region)}
-                      title={`Fill in the known location for ${region.code}`}
-                    >
-                      Use {region.code}
-                    </Button>
-                  {/if}
                   <Button variant="outline" size="sm" disabled={busy} onclick={() => saveRegionDefaults(region)}>
                     Save
                   </Button>

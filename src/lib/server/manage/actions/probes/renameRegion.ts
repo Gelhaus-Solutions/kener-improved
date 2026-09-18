@@ -28,11 +28,20 @@ interface Payload {
  * no longer appears on any screen, while the renamed region started from an
  * empty chart. Renaming the row keeps the id, and therefore keeps the history.
  *
- * **The reserved rows are refused.** `merged` (0) is the computed verdict and
- * `local` (-1) is the server's own check. Both are constants the code reasons
- * about by id, both carry a null org, and neither is a vantage point somebody
- * named. Renaming either would leave a screen reading "Frankfurt" for a row the
- * merge treats as the local check.
+ * **The merged verdict is refused; the local check is renameable in part.**
+ * `merged` (0) is the computed answer across the other regions, it appears on no
+ * map and no public surface, and there is nothing for an operator to call it.
+ *
+ * `local` (-1) is different and used to be refused for the same reasons, which
+ * was wrong. It is a real vantage point - this server, wherever you run it - and
+ * since B13 it is drawn on the map and listed on the PUBLIC status page. A
+ * hardcoded "Local check" was therefore appearing in front of visitors with no
+ * way to change it. Its NAME and DESCRIPTION are now the operator's.
+ *
+ * **Its CODE is not.** `code` is an identifier: `coordinatesForCode` keys the
+ * built-in location lookup on it, and the reserved rows carry a null org so the
+ * usual per-org uniqueness does not protect them. The id is what the merge
+ * reasons about either way, so nothing is gained by letting the code move.
  */
 export default {
   action: "renameRegion",
@@ -41,8 +50,13 @@ export default {
     const regionId = Number(data.region_id);
     if (!Number.isFinite(regionId)) throw new ActionError(400, "region_id is required");
 
-    if (regionId === MERGED_REGION_ID || regionId === LOCAL_REGION_ID) {
-      throw new ActionError(400, "The merged verdict and the local check are built in and cannot be renamed");
+    if (regionId === MERGED_REGION_ID) {
+      throw new ActionError(400, "The merged verdict is computed from the other regions and has no name of its own");
+    }
+
+    // The local check keeps its identifier and gains a display name. See above.
+    if (regionId === LOCAL_REGION_ID && data.code !== undefined) {
+      throw new ActionError(400, "The local check's code is built in; its name can be changed");
     }
 
     // Org-visible regions only. This is what stops one tenant renaming another's

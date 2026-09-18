@@ -1,5 +1,6 @@
 import db from "../db/db.js";
 import { MERGED_REGION_ID } from "../db/regions.js";
+import { LOCAL_REGION_ID } from "../probes/merge.js";
 import { GetNowTimestampUTC } from "../tool.js";
 import { REGION_FRESHNESS_SECONDS, statusFromSample, type RegionMapEntry } from "$lib/regions/mapModel.js";
 
@@ -20,10 +21,18 @@ import { REGION_FRESHNESS_SECONDS, statusFromSample, type RegionMapEntry } from 
  *     the map must account for it; the component drops it from the picture.
  */
 
-/** The regions an operator could plot. Reserved ids are not locations. */
+/**
+ * The regions an operator could plot.
+ *
+ * **Everything except the merged verdict.** Region 0 is the computed answer
+ * across the others and is not a location. The LOCAL check at -1 is: it is this
+ * server, wherever you run it, and on an install with no probe agents it is the
+ * only place anything is checked from. Excluding it was wrong, and it made the
+ * map useless on exactly the installs that have nothing else to show.
+ */
 async function plottableRegions() {
   const regions = await db.getMergeRegions();
-  return regions.filter((r) => r.id > MERGED_REGION_ID);
+  return regions.filter((r) => r.id !== MERGED_REGION_ID);
 }
 
 /** How many agents each region holds, for the hover text. */
@@ -95,16 +104,32 @@ export async function regionMapForFleet(): Promise<RegionMapEntry[]> {
   const now = GetNowTimestampUTC();
   const since = now - REGION_FRESHNESS_SECONDS;
 
-  const [regions, reporting, agents] = await Promise.all([
+  const [regions, reporting, agents, mergedLatest] = await Promise.all([
     plottableRegions(),
     db.getReportingRegions(since),
     agentCounts(),
+    // See `hasRecentMergedData`: the local check's evidence on an install with
+    // no probe agents, where it writes no row of its own.
+    db.hasRecentMergedData(since).catch(() => null),
   ]);
 
   const byRegion = new Map(reporting.map((r) => [r.region_id, r]));
 
   return regions.map((region) => {
-    const seen = byRegion.get(region.id);
+    /**
+     * **The local check is alive whenever this instance is recording anything.**
+     *
+     * Per-source rows are written only for monitors that are actually probed, so
+     * an install with no agents has a local check that is running perfectly well
+     * and has never written a row at -1. Reading that as "no recent data" told
+     * an operator their own server had stopped checking, which is the single
+     * most alarming thing this screen could say and it was never true.
+     */
+    const seen =
+      byRegion.get(region.id) ??
+      (region.id === LOCAL_REGION_ID && mergedLatest !== null
+        ? { region_id: region.id, samples: 1, latest: mergedLatest }
+        : undefined);
     // Fleet health has no per-monitor status, so the question is simply whether
     // anything arrived. Reporting is UP; silence is NO_DATA, and silence is
     // explicitly NOT down: an operator who has configured a region and not yet

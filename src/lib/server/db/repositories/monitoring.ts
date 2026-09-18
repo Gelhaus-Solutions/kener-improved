@@ -222,7 +222,12 @@ export class MonitoringRepository extends BaseRepository {
     const regions = (await this.table("monitoring_data")
       .distinct("region_id")
       .where("monitor_tag", monitor_tag)
-      .where("region_id", ">", MERGED_REGION_ID)
+      // B13. Everything EXCEPT the merged verdict, which is the computed answer
+      // rather than a place. `> MERGED_REGION_ID` also excluded the LOCAL check
+      // at -1, so the one region every install has could never appear on its own
+      // map: the server checking the thing itself is a place, and it is usually
+      // the only place.
+      .whereNot("region_id", MERGED_REGION_ID)
       .where("timestamp", ">=", since)) as Array<{ region_id: number }>;
 
     const rows = await Promise.all(
@@ -244,7 +249,9 @@ export class MonitoringRepository extends BaseRepository {
       .select("region_id")
       .count("* as samples")
       .max({ latest: "timestamp" })
-      .where("region_id", ">", MERGED_REGION_ID)
+      // See `getLatestPerRegion`: the local check is a place, the merged verdict
+      // is not.
+      .whereNot("region_id", MERGED_REGION_ID)
       .where("timestamp", ">=", since)
       .groupBy("region_id")) as Array<{ region_id: number; samples: string | number; latest: string | number }>;
 
@@ -254,6 +261,28 @@ export class MonitoringRepository extends BaseRepository {
       samples: Number(r.samples),
       latest: Number(r.latest),
     }));
+  }
+
+  /**
+   * B13. Has this instance recorded anything at all lately, at the merged region?
+   *
+   * The fleet map's fallback for the LOCAL check. Per-source rows - including the
+   * local one at -1 - are written only when a monitor is actually probed
+   * (`monitorExecuteQueue` skips them otherwise, because doubling the write
+   * volume of the largest table for an install with no probes would be a real
+   * cost for no benefit). So on an install with no probe agents the local check
+   * is running and reporting, and has no row of its own to prove it.
+   *
+   * Region 0 is what it produces there, so its presence is the evidence.
+   */
+  async hasRecentMergedData(since: number): Promise<number | null> {
+    const row = (await this.table("monitoring_data")
+      .max({ latest: "timestamp" })
+      .where("region_id", MERGED_REGION_ID)
+      .where("timestamp", ">=", since)
+      .first()) as { latest: string | number | null } | undefined;
+    const latest = row?.latest;
+    return latest === null || latest === undefined ? null : Number(latest);
   }
 
   async getLatestMonitoringDataAllActive(monitor_tags: string[]): Promise<MonitoringData[]> {

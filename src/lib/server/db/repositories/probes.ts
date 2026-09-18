@@ -1,5 +1,6 @@
 import { BaseRepository } from "./base.js";
 import { runAcrossOrgs, currentOrgIdOrDefault } from "../orgContext.js";
+import { LOCAL_REGION_ID } from "../../probes/merge.js";
 
 /**
  * Remote probe agents and what they are assigned to check (B1b schema, B1c use).
@@ -534,12 +535,22 @@ export class ProbesRepository extends BaseRepository {
    * `code` is an identifier under a global unique index, and a caller that can
    * write one has no business writing the other by passing an extra key.
    *
-   * Scoped, unlike the defaults update. That one is unscoped so an operator can
-   * configure `local` and `merged`, which carry a null org. Nothing here needs
-   * that: a renameable region always belongs to somebody, and the reserved rows
-   * are refused at the action before they reach this method. So the `org_id`
-   * predicate stays on, and one tenant cannot rename another's region even if
-   * the id is guessed.
+   * Scoped for a tenant's own regions, so one tenant cannot rename another's by
+   * guessing an id.
+   *
+   * **The local check is the exception, and it has to be.** B13 draws it on the
+   * map and lists it on the PUBLIC status page, so its name is something an
+   * operator needs to set - and it is an instance row carrying a NULL `org_id`,
+   * because every org's local check is the same server. A scoped UPDATE matches
+   * it zero times and reports success, which is exactly what happened the first
+   * time: the coordinates saved through the unscoped `updateRegionDefaults`
+   * while the name silently did not move.
+   *
+   * `updateRegionDefaults` already reaches this row unscoped for the same
+   * reason, so this is the existing rule applied to one more column rather than
+   * a new hole. **On a multi-tenant install the consequence is real and worth
+   * stating: renaming the local check changes it for every org**, because there
+   * is one server and one row. A per-org display name would be a schema change.
    */
   async updateRegion(
     regionId: number,
@@ -549,9 +560,13 @@ export class ProbesRepository extends BaseRepository {
     // `regions.created_at`/`updated_at` are real timestamp columns, not the
     // integer seconds most of this schema uses, so `nowSeconds()` would write a
     // small integer into a timestamp here.
-    return await this.table("regions")
-      .where({ id: regionId })
-      .update({ ...patch, updated_at: this.knexUnscoped.fn.now() });
+    const values = { ...patch, updated_at: this.knexUnscoped.fn.now() };
+
+    if (regionId === LOCAL_REGION_ID) {
+      return await runAcrossOrgs(() => this.knexUnscoped("regions").where({ id: regionId }).update(values));
+    }
+
+    return await this.table("regions").where({ id: regionId }).update(values);
   }
 
   async updateRegionDefaults(

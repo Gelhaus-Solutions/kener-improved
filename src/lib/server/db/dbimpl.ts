@@ -175,6 +175,7 @@ class DbImpl {
   getLatestMonitoringDataAtRegion!: MonitoringRepository["getLatestMonitoringDataAtRegion"];
   getLatestPerRegion!: MonitoringRepository["getLatestPerRegion"];
   getReportingRegions!: MonitoringRepository["getReportingRegions"];
+  hasRecentMergedData!: MonitoringRepository["hasRecentMergedData"];
   getLatestMonitoringDataAllActive!: MonitoringRepository["getLatestMonitoringDataAllActive"];
   getLastHeartbeat!: MonitoringRepository["getLastHeartbeat"];
   getAggregatedMonitoringData!: MonitoringRepository["getAggregatedMonitoringData"];
@@ -866,6 +867,7 @@ class DbImpl {
     this.getLatestMonitoringDataAtRegion = this.monitoring.getLatestMonitoringDataAtRegion.bind(this.monitoring);
     this.getLatestPerRegion = this.monitoring.getLatestPerRegion.bind(this.monitoring);
     this.getReportingRegions = this.monitoring.getReportingRegions.bind(this.monitoring);
+    this.hasRecentMergedData = this.monitoring.hasRecentMergedData.bind(this.monitoring);
     this.getLatestMonitoringDataAllActive = this.monitoring.getLatestMonitoringDataAllActive.bind(this.monitoring);
     this.getLastHeartbeat = this.monitoring.getLastHeartbeat.bind(this.monitoring);
     this.getAggregatedMonitoringData = this.monitoring.getAggregatedMonitoringData.bind(this.monitoring);
