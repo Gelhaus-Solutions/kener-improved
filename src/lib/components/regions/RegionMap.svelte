@@ -1,6 +1,6 @@
 <script lang="ts">
   import { MAP_HEIGHT, MAP_WIDTH, placeRegions, project } from "$lib/regions/projection";
-  import { graticulePaths, worldOutlinePaths } from "$lib/regions/worldOutline";
+  import { graticulePaths, worldOutlinePath } from "$lib/regions/worldOutline";
   import { describeEntry, sortForTable, type RegionMapEntry, type RegionMapStatus } from "$lib/regions/mapModel";
 
   /**
@@ -26,7 +26,7 @@
 
   let { entries, headline, caption }: Props = $props();
 
-  const outline = worldOutlinePaths();
+  const outline = worldOutlinePath();
   const graticule = graticulePaths();
 
   const placed = $derived(placeRegions(entries));
@@ -84,9 +84,14 @@
         <path {d} fill="none" stroke="currentColor" stroke-width="0.5" class="text-muted-foreground/20" />
       {/each}
 
-      {#each outline as d (d)}
-        <path {d} class="fill-muted-foreground/20 stroke-muted-foreground/40" stroke-width="0.75" />
-      {/each}
+      <!-- One path, filled even-odd: interior rings are lakes and must punch
+           through rather than being painted in the land colour on top of land. -->
+      <path
+        d={outline}
+        fill-rule="evenodd"
+        class="fill-muted-foreground/20 stroke-muted-foreground/40"
+        stroke-width="0.5"
+      />
 
       {#each placed as p (p.region.id)}
         <!--
@@ -149,7 +154,9 @@
             <span class="inline-flex items-center gap-1.5">
               <span
                 class="inline-block size-2 rounded-full"
-                style="background: {e.status === 'NO_DATA' ? 'transparent' : FILL[e.status]}; box-shadow: inset 0 0 0 2px {FILL[e.status]}"
+                style="background: {e.status === 'NO_DATA'
+                  ? 'transparent'
+                  : FILL[e.status]}; box-shadow: inset 0 0 0 2px {FILL[e.status]}"
                 aria-hidden="true"
               ></span>
               {LABEL[e.status]}
@@ -166,9 +173,8 @@
   {#if unplaced.length > 0}
     <p class="text-muted-foreground text-xs">
       {unplaced.length}
-      {unplaced.length === 1 ? "region has" : "regions have"} no coordinates and {unplaced.length === 1
-        ? "is"
-        : "are"} listed above but not shown on the map.
+      {unplaced.length === 1 ? "region has" : "regions have"} no coordinates and {unplaced.length === 1 ? "is" : "are"} listed
+      above but not shown on the map.
     </p>
   {/if}
 </div>
