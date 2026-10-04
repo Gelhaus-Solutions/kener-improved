@@ -55,6 +55,7 @@ export default async function get(req: APIServerRequest): Promise<Response> {
 
   const startTime = endOfDayTodayAtTz - days * 24 * 60 * 60;
 
+<<<<<<< HEAD
   // Resolve first, because everything below needs *physical* tags while the
   // caller may have asked with per-org slugs (KENER-127). The page hands the
   // browser `monitorTag`, which is the slug, and this endpoint used to match on
@@ -70,6 +71,12 @@ export default async function get(req: APIServerRequest): Promise<Response> {
   const [latestDataAll, aggregatedData] = await Promise.all([
     GetLatestMonitoringDataAllActive(physicalTags),
     GetStatusCountsByIntervalGroupedByMonitor(physicalTags, startTime, 86400, days),
+=======
+  const [monitors, latestDataAll, aggregatedData] = await Promise.all([
+    db.getMonitors({ tags, status: GC.ACTIVE, is_hidden: GC.NO }),
+    GetLatestMonitoringDataAllActive(tags),
+    GetStatusCountsByIntervalGroupedByMonitor(tags, startTime, 86400, days),
+>>>>>>> 9da3d18142b1e32b084c075ced4c36f3d16c66aa
   ]);
 
   const latestStatusByTag = new Map<string, StatusType>(

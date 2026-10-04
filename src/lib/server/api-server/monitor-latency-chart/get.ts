@@ -3,8 +3,12 @@ import type { APIServerRequest } from "$lib/server/types/api-server";
 import db from "$lib/server/db/db";
 import { ResolveVisiblePublicMonitor } from "$lib/server/controllers/publicMonitorResolver";
 import { GetMinuteStartNowTimestampUTC } from "$lib/server/tool";
+<<<<<<< HEAD
 import { readLatencySeries, snapToGrain } from "$lib/server/services/latencyPercentiles";
 import { MERGED_REGION_ID } from "$lib/server/db/regions";
+=======
+import GC from "$lib/global-constants";
+>>>>>>> 9da3d18142b1e32b084c075ced4c36f3d16c66aa
 
 /**
  * Time range definitions with aggregation intervals
@@ -42,8 +46,13 @@ export default async function get(req: APIServerRequest): Promise<Response> {
     return error(400, { message: "tag query parameter is required" });
   }
 
+<<<<<<< HEAD
   // Visible, not merely existing. See publicMonitorResolver (KENER-126).
   const monitor = await ResolveVisiblePublicMonitor(tag);
+=======
+  const monitors = await db.getMonitors({ tag, status: GC.ACTIVE, is_hidden: GC.NO });
+  const monitor = monitors[0];
+>>>>>>> 9da3d18142b1e32b084c075ced4c36f3d16c66aa
   if (!monitor) {
     return error(404, { message: "Monitor not found" });
   }
