@@ -992,20 +992,18 @@ export class IncidentsRepository extends BaseRepository {
         "monitors.slug as monitor_slug",
         "monitors.name as monitor_name",
         "monitors.image as monitor_image",
+        "monitors.is_hidden as monitor_is_hidden",
       )
       .leftJoin("incident_monitors", "incidents.id", "incident_monitors.incident_id")
       .leftJoin("monitors", "incident_monitors.monitor_tag", "monitors.tag");
 
     if (tags && tags.length > 0) {
-      query.where(function () {
-        this.whereIn("incident_monitors.monitor_tag", tags);
-      });
+      query.whereIn("incident_monitors.monitor_tag", tags).andWhere("monitors.is_hidden", "NO");
     } else {
       query.where("incidents.is_global", "YES");
     }
 
     const rows = await query
-      .andWhere("monitors.is_hidden", "NO")
       .andWhere("incidents.state", "!=", GC.RESOLVED)
       .andWhere("incidents.incident_type", GC.INCIDENT)
       .andWhere("incidents.start_date_time", "<=", timestamp)
@@ -1014,7 +1012,7 @@ export class IncidentsRepository extends BaseRepository {
       })
       .orderBy("incidents.start_date_time", "desc");
 
-    return this.groupIncidentsByIdForMonitorList(rows);
+    return this.groupIncidentsByIdForMonitorListFilterHidden(rows);
   }
 
   async getOngoingIncidentsForMonitorListWithComments(
@@ -1242,6 +1240,7 @@ export class IncidentsRepository extends BaseRepository {
     return await this.table("incident_monitors")
       .join("monitors", "incident_monitors.monitor_tag", "monitors.tag")
       .where("incident_monitors.incident_id", incident_id)
+      .andWhere("monitors.is_hidden", "NO")
       .select(
         "incident_monitors.*",
         "monitors.slug as monitor_slug",
