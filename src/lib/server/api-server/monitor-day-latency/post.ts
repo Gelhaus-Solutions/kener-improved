@@ -4,6 +4,7 @@ import db from "$lib/server/db/db";
 import { BeginningOfDay, GetMinuteStartNowTimestampUTC, GetMinuteStartTimestampUTC } from "$lib/server/tool";
 import { ResolveVisiblePublicMonitor } from "../../controllers/publicMonitorResolver.js";
 import { ParseLatency } from "$lib/clientTools";
+import GC from "$lib/global-constants";
 
 interface DayDetailRequest {
   tag: string;
@@ -111,10 +112,15 @@ export default async function post(req: APIServerRequest): Promise<Response> {
       req.body.nowAtTz ? parseInt(req.body.nowAtTz || "0", 10) : GetMinuteStartNowTimestampUTC(),
     ) + 60;
 
+<<<<<<< HEAD
   // Visible, not merely existing (KENER-126). Only `monitor.tag` is used below,
   // so the raw record this returns is all this endpoint ever needed.
   const monitor = await ResolveVisiblePublicMonitor(body.tag);
   if (!monitor) {
+=======
+  const monitors = await GetMonitorsParsed({ tag: body.tag, status: GC.ACTIVE, is_hidden: GC.NO });
+  if (!monitors || monitors.length === 0) {
+>>>>>>> 74a6228b862f276c4f42177b340ae997fe9dfca2
     return error(404, { message: "Monitor not found" });
   }
 
