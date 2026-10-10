@@ -1,6 +1,10 @@
 import db from "../db/db.js";
+<<<<<<< HEAD
 import { GetSiteDataCached, InvalidateSiteDataCache, InvalidateInstanceSiteDataCache } from "../cache/siteDataCache.js";
 import { isInstanceScoped } from "./siteDataScope.js";
+=======
+import { IsMaskedString, MaskString } from "../tool.js";
+>>>>>>> b69e1be9022031659cf1e44b0e053aab4c0210e7
 import { siteDataKeys } from "./siteDataKeys.js";
 import type { Cookies } from "@sveltejs/kit";
 import type {
@@ -72,6 +76,47 @@ export interface SiteDataTransformed {
   globalMaintenanceNotificationSettings?: GlobalMaintenanceNotificationSettings;
 }
 
+<<<<<<< HEAD
+=======
+function secretPath(key: string): string[] | null {
+  if (key === "oidcSettings") return ["client_secret"];
+  if (key.startsWith("captcha.")) return ["requirements", "Secret Key"];
+  return null;
+}
+
+function readPath(value: unknown, path: string[]): unknown {
+  return path.reduce<unknown>(
+    (v, k) => (v && typeof v === "object" ? (v as Record<string, unknown>)[k] : undefined),
+    value,
+  );
+}
+
+function writePath(value: unknown, [head, ...rest]: string[], secret: string): Record<string, unknown> {
+  const obj = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  return { ...obj, [head]: rest.length ? writePath(obj[head], rest, secret) : secret };
+}
+
+/** Returns a copy of a site-data value with its secret field masked, for any response that leaves the server. */
+export function MaskSiteDataSecret(key: string, value: unknown): unknown {
+  const path = secretPath(key);
+  const secret = path && readPath(value, path);
+  if (!path || typeof secret !== "string" || !secret) return value;
+  return writePath(value, path, MaskString(secret));
+}
+
+/** Puts the stored secret back when a save sends any masked secret or leaves it out. An empty string clears it. */
+export function RestoreSiteDataSecret(key: string, value: unknown, stored: unknown): unknown {
+  const path = secretPath(key);
+  const storedSecret = path && readPath(stored, path);
+  if (!path || typeof storedSecret !== "string" || !storedSecret) return value;
+  if (!value || typeof value !== "object") return value;
+  const incoming = readPath(value, path);
+  const unchanged = incoming === undefined || (typeof incoming === "string" && IsMaskedString(incoming));
+  if (!unchanged) return value;
+  return writePath(value, path, storedSecret);
+}
+
+>>>>>>> b69e1be9022031659cf1e44b0e053aab4c0210e7
 export async function InsertKeyValue(key: string, value: string): Promise<number[]> {
   let f = siteDataKeys.find((k) => k.key === key);
   if (!f) {
@@ -82,6 +127,7 @@ export async function InsertKeyValue(key: string, value: string): Promise<number
     console.trace(`Invalid value for key: ${key}`);
     throw new Error(`Invalid value for key: ${key}`);
   }
+<<<<<<< HEAD
   const result = await db.insertOrUpdateSiteData(key, value, f.data_type);
   // Not the only writer: the v4 config API validates differently and calls
   // db.insertOrUpdateSiteData directly, so it invalidates for itself.
@@ -92,6 +138,12 @@ export async function InsertKeyValue(key: string, value: string): Promise<number
   if (isInstanceScoped(key)) await InvalidateInstanceSiteDataCache();
   else await InvalidateSiteDataCache();
   return result;
+=======
+  if (secretPath(key)) {
+    value = JSON.stringify(RestoreSiteDataSecret(key, JSON.parse(value), await GetSiteDataByKey(key)));
+  }
+  return db.insertOrUpdateSiteData(key, value, f.data_type);
+>>>>>>> b69e1be9022031659cf1e44b0e053aab4c0210e7
 }
 
 /** Reads and transforms every site_data row. Uncached; go through GetAllSiteData. */
