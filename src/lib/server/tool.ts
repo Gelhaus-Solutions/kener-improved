@@ -339,6 +339,9 @@ function MaskString(str: string): string {
   }
   return "*".repeat(str.length - 4) + str.slice(-4);
 }
+function IsMaskedString(str: string): boolean {
+  return /^\*+.{0,4}$/.test(str);
+}
 
 function GetDbType() {
   //sqlite, postgresql, mysql
@@ -619,6 +622,7 @@ export {
   BeginningOfMinute,
   Wait,
   MaskString,
+  IsMaskedString,
   GetDbType,
   HashString,
   ValidateEmail,
