@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 import { ResolvePublicMonitorTag } from "./publicMonitorResolver.js";
+=======
+import { isDeepStrictEqual } from "node:util";
+>>>>>>> 16f16c3e3c76de193e7b3ad24b8d72f53a06917f
 import {
   GetMinuteStartNowTimestampUTC,
   GetMinuteStartTimestampUTC,
@@ -30,13 +34,18 @@ import type { PaginationInput } from "../../types/common.js";
 import GC, { getBadgeStyle, isMonitoringStatus, MONITORING_STATUSES, type BadgeStyle } from "../../global-constants.js";
 import type { MonitoringStatus } from "../../types/status.js";
 import { makeBadge } from "badge-maker";
+import randomName from "@scaleway/random-name";
 import { ErrorSvg } from "../../anywhere.js";
 import { GetLastMonitoringValue, SetLastHeartbeat, DeleteMonitorCaches } from "../cache/setGet.js";
 import { CollapseStatusCounts } from "../../clientTools.js";
 import { translate, isLocaleAvailable } from "../i18n.js";
 import type { HeartbeatMonitor, GroupMonitorTypeData } from "../types/monitor.js";
+<<<<<<< HEAD
 import { IsValidProxyURL } from "../../anywhere.js";
 import { reconcileProbeAssignments } from "../probes/reconcile.js";
+=======
+import { IsValidProxyURL, IsValidHeartbeatSecret, HEARTBEAT_SECRET_RULE } from "../../anywhere.js";
+>>>>>>> 16f16c3e3c76de193e7b3ad24b8d72f53a06917f
 
 interface GroupUpdateData {
   monitor_tag: string;
@@ -315,8 +324,9 @@ export const GetMonitorsParsed = async (query: MonitorFilter): Promise<Array<Mon
  * type_data.proxy must be a valid http(s):// URL. Node silently ignores any other scheme and
  * throws on a malformed authority, both at check time, so save is where a typo has to fail.
  * `$SECRET` tokens are still raw here and pass. Unparseable type_data is not this check's problem.
+ * A proxy equal to `storedProxy` passes, so a bad stored value does not block an unrelated change.
  */
-function validateTypeDataProxy(monitor: MonitorInput): void {
+export function ValidateTypeDataProxy(monitor: Pick<MonitorInput, "type_data">, storedProxy?: unknown): void {
   if (!monitor.type_data) return;
   let typeData: unknown;
   try {
@@ -327,16 +337,50 @@ function validateTypeDataProxy(monitor: MonitorInput): void {
   // type_data is parsed JSON, so `proxy` can be any type. Absent or blank means no proxy;
   // anything else - an object or a number included - has to be a proxy URL.
   const proxy = (typeData as { proxy?: unknown } | null)?.proxy;
-  if (proxy === undefined || proxy === null) return;
+  if (proxy === undefined || proxy === null || isDeepStrictEqual(proxy, storedProxy)) return;
   if (typeof proxy === "string" && proxy.trim() === "") return;
   if (!IsValidProxyURL(proxy)) {
     throw new Error("Proxy URL must be a valid http:// or https:// URL");
   }
 }
 
+function parseTypeData(typeData: string | null | undefined): Record<string, unknown> | null {
+  if (!typeData) return {};
+  try {
+    const parsed: unknown = JSON.parse(typeData);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+const newHeartbeatSecret = (): string => randomName() + "-" + randomName();
+
+/**
+ * Returns the HEARTBEAT monitor to save, with a generated secret when it has none. Throws when
+ * the secret is new or changed and breaks the rule; an unchanged stored secret is kept as is.
+ */
+export function WithValidHeartbeatSecret<T extends Pick<MonitorInput, "monitor_type" | "type_data">>(
+  monitor: T,
+  storedSecret?: unknown,
+): T {
+  if (monitor.monitor_type !== "HEARTBEAT") return monitor;
+  const typeData = parseTypeData(monitor.type_data);
+  if (!typeData) return monitor;
+  const secret = typeData.secretString;
+  if (secret !== undefined && secret !== storedSecret && !IsValidHeartbeatSecret(secret)) {
+    throw new Error(`Heartbeat secret breaks the rule. ${HEARTBEAT_SECRET_RULE}`);
+  }
+  if (secret) return monitor;
+  return { ...monitor, type_data: JSON.stringify({ ...typeData, secretString: newHeartbeatSecret() }) };
+}
+
 export const CreateUpdateMonitor = async (monitor: MonitorInput): Promise<number | number[]> => {
   let monitorData = { ...monitor };
-  validateTypeDataProxy(monitorData);
+  ValidateTypeDataProxy(monitorData);
+  const stored = monitorData.id ? (await db.getMonitors({ id: monitorData.id }))[0] : undefined;
+  if (stored && monitorData.type_data === undefined) monitorData.type_data = stored.type_data;
+  monitorData = WithValidHeartbeatSecret(monitorData, parseTypeData(stored?.type_data)?.secretString);
   if (monitorData.id) {
     return await db.updateMonitor(monitorData as MonitorRecord);
   } else {
@@ -395,6 +439,7 @@ export const CreateMonitor = async (monitor: MonitorInput): Promise<number[]> =>
     throw new Error("monitor id must be empty or 0");
   }
   validateMonitorTag(monitorData.tag);
+<<<<<<< HEAD
   validateTypeDataProxy(monitorData);
   // I3e: set explicitly rather than left to the repository's fallback, which
   // cannot know the org prefix.
@@ -402,6 +447,10 @@ export const CreateMonitor = async (monitor: MonitorInput): Promise<number[]> =>
   const created = await db.insertMonitor(monitorData);
   await reconcileAfterMonitorChange(monitorData.tag);
   return created;
+=======
+  ValidateTypeDataProxy(monitorData);
+  return await db.insertMonitor(monitorData);
+>>>>>>> 16f16c3e3c76de193e7b3ad24b8d72f53a06917f
 };
 
 interface CloneMonitorInput {
@@ -457,7 +506,10 @@ export const CloneMonitor = async ({ sourceTag, newTag, newName }: CloneMonitorI
     monitor_type: source.monitor_type,
     down_trigger: source.down_trigger,
     degraded_trigger: source.degraded_trigger,
-    type_data: source.type_data,
+    type_data:
+      source.monitor_type === "HEARTBEAT"
+        ? JSON.stringify({ ...parseTypeData(source.type_data), secretString: newHeartbeatSecret() })
+        : source.type_data,
     day_degraded_minimum_count: source.day_degraded_minimum_count,
     day_down_minimum_count: source.day_down_minimum_count,
     confirmation_threshold: source.confirmation_threshold,

@@ -5,6 +5,7 @@ import { GetMinuteStartNowTimestampUTC } from "$lib/server/tool";
 import type { StatusType } from "$lib/types/status";
 import type { TimestampStatusCount } from "$lib/server/types/db";
 import { buildMonitorBarResponse } from "./shared";
+import GC from "$lib/global-constants";
 
 const DEFAULT_DAYS = 90;
 const MAX_DAYS = 90;
@@ -66,10 +67,15 @@ export default async function get(req: APIServerRequest): Promise<Response> {
     return error(400, { message: "tag query parameter is required" });
   }
 
+<<<<<<< HEAD
   // Visible, not merely existing (KENER-126). This endpoint answered for any
   // monitor whose tag you knew, hidden and inactive included, and returned its
   // name, description, image and ninety days of history.
   const monitor = await ResolveVisiblePublicMonitor(tag);
+=======
+  const monitors = await db.getMonitors({ tag, status: GC.ACTIVE, is_hidden: GC.NO });
+  const monitor = monitors[0];
+>>>>>>> 16f16c3e3c76de193e7b3ad24b8d72f53a06917f
   if (!monitor) {
     return error(404, { message: "Monitor not found" });
   }

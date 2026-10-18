@@ -3,6 +3,7 @@ import db from "$lib/server/db/db";
 import { InvalidateSiteDataCache, InvalidateInstanceSiteDataCache } from "$lib/server/cache/siteDataCache";
 import { isInstanceScoped } from "$lib/server/controllers/siteDataScope";
 import { siteDataKeys } from "$lib/server/controllers/siteDataKeys";
+import { GetSiteDataByKey, InsertKeyValue, MaskSiteDataSecret } from "$lib/server/controllers/siteDataController";
 import type {
   GetSiteDataKeyResponse,
   UpdateSiteDataKeyResponse,
@@ -49,7 +50,7 @@ export const GET: RequestHandler = async ({ params }) => {
 
   const response: GetSiteDataKeyResponse = {
     key: data.key,
-    value: data.data_type === "object" ? JSON.parse(data.value) : data.value,
+    value: MaskSiteDataSecret(data.key, data.data_type === "object" ? JSON.parse(data.value) : data.value),
     data_type: data.data_type,
   };
 
@@ -119,6 +120,7 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
   }
 
   // Insert or update the value
+<<<<<<< HEAD
   await db.insertOrUpdateSiteData(configKey, valueToStore, keyConfig.data_type);
   // This route validates for itself instead of going through InsertKeyValue, so
   // it has to invalidate the site data cache for itself too - including I3g's
@@ -126,10 +128,13 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
   // org reads through.
   if (isInstanceScoped(configKey)) await InvalidateInstanceSiteDataCache();
   else await InvalidateSiteDataCache();
+=======
+  await InsertKeyValue(configKey, valueToStore);
+>>>>>>> 16f16c3e3c76de193e7b3ad24b8d72f53a06917f
 
   const response: UpdateSiteDataKeyResponse = {
     key: configKey,
-    value: keyConfig.data_type === "object" ? body.value : valueToStore,
+    value: MaskSiteDataSecret(configKey, await GetSiteDataByKey(configKey)),
     data_type: keyConfig.data_type,
   };
 
