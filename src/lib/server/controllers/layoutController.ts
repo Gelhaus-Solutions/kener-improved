@@ -3,6 +3,7 @@ import type { Cookies } from "@sveltejs/kit";
 import type { UserRecordPublic } from "$lib/server/types/db";
 import seedSiteData from "$lib/server/db/seedSiteData";
 import {
+  CanSeeHiddenMonitors,
   GetAllSiteData,
   GetLoggedInSession,
   GetLocaleFromCookie,
@@ -21,6 +22,7 @@ export interface LayoutServerData {
   isSetupComplete: boolean;
   isAdminAccountCreated: boolean;
   loggedInUser: UserRecordPublic | null;
+  canSeeHiddenMonitors: boolean;
   selectedLang: string;
   siteStatusColors: {
     UP: string;
@@ -140,6 +142,7 @@ export async function GetLayoutServerData(cookies: Cookies, request: Request): P
     // pipeline already established from the hostname. See GetSwitcherPages.
     GetSwitcherPages(),
   ]);
+  const canSeeHiddenMonitors = await CanSeeHiddenMonitors(loggedInUser);
 
   // Same check as IsSetupComplete, but reuses the site data fetched above
   // instead of querying it a second time on every request
@@ -175,6 +178,7 @@ export async function GetLayoutServerData(cookies: Cookies, request: Request): P
     isSetupComplete,
     isAdminAccountCreated: userCounts ? Number(userCounts.count) > 0 : false,
     loggedInUser,
+    canSeeHiddenMonitors,
     selectedLang,
     siteStatusColors,
     siteStatusColorsDark,

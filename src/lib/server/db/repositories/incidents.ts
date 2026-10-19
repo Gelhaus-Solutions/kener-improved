@@ -140,6 +140,7 @@ interface IncidentRowWithMonitor {
   monitor_slug: string;
   monitor_name: string;
   monitor_image: string | null;
+  monitor_is_hidden: string | null;
 }
 
 /**
@@ -150,6 +151,7 @@ export class IncidentsRepository extends BaseRepository {
 
   /**
    * Group raw incident rows by incident ID, aggregating monitors into an array
+   * Filters out hidden monitors
    */
   private groupIncidentsByIdForMonitorList(rows: IncidentRowWithMonitor[]): IncidentForMonitorList[] {
     const incidentMap = new Map<number, IncidentForMonitorList>();
@@ -170,8 +172,8 @@ export class IncidentsRepository extends BaseRepository {
       }
 
       const incident = incidentMap.get(row.id)!;
-      // Only add monitor if it exists (handles LEFT JOIN nulls)
-      if (row.monitor_tag) {
+      // Only add monitor if it exists and is not hidden
+      if (row.monitor_tag && row.monitor_is_hidden !== "YES") {
         incident.monitors.push({
           monitor_tag: row.monitor_tag,
           monitor_impact: row.monitor_impact,
@@ -904,11 +906,14 @@ export class IncidentsRepository extends BaseRepository {
         "monitors.slug as monitor_slug",
         "monitors.name as monitor_name",
         "monitors.image as monitor_image",
+        "monitors.is_hidden as monitor_is_hidden",
       )
       .leftJoin("incident_monitors", "incidents.id", "incident_monitors.incident_id")
       .leftJoin("monitors", "incident_monitors.monitor_tag", "monitors.tag")
       .where(function () {
-        this.whereIn("incident_monitors.monitor_tag", monitorTags).orWhere("incidents.is_global", "YES");
+        this.where((tagged) =>
+          tagged.whereIn("incident_monitors.monitor_tag", monitorTags).andWhere("monitors.is_hidden", "NO"),
+        ).orWhere("incidents.is_global", "YES");
       })
       .andWhere("incidents.state", "!=", GC.RESOLVED)
       .andWhere("incidents.incident_type", GC.INCIDENT)
@@ -992,20 +997,18 @@ export class IncidentsRepository extends BaseRepository {
         "monitors.slug as monitor_slug",
         "monitors.name as monitor_name",
         "monitors.image as monitor_image",
+        "monitors.is_hidden as monitor_is_hidden",
       )
       .leftJoin("incident_monitors", "incidents.id", "incident_monitors.incident_id")
       .leftJoin("monitors", "incident_monitors.monitor_tag", "monitors.tag");
 
     if (tags && tags.length > 0) {
-      query.where(function () {
-        this.whereIn("incident_monitors.monitor_tag", tags);
-      });
+      query.whereIn("incident_monitors.monitor_tag", tags).andWhere("monitors.is_hidden", "NO");
     } else {
       query.where("incidents.is_global", "YES");
     }
 
     const rows = await query
-      .andWhere("monitors.is_hidden", "NO")
       .andWhere("incidents.state", "!=", GC.RESOLVED)
       .andWhere("incidents.incident_type", GC.INCIDENT)
       .andWhere("incidents.start_date_time", "<=", timestamp)
@@ -1090,8 +1093,11 @@ export class IncidentsRepository extends BaseRepository {
     const incidentIds = await this.table("incidents")
       .distinct("incidents.id")
       .leftJoin("incident_monitors", "incidents.id", "incident_monitors.incident_id")
+      .leftJoin("monitors", "incident_monitors.monitor_tag", "monitors.tag")
       .where(function () {
-        this.whereIn("incident_monitors.monitor_tag", monitorTags).orWhere("incidents.is_global", "YES");
+        this.where((tagged) =>
+          tagged.whereIn("incident_monitors.monitor_tag", monitorTags).andWhere("monitors.is_hidden", "NO"),
+        ).orWhere("incidents.is_global", "YES");
       })
       .andWhere("incidents.state", GC.RESOLVED)
       .andWhere("incidents.incident_type", GC.INCIDENT)
@@ -1120,6 +1126,7 @@ export class IncidentsRepository extends BaseRepository {
         "monitors.slug as monitor_slug",
         "monitors.name as monitor_name",
         "monitors.image as monitor_image",
+        "monitors.is_hidden as monitor_is_hidden",
       )
       .leftJoin("incident_monitors", "incidents.id", "incident_monitors.incident_id")
       .leftJoin("monitors", "incident_monitors.monitor_tag", "monitors.tag")
@@ -1238,6 +1245,7 @@ export class IncidentsRepository extends BaseRepository {
     return await query;
   }
 
+<<<<<<< HEAD
   async getMonitorsByIncidentId(incident_id: number): Promise<IncidentMonitorDetailRecord[]> {
     return await this.table("incident_monitors")
       .join("monitors", "incident_monitors.monitor_tag", "monitors.tag")
@@ -1249,6 +1257,21 @@ export class IncidentsRepository extends BaseRepository {
         "monitors.image as monitor_image",
         "monitors.description as monitor_description",
       );
+=======
+  async getMonitorsByIncidentId(incident_id: number, includeHidden = false): Promise<IncidentMonitorDetailRecord[]> {
+    const query = this.knex("incident_monitors")
+      .join("monitors", "incident_monitors.monitor_tag", "monitors.tag")
+      .where("incident_monitors.incident_id", incident_id);
+    if (!includeHidden) {
+      query.andWhere("monitors.is_hidden", "NO");
+    }
+    return await query.select(
+      "incident_monitors.*",
+      "monitors.name as monitor_name",
+      "monitors.image as monitor_image",
+      "monitors.description as monitor_description",
+    );
+>>>>>>> 121610d3a26d408436a53bf2444e9b798dbee848
   }
 
   async removeIncidentMonitor(incident_id: number, monitor_tag: string): Promise<number> {
@@ -1392,7 +1415,7 @@ export class IncidentsRepository extends BaseRepository {
 
     const rows = await query.orderBy("incidents.start_date_time", "desc");
 
-    const incidents = this.groupIncidentsByIdForMonitorListFilterHidden(rows);
+    const incidents = this.groupIncidentsByIdForMonitorList(rows);
 
     if (incidents.length === 0) {
       return [];
@@ -1450,7 +1473,7 @@ export class IncidentsRepository extends BaseRepository {
       .andWhere("incidents.start_date_time", "<=", endTs)
       .orderBy("incidents.start_date_time", "desc");
 
-    const incidents = this.groupIncidentsByIdForMonitorListFilterHidden(rows);
+    const incidents = this.groupIncidentsByIdForMonitorList(rows);
 
     if (incidents.length === 0) {
       return [];
@@ -1476,6 +1499,7 @@ export class IncidentsRepository extends BaseRepository {
       comments: commentsByIncidentId.get(incident.id) || [],
     }));
   }
+<<<<<<< HEAD
 
   /**
    * Group raw incident rows by incident ID, aggregating monitors into an array
@@ -1688,4 +1712,6 @@ export class IncidentsRepository extends BaseRepository {
 
     return filled;
   }
+=======
+>>>>>>> 121610d3a26d408436a53bf2444e9b798dbee848
 }

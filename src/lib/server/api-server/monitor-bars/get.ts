@@ -1,12 +1,18 @@
 import { json, error } from "@sveltejs/kit";
 import type { APIServerRequest } from "$lib/server/types/api-server";
+<<<<<<< HEAD
 import { ResolveVisiblePublicMonitors } from "$lib/server/controllers/publicMonitorResolver";
+=======
+import { CanSeeHiddenMonitors, GetLoggedInSession } from "$lib/server/controllers/userController";
+import db from "$lib/server/db/db";
+>>>>>>> 121610d3a26d408436a53bf2444e9b798dbee848
 import { GetMinuteStartNowTimestampUTC } from "$lib/server/tool";
 import type { StatusType } from "$lib/types/status";
 import GC from "$lib/global-constants";
 import type { MonitorBarResponse } from "$lib/server/api-server/monitor-bar/get";
 import { buildMonitorBarResponseFromRawData } from "$lib/server/api-server/monitor-bar/shared";
 import {
+  AttachSslCacheFields,
   GetLatestMonitoringDataAllActive,
   GetStatusCountsByIntervalGroupedByMonitor,
 } from "$lib/server/controllers/monitorsController";
@@ -54,7 +60,9 @@ export default async function get(req: APIServerRequest): Promise<Response> {
   }
 
   const startTime = endOfDayTodayAtTz - days * 24 * 60 * 60;
+  const canSeeHidden = await CanSeeHiddenMonitors(await GetLoggedInSession(req.cookies));
 
+<<<<<<< HEAD
   // Resolve first, because everything below needs *physical* tags while the
   // caller may have asked with per-org slugs (KENER-127). The page hands the
   // browser `monitorTag`, which is the slug, and this endpoint used to match on
@@ -70,11 +78,18 @@ export default async function get(req: APIServerRequest): Promise<Response> {
   const [latestDataAll, aggregatedData] = await Promise.all([
     GetLatestMonitoringDataAllActive(physicalTags),
     GetStatusCountsByIntervalGroupedByMonitor(physicalTags, startTime, 86400, days),
+=======
+  const [monitors, latestDataAll, aggregatedData] = await Promise.all([
+    db.getMonitors({ tags, status: GC.ACTIVE, is_hidden: canSeeHidden ? undefined : GC.NO }),
+    GetLatestMonitoringDataAllActive(tags),
+    GetStatusCountsByIntervalGroupedByMonitor(tags, startTime, 86400, days),
+>>>>>>> 121610d3a26d408436a53bf2444e9b798dbee848
   ]);
 
   const latestStatusByTag = new Map<string, StatusType>(
     latestDataAll.map((d) => [d.monitor_tag, (d.status as StatusType) || GC.NO_DATA]),
   );
+  const latestDataByTag = new Map(latestDataAll.map((d) => [d.monitor_tag, d]));
 
   // Keyed by the name the caller used, not by the physical tag, so a browser that
   // asked for "api" can find "api" in the answer.
@@ -98,6 +113,7 @@ export default async function get(req: APIServerRequest): Promise<Response> {
 
   const responseData: Record<string, MonitorBarResponse> = {};
   const monitorResults = await Promise.all(
+<<<<<<< HEAD
     tags.map(async (requested) => {
       const monitor = resolved.get(requested);
       if (!monitor) return null;
@@ -112,6 +128,23 @@ export default async function get(req: APIServerRequest): Promise<Response> {
       );
       return { tag: requested, payload };
     }),
+=======
+    tags
+      .filter((tag) => existingTags.has(tag))
+      .map(async (tag) => {
+        const monitor = monitorByTag.get(tag);
+        if (!monitor) return null;
+        const payload = buildMonitorBarResponseFromRawData(
+          monitor,
+          aggregatedByTag.get(tag) || [],
+          days,
+          endOfDayTodayAtTz,
+          latestStatusByTag.get(tag) || GC.NO_DATA,
+          monitor.monitor_type === "SSL" ? await AttachSslCacheFields(latestDataByTag.get(tag)) : null,
+        );
+        return { tag, payload };
+      }),
+>>>>>>> 121610d3a26d408436a53bf2444e9b798dbee848
   );
 
   for (const result of monitorResults) {

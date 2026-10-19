@@ -117,6 +117,7 @@ async function createNewIncident(
     incidentInput,
     update,
     monitorTag,
+<<<<<<< HEAD
     // NOT `config.alert_value`, which is what this passed until B7.
     //
     // The threshold is only a component impact for a STATUS alert. For LATENCY
@@ -127,6 +128,10 @@ async function createNewIncident(
     // being notified about it: the alert row was already committed, so the alert
     // looked active while nobody was told.
     alertIncidentComponentImpact(config.alert_for, config.alert_value),
+=======
+    config.alert_value,
+    config.alert_for,
+>>>>>>> 121610d3a26d408436a53bf2444e9b798dbee848
   );
 
   return incidentCreated;
