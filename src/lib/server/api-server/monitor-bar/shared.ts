@@ -2,10 +2,11 @@ import db from "$lib/server/db/db";
 import { readLatencySeries } from "../../services/latencyPercentiles.js";
 import GC from "$lib/global-constants";
 import type { StatusType } from "$lib/types/status";
-import type { MonitorRecord, TimestampStatusCount } from "$lib/server/types/db";
+import type { MonitorRecord, MonitoringData, TimestampStatusCount } from "$lib/server/types/db";
 import { UptimeCalculator } from "$lib/server/tool";
 import { GetStatusCountsByInterval } from "$lib/server/controllers/monitorsController";
 import type { MonitorBarResponse } from "./get";
+<<<<<<< HEAD
 import { toZonedTime, fromZonedTime } from "date-fns-tz";
 import { startOfDay, getUnixTime } from "date-fns";
 
@@ -24,6 +25,10 @@ export const endOfDayAtTz = (timeZone: string): number => {
   const startOfDayInUTC = fromZonedTime(startOfDay(toZonedTime(now, timeZone)), timeZone);
   return getUnixTime(startOfDayInUTC) + 86400;
 };
+=======
+import { ResolveSslExpiresAtMs } from "$lib/clientTools";
+import { AttachSslCacheFields } from "$lib/server/controllers/monitorsController";
+>>>>>>> 121610d3a26d408436a53bf2444e9b798dbee848
 
 interface ParsedMonitorSettings {
   uptime_formula_numerator?: string;
@@ -77,6 +82,7 @@ export const buildMonitorBarResponse = async (
   latestStatus?: StatusType,
 ): Promise<MonitorBarResponse> => {
   const startTime = endOfDayTodayAtTz - days * 24 * 60 * 60;
+<<<<<<< HEAD
   // Through the controller rather than straight to the repository (I9): that is
   // where the rollup read path, its cache and the raw-SQL fallback live, and a
   // second call site reaching past it would quietly keep scanning 129,600 rows
@@ -84,14 +90,22 @@ export const buildMonitorBarResponse = async (
   const [rawUptimeData, latestData] = await Promise.all([
     GetStatusCountsByInterval(monitor.tag, startTime, 86400, days),
     latestStatus ? Promise.resolve(null) : db.getLatestMonitoringData(monitor.tag),
+=======
+  const isSsl = monitor.monitor_type === "SSL";
+  const [rawUptimeData, latestData] = await Promise.all([
+    db.getStatusCountsByInterval(monitor.tag, startTime, 86400, days),
+    latestStatus && !isSsl ? Promise.resolve(null) : db.getLatestMonitoringData(monitor.tag),
+>>>>>>> 121610d3a26d408436a53bf2444e9b798dbee848
   ]);
+  const latest = isSsl ? await AttachSslCacheFields(latestData) : latestData;
 
   const response = buildMonitorBarResponseFromRawData(
     monitor,
     rawUptimeData,
     days,
     endOfDayTodayAtTz,
-    latestStatus || (latestData?.status as StatusType) || GC.NO_DATA,
+    latestStatus || (latest?.status as StatusType) || GC.NO_DATA,
+    latest,
   );
 
   // B4: the window's percentiles, merged from the histograms.
@@ -135,8 +149,10 @@ export const buildMonitorBarResponseFromRawData = (
   days: number,
   endOfDayTodayAtTz: number,
   latestStatus?: StatusType,
+  latestData?: MonitoringData | null,
 ): MonitorBarResponse => {
   const startTime = endOfDayTodayAtTz - days * 24 * 60 * 60;
+  const isSsl = monitor.monitor_type === "SSL";
   const monitorSettings = parseMonitorSettings(monitor.monitor_settings_json);
   const uptimeCalculationResult = UptimeCalculator(
     rawUptimeData,
@@ -156,5 +172,10 @@ export const buildMonitorBarResponseFromRawData = (
     avgLatency: uptimeCalculationResult.avgLatency,
     maxLatency: uptimeCalculationResult.maxLatency,
     minLatency: uptimeCalculationResult.minLatency,
+    monitorType: monitor.monitor_type,
+    sslExpiresAt: isSsl ? ResolveSslExpiresAtMs(latestData) : null,
+    sslTrusted: isSsl ? (latestData?.cert_trusted ?? null) : null,
+    issuerCn: isSsl ? (latestData?.issuer_cn ?? null) : null,
+    issuerO: isSsl ? (latestData?.issuer_o ?? null) : null,
   };
 };
