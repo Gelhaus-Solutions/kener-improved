@@ -52,6 +52,8 @@
     "Get notified about incidents updates": "Get notified about incidents updates",
     "Get notified about scheduled maintenance": "Get notified about scheduled maintenance",
     "IDENTIFIED": "IDENTIFIED",
+    "INSECURE": "INSECURE",
+    "UNKNOWN": "UNKNOWN",
     "iFrame": "iFrame",
     "Impact": "Impact",
     "incident": "Incident",
@@ -59,8 +61,13 @@
     "Incident Updates": "Incident Updates",
     "Incidents": "Incidents",
     "Included Monitors (%count)": "Included Monitors (%count)",
+<<<<<<< HEAD
     "Inherited from %monitors": "Inherited from %monitors",
+=======
+    "Issued By": "Issued By",
+>>>>>>> ca81d36c33da76faa1e70560832d83f5261bf89e
     "INVESTIGATING": "INVESTIGATING",
+    "Expires At": "Expires At",
     "Last Updated": "Last Updated",
     "Latency": "Latency",
     "Latency Embed": "Latency Embed",
@@ -125,15 +132,23 @@
     "Read more": "Read more",
     "READY": "READY",
     "Recurring": "Recurring",
+<<<<<<< HEAD
     "Region %id": "Region %id",
     "Remove": "Remove",
+=======
+    "Time Remaining": "Time Remaining",
+>>>>>>> ca81d36c33da76faa1e70560832d83f5261bf89e
     "RESOLVED": "RESOLVED",
     "RSS feed": "RSS feed",
     "SCHEDULED": "SCHEDULED",
     "Scheduled Events (%count)": "Scheduled Events (%count)",
     "Script": "Script",
+<<<<<<< HEAD
     "Search incidents": "Search incidents",
     "Searchable history of past incidents": "Searchable history of past incidents",
+=======
+    "SECURED": "SECURED",
+>>>>>>> ca81d36c33da76faa1e70560832d83f5261bf89e
     "Select Language": "Select Language",
     "Select latency metric to display": "Select latency metric to display",
     "Select Range": "Select Range",

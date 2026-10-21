@@ -1,5 +1,6 @@
 import { json, error } from "@sveltejs/kit";
 import type { APIServerRequest } from "$lib/server/types/api-server";
+import { CanSeeHiddenMonitors, GetLoggedInSession } from "$lib/server/controllers/userController";
 import db from "$lib/server/db/db";
 import {
   BeginningOfDay,
@@ -42,9 +43,19 @@ export default async function post(req: APIServerRequest): Promise<Response> {
       req.body.nowAtTz ? parseInt(req.body.nowAtTz || "0", 10) : GetMinuteStartNowTimestampUTC(),
     ) + 60;
 
+<<<<<<< HEAD
   // Visible, not merely existing (KENER-126).
   const monitor = await ResolveVisiblePublicMonitor(body.tag);
   if (!monitor) {
+=======
+  const canSeeHidden = await CanSeeHiddenMonitors(await GetLoggedInSession(req.cookies));
+  const monitors = await GetMonitorsParsed({
+    tag: body.tag,
+    status: GC.ACTIVE,
+    is_hidden: canSeeHidden ? undefined : GC.NO,
+  });
+  if (!monitors || monitors.length === 0) {
+>>>>>>> ca81d36c33da76faa1e70560832d83f5261bf89e
     return error(404, { message: "Monitor not found" });
   }
   // Unlike its three siblings this endpoint needs the uptime formula, and the

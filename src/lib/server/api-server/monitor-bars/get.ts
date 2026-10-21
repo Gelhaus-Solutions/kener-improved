@@ -1,12 +1,18 @@
 import { json, error } from "@sveltejs/kit";
 import type { APIServerRequest } from "$lib/server/types/api-server";
+<<<<<<< HEAD
 import { ResolveVisiblePublicMonitors } from "$lib/server/controllers/publicMonitorResolver";
+=======
+import { CanSeeHiddenMonitors, GetLoggedInSession } from "$lib/server/controllers/userController";
+import db from "$lib/server/db/db";
+>>>>>>> ca81d36c33da76faa1e70560832d83f5261bf89e
 import { GetMinuteStartNowTimestampUTC } from "$lib/server/tool";
 import type { StatusType } from "$lib/types/status";
 import GC from "$lib/global-constants";
 import type { MonitorBarResponse } from "$lib/server/api-server/monitor-bar/get";
-import { buildMonitorBarResponseFromRawData } from "$lib/server/api-server/monitor-bar/shared";
+import { buildMonitorBarResponseFromRawData, parseIntParam } from "$lib/server/api-server/monitor-bar/shared";
 import {
+  AttachSslCacheFields,
   GetLatestMonitoringDataAllActive,
   GetStatusCountsByIntervalGroupedByMonitor,
 } from "$lib/server/controllers/monitorsController";
@@ -28,9 +34,9 @@ interface MonitorBarsResponse {
 export default async function get(req: APIServerRequest): Promise<Response> {
   const tagsStr = req.query.get("tags");
   const daysStr = req.query.get("days");
-  const days = Math.min(MAX_DAYS, Math.max(1, daysStr ? parseInt(daysStr, 10) : DEFAULT_DAYS));
+  const days = Math.min(MAX_DAYS, Math.max(1, parseIntParam(daysStr, DEFAULT_DAYS)));
   const endOfDayTodayAtTzStr = req.query.get("endOfDayTodayAtTz");
-  const endOfDayTodayAtTz = endOfDayTodayAtTzStr ? parseInt(endOfDayTodayAtTzStr, 10) : GetMinuteStartNowTimestampUTC();
+  const endOfDayTodayAtTz = parseIntParam(endOfDayTodayAtTzStr, GetMinuteStartNowTimestampUTC());
 
   if (!tagsStr) {
     return error(400, { message: "tags query parameter is required" });
@@ -54,7 +60,9 @@ export default async function get(req: APIServerRequest): Promise<Response> {
   }
 
   const startTime = endOfDayTodayAtTz - days * 24 * 60 * 60;
+  const canSeeHidden = await CanSeeHiddenMonitors(await GetLoggedInSession(req.cookies));
 
+<<<<<<< HEAD
   // Resolve first, because everything below needs *physical* tags while the
   // caller may have asked with per-org slugs (KENER-127). The page hands the
   // browser `monitorTag`, which is the slug, and this endpoint used to match on
@@ -70,11 +78,18 @@ export default async function get(req: APIServerRequest): Promise<Response> {
   const [latestDataAll, aggregatedData] = await Promise.all([
     GetLatestMonitoringDataAllActive(physicalTags),
     GetStatusCountsByIntervalGroupedByMonitor(physicalTags, startTime, 86400, days),
+=======
+  const [monitors, latestDataAll, aggregatedData] = await Promise.all([
+    db.getMonitors({ tags, status: GC.ACTIVE, is_hidden: canSeeHidden ? undefined : GC.NO }),
+    GetLatestMonitoringDataAllActive(tags),
+    GetStatusCountsByIntervalGroupedByMonitor(tags, startTime, 86400, days),
+>>>>>>> ca81d36c33da76faa1e70560832d83f5261bf89e
   ]);
 
   const latestStatusByTag = new Map<string, StatusType>(
     latestDataAll.map((d) => [d.monitor_tag, (d.status as StatusType) || GC.NO_DATA]),
   );
+  const latestDataByTag = new Map(latestDataAll.map((d) => [d.monitor_tag, d]));
 
   // Keyed by the name the caller used, not by the physical tag, so a browser that
   // asked for "api" can find "api" in the answer.
@@ -98,6 +113,7 @@ export default async function get(req: APIServerRequest): Promise<Response> {
 
   const responseData: Record<string, MonitorBarResponse> = {};
   const monitorResults = await Promise.all(
+<<<<<<< HEAD
     tags.map(async (requested) => {
       const monitor = resolved.get(requested);
       if (!monitor) return null;
@@ -112,6 +128,23 @@ export default async function get(req: APIServerRequest): Promise<Response> {
       );
       return { tag: requested, payload };
     }),
+=======
+    tags
+      .filter((tag) => existingTags.has(tag))
+      .map(async (tag) => {
+        const monitor = monitorByTag.get(tag);
+        if (!monitor) return null;
+        const payload = buildMonitorBarResponseFromRawData(
+          monitor,
+          aggregatedByTag.get(tag) || [],
+          days,
+          endOfDayTodayAtTz,
+          latestStatusByTag.get(tag) || GC.NO_DATA,
+          monitor.monitor_type === "SSL" ? await AttachSslCacheFields(latestDataByTag.get(tag)) : null,
+        );
+        return { tag, payload };
+      }),
+>>>>>>> ca81d36c33da76faa1e70560832d83f5261bf89e
   );
 
   for (const result of monitorResults) {

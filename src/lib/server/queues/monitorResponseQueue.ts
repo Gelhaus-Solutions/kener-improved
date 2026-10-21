@@ -23,6 +23,7 @@ interface JobData {
   ts: number;
   error_message?: string | null;
   raw_status?: string | null;
+<<<<<<< HEAD
   /**
    * Which region observed this sample (B1b).
    *
@@ -31,6 +32,12 @@ interface JobData {
    * outlive the deploy that created them. Absent means the merged verdict.
    */
   region_id?: number;
+=======
+  expiry_at?: string | null;
+  issuer_cn?: string | null;
+  issuer_o?: string | null;
+  cert_trusted?: boolean;
+>>>>>>> ca81d36c33da76faa1e70560832d83f5261bf89e
 }
 
 const getQueue = () => {
@@ -44,8 +51,24 @@ const addWorker = () => {
   if (worker) return worker;
 
   worker = q.createWorker(getQueue(), async (job: Job): Promise<MonitoringData | null> => {
+<<<<<<< HEAD
     const { monitorTag, ts, status, latency, type, error_message, raw_status } = job.data as JobData;
     const regionId = (job.data as JobData).region_id ?? MERGED_REGION_ID;
+=======
+    const {
+      monitorTag,
+      ts,
+      status,
+      latency,
+      type,
+      error_message,
+      raw_status,
+      expiry_at,
+      issuer_cn,
+      issuer_o,
+      cert_trusted,
+    } = job.data as JobData;
+>>>>>>> ca81d36c33da76faa1e70560832d83f5261bf89e
 
     /**
      * Whether this sample is the authoritative verdict, or one region's view of it.
@@ -124,6 +147,7 @@ const addWorker = () => {
       throw new Error("Failed to insert monitoring data");
     }
 
+<<<<<<< HEAD
     // G5. Live fan-out, on transitions only and for the same reason the outbox
     // emit above is: almost every sample says "still UP", and publishing them all
     // would push hundreds of thousands of messages a day at every open page to
@@ -176,6 +200,17 @@ const addWorker = () => {
       });
       alertingQueue.push(monitorTag, ts, status);
     }
+=======
+    await SetLastMonitoringValue(monitorTag, {
+      monitor_tag: monitorTag,
+      timestamp: ts,
+      status: status,
+      latency: latency,
+      type: type,
+      ...(expiry_at ? { expiry_at, issuer_cn, issuer_o, cert_trusted } : {}),
+    });
+    alertingQueue.push(monitorTag, ts, status);
+>>>>>>> ca81d36c33da76faa1e70560832d83f5261bf89e
 
     return dbRes;
   });
