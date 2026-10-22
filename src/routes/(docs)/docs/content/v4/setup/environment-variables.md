@@ -237,6 +237,7 @@ NO_PROXY=localhost,127.0.0.1,prometheus.lan,.internal
 - An API or Prometheus monitor can set its own **Proxy URL** (for example `http://user:$PROXY_PASS@proxy.internal:3128`, with `$SECRET` substitution), which overrides these variables for that monitor.
 - A monitor error of `Failed to establish tunnel to host:443 via …` means the proxy refused the connection: check the proxy credentials, or add the host to `NO_PROXY`.
 
+<<<<<<< HEAD
 ### KENER_SSE_MAX_CONNECTIONS {#kener-sse-max-connections}
 
 **Purpose**: Cap the number of simultaneous [live update](/docs/v4/live-updates) connections a web process will hold. Public status pages keep one open connection per viewer, so this bounds what that can cost.
@@ -251,10 +252,23 @@ KENER_SSE_MAX_CONNECTIONS=5000
 
 # Turn live updates off entirely
 KENER_SSE_MAX_CONNECTIONS=0
+=======
+### DOCKER_HOST / DOCKER_TLS_VERIFY {#docker-host}
+
+**Purpose**: The connection a new [Docker monitor](/docs/v4/monitors/docker#default-connection) starts with, in the Docker CLI's own format. Set it when Kener reaches Docker through a socket proxy.
+
+**Default**: unset (the form starts on `/var/run/docker.sock`)
+
+**Example**:
+
+```bash
+DOCKER_HOST=tcp://docker-socket-proxy:2375
+>>>>>>> 5bc658b771d44f48b61a514cfdb5037468c5aa36
 ```
 
 **Important**:
 
+<<<<<<< HEAD
 - Beyond the cap, new viewers are told to retry later and their page simply stops updating on its own. It still renders and is accurate at load.
 - Requires Redis. With Redis unreachable the stream opens and delivers nothing, which is indistinguishable from a page where nothing has changed.
 
@@ -274,6 +288,10 @@ KENER_REPORT_LINK_TTL_SECONDS=604800
 
 > [!IMPORTANT]
 > In Docker this path must be on a mounted volume. Without one, generated reports are lost on every redeploy and their download links stop working.
+=======
+- Kener reads `unix://` and `tcp://` addresses. Set `DOCKER_TLS_VERIFY=1` or `DOCKER_TLS=1` to start on `tls`. Any other value logs one warning and keeps the socket.
+- Only the dashboard form uses it. Saved monitors and monitors created through the API keep the connection they were given.
+>>>>>>> 5bc658b771d44f48b61a514cfdb5037468c5aa36
 
 ## Integration Variables {#integration-variables}
 

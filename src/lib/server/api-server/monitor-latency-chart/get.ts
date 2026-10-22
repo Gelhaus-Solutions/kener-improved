@@ -1,10 +1,15 @@
 import { json, error } from "@sveltejs/kit";
 import type { APIServerRequest } from "$lib/server/types/api-server";
+import { CanSeeHiddenMonitors, GetLoggedInSession } from "$lib/server/controllers/userController";
 import db from "$lib/server/db/db";
 import { ResolveVisiblePublicMonitor } from "$lib/server/controllers/publicMonitorResolver";
 import { GetMinuteStartNowTimestampUTC } from "$lib/server/tool";
+<<<<<<< HEAD
 import { readLatencySeries, snapToGrain } from "$lib/server/services/latencyPercentiles";
 import { MERGED_REGION_ID } from "$lib/server/db/regions";
+=======
+import GC from "$lib/global-constants";
+>>>>>>> 5bc658b771d44f48b61a514cfdb5037468c5aa36
 
 /**
  * Time range definitions with aggregation intervals
@@ -42,8 +47,14 @@ export default async function get(req: APIServerRequest): Promise<Response> {
     return error(400, { message: "tag query parameter is required" });
   }
 
+<<<<<<< HEAD
   // Visible, not merely existing. See publicMonitorResolver (KENER-126).
   const monitor = await ResolveVisiblePublicMonitor(tag);
+=======
+  const canSeeHidden = await CanSeeHiddenMonitors(await GetLoggedInSession(req.cookies));
+  const monitors = await db.getMonitors({ tag, status: GC.ACTIVE, is_hidden: canSeeHidden ? undefined : GC.NO });
+  const monitor = monitors[0];
+>>>>>>> 5bc658b771d44f48b61a514cfdb5037468c5aa36
   if (!monitor) {
     return error(404, { message: "Monitor not found" });
   }

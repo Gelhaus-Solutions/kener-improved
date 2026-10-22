@@ -181,6 +181,25 @@ export function determineEventStatus(
 
 // ============ Helper to create a maintenance event with notification ============
 
+// Subscribers hear only of maintenances a status page shows: global, or with a monitor that is not hidden.
+const pushMaintenanceUpdate = async (
+  event: MaintenanceEventRecordDetailed,
+  statusMessage: string,
+  updateIdSuffix: string,
+  subjectPrefix: string,
+  siteUrl: string,
+): Promise<void> => {
+  const [maintenance, monitors] = await Promise.all([
+    db.getMaintenanceById(event.maintenance_id),
+    db.getMonitorsByMaintenanceId(event.maintenance_id),
+  ]);
+  if (maintenance?.is_global !== "YES" && monitors.length === 0) return;
+  const monitorNames = monitors.map((m) => `${m.monitor_name}(${m.monitor_impact})`).join(", ");
+  await subscriberQueue.push(
+    maintenanceToVariables(event, monitorNames, statusMessage, updateIdSuffix, subjectPrefix, siteUrl),
+  );
+};
+
 export const CreateMaintenanceEventWithNotification = async (
   maintenance_id: number,
   start_date_time: number,
@@ -217,8 +236,6 @@ export const CreateMaintenanceEventWithNotification = async (
     if (notificationSettings.event_types.created) {
       const siteVars = siteDataToVariables(siteData);
       const siteUrl = siteVars.site_url;
-      const monitors = await db.getMonitorsByMaintenanceId(maintenance_id);
-      const monitorNames = monitors.map((m) => `${m.monitor_name}(${m.monitor_impact})`).join(", ");
       const eventDetailed: MaintenanceEventRecordDetailed = {
         id: event.id,
         maintenance_id,
@@ -230,6 +247,7 @@ export const CreateMaintenanceEventWithNotification = async (
         title,
         description,
       };
+<<<<<<< HEAD
       const update = maintenanceToVariables(
         eventDetailed,
         monitorNames,
@@ -239,6 +257,9 @@ export const CreateMaintenanceEventWithNotification = async (
         siteUrl,
       );
       await subscriberQueue.push(update, undefined, { event_id: eventId, org_id: currentOrgId() });
+=======
+      await pushMaintenanceUpdate(eventDetailed, "**has been created**", "created", "Maintenance Created", siteUrl);
+>>>>>>> 5bc658b771d44f48b61a514cfdb5037468c5aa36
     }
   } catch (err) {
     console.error(`Error sending created notification for maintenance event ${event.id}:`, err);
@@ -667,22 +688,22 @@ export const UpdateMaintenanceEventStatus = async (id: number, status: string): 
       const siteVars = siteDataToVariables(siteData);
       const siteUrl = siteVars.site_url;
       const maintenance = await db.getMaintenanceById(updated.maintenance_id);
-      const monitors = await db.getMonitorsByMaintenanceId(updated.maintenance_id);
-      const monitorNames = monitors.map((m) => `${m.monitor_name}(${m.monitor_impact})`).join(", ");
       const eventDetailed: MaintenanceEventRecordDetailed = {
         ...updated,
         title: maintenance?.title || "",
         description: maintenance?.description || null,
       };
-      const update = maintenanceToVariables(
+      await pushMaintenanceUpdate(
         eventDetailed,
-        monitorNames,
         targetStatus === GC.COMPLETED ? "**has been completed**" : "**has been cancelled**",
         targetStatus === GC.COMPLETED ? "completed" : "cancelled",
         targetStatus === GC.COMPLETED ? "Maintenance Completed" : "Maintenance Cancelled",
         siteUrl,
       );
+<<<<<<< HEAD
       await subscriberQueue.push(update, undefined, { event_id: eventId, org_id: currentOrgId() });
+=======
+>>>>>>> 5bc658b771d44f48b61a514cfdb5037468c5aa36
     }
   } catch (err) {
     console.error(`Error sending ${targetStatus} notification for maintenance event ${id}:`, err);
@@ -847,22 +868,22 @@ export const UpdateMaintenanceEventStatuses = async (): Promise<void> => {
         });
       });
       console.log(`Maintenance event ${event.id} marked as READY (starts at ${event.start_date_time})`);
-      const monitors = await db.getMonitorsByMaintenanceId(event.maintenance_id);
-      const monitorNames = monitors.map((m) => `${m.monitor_name}(${m.monitor_impact})`).join(", ");
       const timeUntilStart = formatDistanceStrict(
         new Date(event.start_date_time * 1000),
         new Date(currentTimestamp * 1000),
       );
       if (notificationSettings.event_types.reminder) {
-        const update = maintenanceToVariables(
+        await pushMaintenanceUpdate(
           event,
-          monitorNames,
           `**is starting in ${timeUntilStart}**`,
           "starting_soon",
           "Maintenance Starting Soon",
           siteUrl,
         );
+<<<<<<< HEAD
         await subscriberQueue.push(update, undefined, { event_id: reminderEventId, org_id: currentOrgId() });
+=======
+>>>>>>> 5bc658b771d44f48b61a514cfdb5037468c5aa36
       }
     }
 
@@ -879,10 +900,8 @@ export const UpdateMaintenanceEventStatuses = async (): Promise<void> => {
         });
       });
       console.log(`Maintenance event ${event.id} marked as ONGOING (catch-up from SCHEDULED)`);
-      const monitors = await db.getMonitorsByMaintenanceId(event.maintenance_id);
-      const monitorNames = monitors.map((m) => `${m.monitor_name}(${m.monitor_impact})`).join(", ");
-
       if (notificationSettings.event_types.started) {
+<<<<<<< HEAD
         const update = maintenanceToVariables(
           event,
           monitorNames,
@@ -892,6 +911,9 @@ export const UpdateMaintenanceEventStatuses = async (): Promise<void> => {
           siteUrl,
         );
         await subscriberQueue.push(update, undefined, { event_id: catchUpEventId, org_id: currentOrgId() });
+=======
+        await pushMaintenanceUpdate(event, "**is now in progress**", "ongoing", "Maintenance In Progress", siteUrl);
+>>>>>>> 5bc658b771d44f48b61a514cfdb5037468c5aa36
       }
     }
 
@@ -906,10 +928,8 @@ export const UpdateMaintenanceEventStatuses = async (): Promise<void> => {
         });
       });
       console.log(`Maintenance event ${event.id} marked as ONGOING`);
-      const monitors = await db.getMonitorsByMaintenanceId(event.maintenance_id);
-      const monitorNames = monitors.map((m) => `${m.monitor_name}(${m.monitor_impact})`).join(", ");
-
       if (notificationSettings.event_types.started) {
+<<<<<<< HEAD
         const update = maintenanceToVariables(
           event,
           monitorNames,
@@ -919,6 +939,9 @@ export const UpdateMaintenanceEventStatuses = async (): Promise<void> => {
           siteUrl,
         );
         await subscriberQueue.push(update, undefined, { event_id: startedEventId, org_id: currentOrgId() });
+=======
+        await pushMaintenanceUpdate(event, "**is now in progress**", "ongoing", "Maintenance In Progress", siteUrl);
+>>>>>>> 5bc658b771d44f48b61a514cfdb5037468c5aa36
       }
     }
 
@@ -932,10 +955,8 @@ export const UpdateMaintenanceEventStatuses = async (): Promise<void> => {
         });
       });
       console.log(`Maintenance event ${event.id} marked as COMPLETED`);
-      const monitors = await db.getMonitorsByMaintenanceId(event.maintenance_id);
-      const monitorNames = monitors.map((m) => `${m.monitor_name}(${m.monitor_impact})`).join(", ");
-
       if (notificationSettings.event_types.ended) {
+<<<<<<< HEAD
         const update = maintenanceToVariables(
           event,
           monitorNames,
@@ -945,6 +966,9 @@ export const UpdateMaintenanceEventStatuses = async (): Promise<void> => {
           siteUrl,
         );
         await subscriberQueue.push(update, undefined, { event_id: completedEventId, org_id: currentOrgId() });
+=======
+        await pushMaintenanceUpdate(event, "**has been completed**", "completed", "Maintenance Completed", siteUrl);
+>>>>>>> 5bc658b771d44f48b61a514cfdb5037468c5aa36
       }
     }
   } catch (error) {

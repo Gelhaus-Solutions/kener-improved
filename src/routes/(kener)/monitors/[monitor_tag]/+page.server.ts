@@ -10,6 +10,7 @@ import {
 } from "$lib/server/controllers/dashboardController.js";
 import { GetNowTimestampUTC, UptimeCalculator } from "$lib/server/tool";
 import GC from "$lib/global-constants.js";
+<<<<<<< HEAD
 import { ParseLatency } from "$lib/clientTools";
 import { componentImpactSummary, componentImpactTextClass } from "$lib/server/incidents/pageStatus";
 import { getMonitorDependencyView } from "$lib/server/incidents/dependencyView";
@@ -17,12 +18,17 @@ import { GetMonitorsParsed } from "$lib/server/controllers/monitorsController";
 import { ResolvePublicMonitorTag } from "$lib/server/controllers/publicMonitorResolver";
 import { publishedSlosFor } from "$lib/server/services/sloPublic";
 import { regionMapForMonitor } from "$lib/server/regions/mapData";
+=======
+import { GetStatusColor, GetStatusSummary, ParseLatency, ResolveSslExpiresAtMs } from "$lib/clientTools";
+import { AttachSslCacheFields, GetMonitorsParsed } from "$lib/server/controllers/monitorsController";
+>>>>>>> 5bc658b771d44f48b61a514cfdb5037468c5aa36
 import type { GroupMonitorTypeData } from "$lib/server/types/monitor";
 import type { MonitorSettings } from "$lib/server/types/db";
 
 export const load: PageServerLoad = async ({ params, parent }) => {
   const { monitor_tag } = params;
   const parentData = await parent();
+<<<<<<< HEAD
   // I3e: the URL carries the monitor's per-org slug. Identical to the tag for
   // the default org, so existing links are unaffected.
   const resolvedTag = (await ResolvePublicMonitorTag(monitor_tag)) ?? monitor_tag;
@@ -31,11 +37,16 @@ export const load: PageServerLoad = async ({ params, parent }) => {
   if (!monitors || monitors.length === 0) {
     throw error(404, { message: "Monitor not found" });
   }
+=======
+  const is_hidden = parentData.canSeeHiddenMonitors ? undefined : "NO";
+  const monitors = await GetMonitorsParsed({ tag: monitor_tag, status: "ACTIVE", is_hidden });
+>>>>>>> 5bc658b771d44f48b61a514cfdb5037468c5aa36
   const monitor = monitors[0];
   if (!monitor) {
     throw error(404, { message: "Monitor not found" });
   }
 
+<<<<<<< HEAD
   // Check if monitor is hidden
   if (monitor.is_hidden === "YES") {
     throw error(404, { message: "Monitor not found" });
@@ -47,6 +58,9 @@ export const load: PageServerLoad = async ({ params, parent }) => {
   // monitor in an active incident rendered a clean page with no incident on it.
   // Invisible on the default org, where slug and tag are the same string.
   const monitorTags = [monitor.tag];
+=======
+  const monitorTags = [monitor_tag];
+>>>>>>> 5bc658b771d44f48b61a514cfdb5037468c5aa36
 
   const eventSettings = parentData.eventDisplaySettings;
   const showInlineEvents = eventSettings.showInlineEvents === true;
@@ -93,6 +107,7 @@ export const load: PageServerLoad = async ({ params, parent }) => {
   // both are facts about a check that ran, and neither is something a declared
   // incident or a dependency could sensibly supply.
   const lastStatus = await db.getLatestMonitoringData(monitor.tag);
+<<<<<<< HEAD
   const lastSampleTimestamp = lastStatus ? lastStatus.timestamp : nowSeconds;
   const lastSampleLatency = lastStatus?.latency ?? 0;
 
@@ -102,6 +117,20 @@ export const load: PageServerLoad = async ({ params, parent }) => {
   // the graph had moved read one way on the status page and another on its own -
   // and there was no way for a visitor to find out which was true.
   const dependencyView = await getMonitorDependencyView(monitor.tag, nowSeconds);
+=======
+  const sslStatus = monitor.monitor_type === "SSL" ? await AttachSslCacheFields(lastStatus) : null;
+  //use uptime calculator tool to parse
+  let item: TimestampStatusCount = {
+    ts: lastStatus ? lastStatus.timestamp : GetNowTimestampUTC(),
+    countOfUp: lastStatus && lastStatus.status === GC.UP ? 1 : 0,
+    countOfDown: lastStatus && lastStatus.status === GC.DOWN ? 1 : 0,
+    countOfDegraded: lastStatus && lastStatus.status === GC.DEGRADED ? 1 : 0,
+    countOfMaintenance: lastStatus && lastStatus.status === GC.MAINTENANCE ? 1 : 0,
+    avgLatency: lastStatus && lastStatus.latency ? lastStatus.latency : 0,
+    maxLatency: lastStatus && lastStatus.latency ? lastStatus.latency : 0,
+    minLatency: lastStatus && lastStatus.latency ? lastStatus.latency : 0,
+  };
+>>>>>>> 5bc658b771d44f48b61a514cfdb5037468c5aa36
 
   //get status summary
   let extendedTags: string[] = [];
@@ -113,6 +142,7 @@ export const load: PageServerLoad = async ({ params, parent }) => {
   }
 
   if (extendedTags.length > 0) {
+<<<<<<< HEAD
     const parsedExtendedMonitors = await GetMonitorsParsed({ tags: extendedTags, status: "ACTIVE", is_hidden: "NO" });
     // KENER-126: this list is serialised into the page and the browser then asks
     // the bar endpoint for each tag in it. Taken straight from `type_data` it
@@ -125,6 +155,9 @@ export const load: PageServerLoad = async ({ params, parent }) => {
     // member conceals it; it does not remove it from the group.
     const visibleTags = new Set(parsedExtendedMonitors.map((m) => m.tag));
     extendedTags = extendedTags.filter((tag) => visibleTags.has(tag));
+=======
+    const parsedExtendedMonitors = await GetMonitorsParsed({ tags: extendedTags, status: "ACTIVE", is_hidden });
+>>>>>>> 5bc658b771d44f48b61a514cfdb5037468c5aa36
     for (const parsedMonitor of parsedExtendedMonitors) {
       if (parsedMonitor.monitor_type !== "GROUP") continue;
 
@@ -176,6 +209,7 @@ export const load: PageServerLoad = async ({ params, parent }) => {
       monitorImage: monitor.image,
       monitorDescription: monitor.description,
       monitorId: monitor.id,
+<<<<<<< HEAD
       monitorLastStatus: componentImpactSummary(dependencyView.impact, dependencyView.silent),
       textClass: componentImpactTextClass(dependencyView.impact, dependencyView.silent),
       // Only when the graph is what moved the headline. Any other time the two
@@ -186,6 +220,17 @@ export const load: PageServerLoad = async ({ params, parent }) => {
       partOfTags: dependencyView.partOf.map((node) => node.monitor_tag),
       monitorLastStatusTimestamp: lastSampleTimestamp,
       monitorLastLatency: ParseLatency(lastSampleLatency),
+=======
+      monitorLastStatus: GetStatusSummary(item),
+      textClass: GetStatusColor(item),
+      monitorLastStatusTimestamp: item.ts,
+      monitorLastLatency: ParseLatency(item.avgLatency),
+      monitorType: monitor.monitor_type,
+      monitorSslExpiresAt: ResolveSslExpiresAtMs(sslStatus),
+      monitorSslTrusted: sslStatus?.cert_trusted ?? null,
+      monitorIssuerCn: sslStatus?.issuer_cn ?? null,
+      monitorIssuerO: sslStatus?.issuer_o ?? null,
+>>>>>>> 5bc658b771d44f48b61a514cfdb5037468c5aa36
       ongoingIncidents,
       ongoingMaintenances,
       upcomingMaintenances,
