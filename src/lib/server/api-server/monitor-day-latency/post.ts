@@ -1,9 +1,11 @@
 import { json, error } from "@sveltejs/kit";
 import type { APIServerRequest } from "$lib/server/types/api-server";
+import { CanSeeHiddenMonitors, GetLoggedInSession } from "$lib/server/controllers/userController";
 import db from "$lib/server/db/db";
 import { BeginningOfDay, GetMinuteStartNowTimestampUTC, GetMinuteStartTimestampUTC } from "$lib/server/tool";
 import { ResolveVisiblePublicMonitor } from "../../controllers/publicMonitorResolver.js";
 import { ParseLatency } from "$lib/clientTools";
+import GC from "$lib/global-constants";
 
 interface DayDetailRequest {
   tag: string;
@@ -111,10 +113,20 @@ export default async function post(req: APIServerRequest): Promise<Response> {
       req.body.nowAtTz ? parseInt(req.body.nowAtTz || "0", 10) : GetMinuteStartNowTimestampUTC(),
     ) + 60;
 
+<<<<<<< HEAD
   // Visible, not merely existing (KENER-126). Only `monitor.tag` is used below,
   // so the raw record this returns is all this endpoint ever needed.
   const monitor = await ResolveVisiblePublicMonitor(body.tag);
   if (!monitor) {
+=======
+  const canSeeHidden = await CanSeeHiddenMonitors(await GetLoggedInSession(req.cookies));
+  const monitors = await GetMonitorsParsed({
+    tag: body.tag,
+    status: GC.ACTIVE,
+    is_hidden: canSeeHidden ? undefined : GC.NO,
+  });
+  if (!monitors || monitors.length === 0) {
+>>>>>>> 5bc658b771d44f48b61a514cfdb5037468c5aa36
     return error(404, { message: "Monitor not found" });
   }
 
