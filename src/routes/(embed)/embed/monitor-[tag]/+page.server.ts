@@ -1,8 +1,12 @@
 import { ResolveVisiblePublicMonitor } from "$lib/server/controllers/publicMonitorResolver";
 import type { PageServerLoad } from "./$types";
+<<<<<<< HEAD
 import { error } from "@sveltejs/kit";
 import db from "$lib/server/db/db";
 import { buildMonitorBarResponse, endOfDayAtTz } from "$lib/server/api-server/monitor-bar/shared";
+=======
+import { parseIntParam } from "$lib/server/api-server/monitor-bar/shared";
+>>>>>>> 6dec4f71aeb8dfb845303b0363f42ca38019e959
 
 const DEFAULT_DAYS = 90;
 const MAX_DAYS = 90;
@@ -11,7 +15,7 @@ export const load: PageServerLoad = async ({ params, url }) => {
   const { tag } = params;
   const theme = url.searchParams.get("theme");
   const daysParam = url.searchParams.get("days");
-  const days = Math.min(MAX_DAYS, Math.max(1, daysParam ? parseInt(daysParam, 10) : DEFAULT_DAYS));
+  const days = Math.min(MAX_DAYS, Math.max(1, parseIntParam(daysParam, DEFAULT_DAYS)));
 
   // Day buckets depend on a timezone, and the server does not know the viewer's.
   // An embedder can pin one with ?tz=; otherwise render UTC. The page refetches

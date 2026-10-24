@@ -300,6 +300,7 @@ const apiAuthHandle: Handle = async ({ event, resolve }) => {
   return response;
 };
 
+<<<<<<< HEAD
 // `orgResolveHandle` runs before `apiAuthHandle` and after the cheap ones: it
 // establishes the host-derived org for the whole request, and `apiAuthHandle`
 // then overrides it with the API key's org. That precedence is load-bearing -
@@ -317,3 +318,15 @@ export const handle = sequence(
   apiAuthHandle,
   eventContextHandle,
 );
+=======
+// A signed-in response can include hidden monitors, so a shared cache (CDN) must not store it.
+const privateCacheHandle: Handle = async ({ event, resolve }) => {
+  const response = await resolve(event);
+  if (event.cookies.get("kener-user") && !response.headers.has("cache-control")) {
+    response.headers.set("cache-control", "private");
+  }
+  return response;
+};
+
+export const handle = sequence(csrfHandle, privateCacheHandle, apiAuthHandle);
+>>>>>>> 6dec4f71aeb8dfb845303b0363f42ca38019e959
