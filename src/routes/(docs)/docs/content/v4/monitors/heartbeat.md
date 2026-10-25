@@ -19,7 +19,27 @@ Accepted methods: `GET` and `POST`.
 
 > Older heartbeat URLs used a colon — `/ext/heartbeat/{tag}:{secret}`. Those still work; they are rewritten to the path-separated form automatically, so existing cron jobs need no changes.
 
+<<<<<<< HEAD
 ## Silence timeout {#minimum-setup}
+=======
+## Heartbeat secret {#heartbeat-secret}
+
+The `{secret}` part of the URL is the heartbeat secret. The monitor tag is public, so the secret is what stops others from sending fake heartbeats. Kener stores it in `type_data.secretString`.
+
+Rule: at least 12 characters, using only `A-Z a-z 0-9 . _ ~ -`. A secret that follows the rule goes into the URL without encoding.
+
+- **Admin UI**: type a value in **Heartbeat secret**, or click **New URL** for a random one.
+- **API**: set `type_data.secretString` on `POST /api/v4/monitors` or `PATCH /api/v4/monitors/{tag}`. A new or changed value that breaks the rule returns HTTP `400` with code `BAD_REQUEST`, and the message starts with `Heartbeat secret breaks the rule`. See the [API Reference](/docs/spec/v4/).
+- **Not set**: when a `HEARTBEAT` monitor is saved without `secretString`, Kener generates one, for example `focused-galois-sharp-chaum`. The `POST`/`PATCH` response includes it.
+- **Clone**: a cloned heartbeat monitor gets a new secret. Give the sender the clone's URL.
+
+> [!TIP]
+> For infrastructure as code, set `secretString` yourself when you create the monitor. Then the sender (a cron job, a Prometheus Alertmanager rule) can be configured with the URL before the monitor exists.
+
+Kener checks the rule only for a new or changed `secretString`. A secret stored before the rule keeps working, and a save that sends it back unchanged succeeds.
+
+## Minimum setup {#minimum-setup}
+>>>>>>> a91998781f15812adc6422ed05b0580b6f38d3b5
 
 The default mode. Set:
 
@@ -78,20 +98,27 @@ Latency is the reported `duration_ms` when the job sent one, and otherwise the e
 
 ## Example {#example}
 
+<<<<<<< HEAD
 A job on a short loop, judged by silence:
+=======
+Request body for `POST /api/v4/monitors`:
+>>>>>>> a91998781f15812adc6422ed05b0580b6f38d3b5
 
 ```json
 {
-    "type": "HEARTBEAT",
+    "tag": "my-job",
+    "name": "My job",
+    "monitor_type": "HEARTBEAT",
     "type_data": {
         "degradedRemainingMinutes": 5,
-        "downRemainingMinutes": 10
+        "downRemainingMinutes": 10,
+        "secretString": "my-job-hb-secret-01"
     }
 }
 ```
 
 ```bash
-*/5 * * * * /path/to/job.sh && curl -s "https://your-kener-host/ext/heartbeat/my-job/my-secret"
+*/5 * * * * /path/to/job.sh && curl -s "https://your-kener-host/ext/heartbeat/my-job/my-job-hb-secret-01"
 ```
 
 A nightly backup, judged by schedule, reporting whether it worked and how long it took:
@@ -117,6 +144,7 @@ Note that the `curl` runs whether or not the job succeeded, so a failure is repo
 ## Troubleshooting {#troubleshooting}
 
 - **Always NO_DATA**: endpoint never called or wrong `tag`/`secret`
+- **`Invalid heartbeat secret`**: the URL secret does not match `secretString`. Copy the URL again from the monitor page, or from the API response.
 - **Always DOWN/DEGRADED**: thresholds too low for actual job interval
 - **Signal accepted but stale**: ensure heartbeat is sent only after successful completion
 - **Schedule seems ignored**: check the editor's next expected runs preview. An unparseable `expectedCron` falls back to the silence timeout
