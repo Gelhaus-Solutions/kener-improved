@@ -79,14 +79,20 @@ export class PagesRepository extends BaseRepository {
     return await this.table("pages_monitors").where("page_id", page_id).orderBy("position", "asc");
   }
 
+<<<<<<< HEAD
   async getPageMonitorsExcludeHidden(page_id: number): Promise<PageMonitorRecord[]> {
     return await this.table("pages_monitors")
+=======
+  async getActivePageMonitors(page_id: number, includeHidden = false): Promise<PageMonitorRecord[]> {
+    const query = this.knex("pages_monitors")
+>>>>>>> 68a6ea236ced714b081f0cac7f1d86383f3ef427
       .join("monitors", "pages_monitors.monitor_tag", "monitors.tag")
       .where("pages_monitors.page_id", page_id)
-      .andWhere("monitors.is_hidden", "NO")
-      .andWhere("monitors.status", "ACTIVE")
-      .orderBy("pages_monitors.position", "asc")
-      .select("pages_monitors.*");
+      .andWhere("monitors.status", "ACTIVE");
+    if (!includeHidden) {
+      query.andWhere("monitors.is_hidden", "NO");
+    }
+    return await query.orderBy("pages_monitors.position", "asc").select("pages_monitors.*");
   }
 
   async getPagesByMonitorTag(monitor_tag: string): Promise<PageMonitorRecord[]> {

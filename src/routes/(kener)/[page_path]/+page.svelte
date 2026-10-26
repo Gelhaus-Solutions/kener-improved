@@ -6,6 +6,7 @@
   import MonitorSloPanel from "$lib/components/MonitorSloPanel.svelte";
   import IncidentItem from "$lib/components/IncidentItem.svelte";
   import MaintenanceItem from "$lib/components/MaintenanceItem.svelte";
+  import NotificationsList from "$lib/components/NotificationsList.svelte";
   import mdToHTML from "$lib/marked.js";
   import clientResolver, { absoluteResolve } from "$lib/client/resolver.js";
   import { resolve } from "$app/paths";
@@ -25,6 +26,89 @@
   let endOfDayTodayAtTz = $derived(getEndOfDayAtTz($selectedTimezone));
 
   let showInlineEvents = $derived(data.eventDisplaySettings?.showInlineEvents === true);
+<<<<<<< HEAD
+=======
+  let eventListPlacement = $derived(data.eventDisplaySettings?.eventListPlacement);
+
+  function getGridItemSpanClass(index: number, total: number, type: typeof viewType): string {
+    if (type === "default-grid") {
+      const mdLastRowCount = total % 2 || 2;
+      const mdLastRowStart = total - mdLastRowCount;
+      const isInMdLastRow = index >= mdLastRowStart;
+      const mdSpan = isInMdLastRow && mdLastRowCount === 1 ? "md:col-span-4" : "md:col-span-2";
+
+      const lgLastRowCount = total % 2 || 2;
+      const lgLastRowStart = total - lgLastRowCount;
+      const isInLgLastRow = index >= lgLastRowStart;
+      const lgSpan = isInLgLastRow && lgLastRowCount === 1 ? "lg:col-span-4" : "lg:col-span-2";
+
+      return `${mdSpan} ${lgSpan}`;
+    }
+
+    const smLastRowCount = total % 2 || 2;
+    const smLastRowStart = total - smLastRowCount;
+    const isInSmLastRow = index >= smLastRowStart;
+    const smSpan = isInSmLastRow && smLastRowCount === 1 ? "sm:col-span-4" : "sm:col-span-2";
+
+    const lgLastRowCount = total % 3 || 3;
+    const lgLastRowStart = total - lgLastRowCount;
+    const isInLgLastRow = index >= lgLastRowStart;
+    const lgSpan = isInLgLastRow
+      ? lgLastRowCount === 1
+        ? "lg:col-span-6"
+        : lgLastRowCount === 2
+          ? "lg:col-span-3"
+          : "lg:col-span-2"
+      : "lg:col-span-2";
+
+    return `${smSpan} ${lgSpan}`;
+  }
+
+  function getGridContainerClass(type: typeof viewType): string {
+    if (type === "compact-grid") return "bg-border gap-px sm:grid-cols-4 lg:grid-cols-6";
+    if (type === "default-grid") return "bg-border gap-px md:grid-cols-4 lg:grid-cols-4";
+    return "";
+  }
+
+  $effect(() => {
+    const tags = data.monitorTags || [];
+    const days = barCount;
+    const currentRequestVersion = ++requestVersion;
+
+    monitorBarDataByTag = {};
+    monitorBarErrorByTag = {};
+
+    if (!browser || !tags.length) return;
+
+    void Promise.all(
+      tags.map(async (tag) => {
+        try {
+          const monitorBarData = await requestMonitorBar(tag, days, endOfDayTodayAtTz);
+          return { tag, ok: true as const, monitorBarData };
+        } catch (err) {
+          const errorMessage = err instanceof Error ? err.message : "Unknown error";
+          return { tag, ok: false as const, errorMessage };
+        }
+      })
+    ).then((results) => {
+      if (currentRequestVersion !== requestVersion) return;
+
+      const nextDataByTag: Record<string, MonitorBarResponse> = {};
+      const nextErrorByTag: Record<string, string> = {};
+
+      for (const result of results) {
+        if (result.ok) {
+          nextDataByTag[result.tag] = result.monitorBarData;
+        } else {
+          nextErrorByTag[result.tag] = result.errorMessage;
+        }
+      }
+
+      monitorBarDataByTag = nextDataByTag;
+      monitorBarErrorByTag = nextErrorByTag;
+    });
+  });
+>>>>>>> 68a6ea236ced714b081f0cac7f1d86383f3ef427
 </script>
 
 <svelte:head>
@@ -58,7 +142,7 @@
 
 <!-- page title -->
 <div class="flex flex-col gap-3 sm:gap-4">
-  <ThemePlus monitor_tags={data.monitorTags} hideNotificationsPopover={showInlineEvents} />
+  <ThemePlus monitor_tags={data.monitorTags} hideNotificationsPopover={eventListPlacement !== "button"} />
   <div class="flex flex-col gap-2 px-3 py-2 sm:px-4">
     {#if data.pageDetails?.page_logo}
       <img
@@ -84,6 +168,7 @@
       </Item.Content>
     </Item.Root>
   </div>
+<<<<<<< HEAD
   {#if !!data.monitorTags.length}
     <LivePageStatusCard statusClass={data.pageStatus.statusClass} statusText={data.pageStatus.statusSummary} />
     {#if showInlineEvents && data.ongoingIncidents && data.ongoingIncidents.length > 0}
@@ -91,25 +176,43 @@
         {#each data.ongoingIncidents as incident, i (incident.id ?? i)}
           <div class=" rounded-3xl border p-3 sm:p-4">
             <IncidentItem {incident} />
+=======
+  <div class="grid grid-cols-1 gap-4 sm:grid-cols-16">
+    <div
+      class="col-span-1 flex flex-col gap-3 sm:gap-4 {eventListPlacement === 'aside'
+        ? 'sm:col-span-11'
+        : 'sm:col-span-16'}"
+    >
+      {#if !!data.monitorTags.length}
+        <EventsCard statusClass={data.pageStatus.statusClass} statusText={data.pageStatus.statusSummary} />
+        {#if showInlineEvents && data.ongoingIncidents && data.ongoingIncidents.length > 0}
+          <div class="flex flex-col gap-3">
+            {#each data.ongoingIncidents as incident, i (incident.id ?? i)}
+              <div class=" rounded-3xl border p-3 sm:p-4">
+                <IncidentItem {incident} />
+              </div>
+            {/each}
+>>>>>>> 68a6ea236ced714b081f0cac7f1d86383f3ef427
           </div>
-        {/each}
-      </div>
-    {/if}
-    {#if showInlineEvents && data.ongoingMaintenances && data.ongoingMaintenances.length > 0}
-      <div class="flex flex-col gap-3">
-        {#each data.ongoingMaintenances as maintenance, i (maintenance.id ?? i)}
-          <div class="rounded-3xl border p-3 sm:p-4">
-            <MaintenanceItem {maintenance} />
+        {/if}
+        {#if showInlineEvents && data.ongoingMaintenances && data.ongoingMaintenances.length > 0}
+          <div class="flex flex-col gap-3">
+            {#each data.ongoingMaintenances as maintenance, i (maintenance.id ?? i)}
+              <div class="rounded-3xl border p-3 sm:p-4">
+                <MaintenanceItem {maintenance} />
+              </div>
+            {/each}
           </div>
-        {/each}
-      </div>
-    {/if}
-    {#if showInlineEvents && data.upcomingMaintenances && data.upcomingMaintenances.length > 0}
-      <div class="flex flex-col gap-3">
-        {#each data.upcomingMaintenances as maintenance, i (maintenance.id ?? i)}
-          <div class="rounded-3xl border p-3 sm:p-4">
-            <MaintenanceItem {maintenance} />
+        {/if}
+        {#if showInlineEvents && data.upcomingMaintenances && data.upcomingMaintenances.length > 0}
+          <div class="flex flex-col gap-3">
+            {#each data.upcomingMaintenances as maintenance, i (maintenance.id ?? i)}
+              <div class="rounded-3xl border p-3 sm:p-4">
+                <MaintenanceItem {maintenance} />
+              </div>
+            {/each}
           </div>
+<<<<<<< HEAD
         {/each}
       </div>
     {/if}
@@ -131,4 +234,39 @@
       {endOfDayTodayAtTz}
     />
   {/if}
+=======
+        {/if}
+        <div class="overflow-hidden rounded-3xl border">
+          <div class={`grid grid-cols-1 ${getGridContainerClass(viewType)}`}>
+            {#each data.monitorTags as tag, i (tag)}
+              <div
+                class="{viewType === 'compact-grid' || viewType === 'default-grid'
+                  ? `${getGridItemSpanClass(i, data.monitorTags.length, viewType)} bg-background`
+                  : i < data.monitorTags.length - 1
+                    ? 'border-b'
+                    : ''} px-2 py-2 sm:px-0"
+              >
+                <MonitorBar
+                  {tag}
+                  prefetchedData={monitorBarDataByTag[tag]}
+                  prefetchedError={monitorBarErrorByTag[tag]}
+                  days={barCount}
+                  {endOfDayTodayAtTz}
+                  groupChildTags={data.monitorGroupMembersByTag?.[tag] || []}
+                  compact={isCompact}
+                  grid={viewType === "compact-grid" || viewType === "default-grid"}
+                />
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
+    </div>
+    {#if eventListPlacement === "aside"}
+      <div class="col-span-1 overflow-hidden rounded-3xl border sm:col-span-5">
+        <NotificationsList monitorTags={data.monitorTags} />
+      </div>
+    {/if}
+  </div>
+>>>>>>> 68a6ea236ced714b081f0cac7f1d86383f3ef427
 </div>
