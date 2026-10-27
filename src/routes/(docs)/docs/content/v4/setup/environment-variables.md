@@ -9,14 +9,13 @@ Environment variables allow you to configure Kener without modifying code. They'
 
 ### KENER_SECRET_KEY {#kener-secret-key}
 
-**Purpose**: Secret key for signing JWT tokens and encrypting sensitive data.
+**Purpose**: Secret key for signing JWT tokens and hashing API keys.
 
 **Used For**:
 
-- User session tokens and authentication
-- API key generation and validation
-- Password hashing and verification
-- Cookie signing for secure sessions
+- User session tokens
+- Password reset, invitation, and email verification links
+- API key validation
 
 **Requirements**:
 
@@ -42,7 +41,10 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 ```
 
 > [!WARNING]
-> Without `KENER_SECRET_KEY`, Kener will use a default key which is **not secure for production**. You'll see warnings in the console if running without this variable.
+> Kener has no fallback key. When `KENER_SECRET_KEY` is unset or empty, the sign-in page shows **Set up not completed**, and sign-in, password reset, and API keys stay off. Kener also logs a startup warning when the key is unset or is an example value from these docs, such as `replace_me_with_a_random_string`.
+
+> [!IMPORTANT]
+> Changing `KENER_SECRET_KEY` signs everyone out and stops every existing API key. Create new API keys after the change.
 
 ### ORIGIN {#origin}
 
@@ -237,6 +239,7 @@ NO_PROXY=localhost,127.0.0.1,prometheus.lan,.internal
 - An API or Prometheus monitor can set its own **Proxy URL** (for example `http://user:$PROXY_PASS@proxy.internal:3128`, with `$SECRET` substitution), which overrides these variables for that monitor.
 - A monitor error of `Failed to establish tunnel to host:443 via …` means the proxy refused the connection: check the proxy credentials, or add the host to `NO_PROXY`.
 
+<<<<<<< HEAD
 ### KENER_SSE_MAX_CONNECTIONS {#kener-sse-max-connections}
 
 **Purpose**: Cap the number of simultaneous [live update](/docs/v4/live-updates) connections a web process will hold. Public status pages keep one open connection per viewer, so this bounds what that can cost.
@@ -251,10 +254,23 @@ KENER_SSE_MAX_CONNECTIONS=5000
 
 # Turn live updates off entirely
 KENER_SSE_MAX_CONNECTIONS=0
+=======
+### DOCKER_HOST / DOCKER_TLS_VERIFY {#docker-host}
+
+**Purpose**: The connection a new [Docker monitor](/docs/v4/monitors/docker#default-connection) starts with, in the Docker CLI's own format. Set it when Kener reaches Docker through a socket proxy.
+
+**Default**: unset (the form starts on `/var/run/docker.sock`)
+
+**Example**:
+
+```bash
+DOCKER_HOST=tcp://docker-socket-proxy:2375
+>>>>>>> 68a6ea236ced714b081f0cac7f1d86383f3ef427
 ```
 
 **Important**:
 
+<<<<<<< HEAD
 - Beyond the cap, new viewers are told to retry later and their page simply stops updating on its own. It still renders and is accurate at load.
 - Requires Redis. With Redis unreachable the stream opens and delivers nothing, which is indistinguishable from a page where nothing has changed.
 
@@ -274,6 +290,10 @@ KENER_REPORT_LINK_TTL_SECONDS=604800
 
 > [!IMPORTANT]
 > In Docker this path must be on a mounted volume. Without one, generated reports are lost on every redeploy and their download links stop working.
+=======
+- Kener reads `unix://` and `tcp://` addresses. Set `DOCKER_TLS_VERIFY=1` or `DOCKER_TLS=1` to start on `tls`. Any other value logs one warning and keeps the socket.
+- Only the dashboard form uses it. Saved monitors and monitors created through the API keep the connection they were given.
+>>>>>>> 68a6ea236ced714b081f0cac7f1d86383f3ef427
 
 ## Integration Variables {#integration-variables}
 
@@ -656,7 +676,7 @@ After setting environment variables:
 
 4. **Warning Signs**:
     ```
-    ⚠ KENER_SECRET_KEY not set, using default (INSECURE)
+    KENER_SECRET_KEY is not set. Sign-in, password reset, and API keys stay off until you set it, ...
     ⚠ Variable $API_KEY not found in environment
     ```
 
@@ -675,15 +695,15 @@ After setting environment variables:
 
 ### Secret Key Warnings {#secret-key-warnings}
 
-**Warning**: `KENER_SECRET_KEY not set, using default`
+**Warning**: `KENER_SECRET_KEY is not set. Sign-in, password reset, and API keys stay off until you set it, ...`
 
-**Impact**:
+**Impact**: The sign-in page shows **Set up not completed**, and `/api/v4` requests that send a Bearer key return HTTP 500.
 
-- Sessions can be hijacked
-- Authentication is insecure
-- Not suitable for production
+**Warning**: `KENER_SECRET_KEY is a published example value, so anyone can forge sign-in sessions for this instance. ...`
 
-**Solution**: Set `KENER_SECRET_KEY` immediately.
+**Impact**: The example values in these docs are public, so anyone can forge a sign-in session for your instance.
+
+**Solution**: Set `KENER_SECRET_KEY` to the output of `openssl rand -base64 32`, then restart Kener. Changing the key signs everyone out and stops every existing API key.
 
 ### Database Connection Fails {#database-connection-fails}
 
