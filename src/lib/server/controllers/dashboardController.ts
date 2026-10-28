@@ -166,8 +166,9 @@ export const GetIncidentCommentsByIncidentId = async (incident_id: number): Prom
  */
 export const GetAffectedMonitorsByIncidentId = async (
   incident_id: number,
+  includeHidden = false,
 ): Promise<Array<IncidentMonitorDetailRecord>> => {
-  return await db.getMonitorsByIncidentId(incident_id);
+  return await db.getMonitorsByIncidentId(incident_id, includeHidden);
 };
 
 // ============ Page Dashboard Data ============
@@ -348,8 +349,7 @@ export const GetPageDashboardData = async (
   pagePath: string,
   layoutData: LayoutServerData,
 ): Promise<PageDashboardData | null> => {
-  // Fetch page by path with monitors
-  const pageData = await GetPageByPathWithMonitors(pagePath);
+  const pageData = await GetPageByPathWithMonitors(pagePath, layoutData.canSeeHiddenMonitors);
   if (!pageData) {
     return null;
   }
@@ -432,7 +432,11 @@ export const GetPageDashboardData = async (
   // Fetch all dashboard data in parallel (respecting feature toggles)
   const [latestData, parsedMonitors, ongoingIncidents, ongoingMaintenances, upcomingMaintenances] = await Promise.all([
     GetLatestMonitoringDataAllActive(monitorTags),
-    GetMonitorsParsed({ tags: monitorTags, status: "ACTIVE", is_hidden: "NO" }),
+    GetMonitorsParsed({
+      tags: monitorTags,
+      status: "ACTIVE",
+      is_hidden: layoutData.canSeeHiddenMonitors ? undefined : "NO",
+    }),
     showInlineEvents && eventSettings.incidents.enabled && eventSettings.incidents.ongoing.show
       ? GetOngoingIncidentsForMonitorList(monitorTags)
       : Promise.resolve([] as IncidentForMonitorListWithComments[]),

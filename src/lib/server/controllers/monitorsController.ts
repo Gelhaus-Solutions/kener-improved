@@ -1,9 +1,15 @@
+<<<<<<< HEAD
 import { ResolvePublicMonitorTag } from "./publicMonitorResolver.js";
+=======
+import { isDeepStrictEqual } from "node:util";
+>>>>>>> dc9d9f118d8acb9bbd1e7f743f22d4b0fed90efe
 import {
   GetMinuteStartNowTimestampUTC,
   GetMinuteStartTimestampUTC,
   GetNowTimestampUTC,
   GetNowTimestampUTCInMs,
+  MatchStoredHeaders,
+  MASKED_SECRET,
   UnparsePercentage,
   UptimeCalculator,
 } from "../tool.js";
@@ -30,13 +36,24 @@ import type { PaginationInput } from "../../types/common.js";
 import GC, { getBadgeStyle, isMonitoringStatus, MONITORING_STATUSES, type BadgeStyle } from "../../global-constants.js";
 import type { MonitoringStatus } from "../../types/status.js";
 import { makeBadge } from "badge-maker";
+import randomName from "@scaleway/random-name";
 import { ErrorSvg } from "../../anywhere.js";
-import { GetLastMonitoringValue, SetLastHeartbeat, DeleteMonitorCaches } from "../cache/setGet.js";
+import {
+  GetLastMonitoringValue,
+  SetLastHeartbeat,
+  SetLastMonitoringValue,
+  DeleteMonitorCaches,
+} from "../cache/setGet.js";
+import alertingQueue from "../queues/alertingQueue.js";
 import { CollapseStatusCounts } from "../../clientTools.js";
 import { translate, isLocaleAvailable } from "../i18n.js";
 import type { HeartbeatMonitor, GroupMonitorTypeData } from "../types/monitor.js";
+<<<<<<< HEAD
 import { IsValidProxyURL } from "../../anywhere.js";
 import { reconcileProbeAssignments } from "../probes/reconcile.js";
+=======
+import { IsValidProxyURL, IsValidHeartbeatSecret, HEARTBEAT_SECRET_RULE } from "../../anywhere.js";
+>>>>>>> dc9d9f118d8acb9bbd1e7f743f22d4b0fed90efe
 
 interface GroupUpdateData {
   monitor_tag: string;
@@ -237,6 +254,7 @@ export function normaliseMonitoringDataUpdate(data: UpdateMonitoringDataInput): 
 }
 
 export const UpdateMonitoringData = async (data: UpdateMonitoringDataInput): Promise<unknown[]> => {
+<<<<<<< HEAD
   const valid = normaliseMonitoringDataUpdate(data);
 
   return await db.updateMonitoringData(
@@ -247,7 +265,31 @@ export const UpdateMonitoringData = async (data: UpdateMonitoringDataInput): Pro
     data.type,
     valid.latency,
     valid.deviation,
+=======
+  const end = GetMinuteStartTimestampUTC(data.end);
+  const result = await db.updateMonitoringData(
+    data.monitor_tag,
+    GetMinuteStartTimestampUTC(data.start),
+    end,
+    data.newStatus,
+    data.type,
+    data.latency ?? 0,
+    data.deviation ?? 0,
+>>>>>>> dc9d9f118d8acb9bbd1e7f743f22d4b0fed90efe
   );
+
+  const latestData = await db.getLatestMonitoringData(data.monitor_tag);
+  if (latestData) {
+    await SetLastMonitoringValue(data.monitor_tag, latestData);
+  }
+  // Manual samples reach alerting: a NONE monitor has no other trigger for evaluation.
+  // Best-effort: the rows are committed, so a queue outage must not fail the write.
+  try {
+    await alertingQueue.push(data.monitor_tag, end, data.newStatus);
+  } catch (err) {
+    console.error(`Failed to enqueue alert evaluation for ${data.monitor_tag} after MANUAL data write:`, err);
+  }
+  return result;
 };
 
 export const AggregateData = (
@@ -311,12 +353,78 @@ export const GetMonitorsParsed = async (query: MonitorFilter): Promise<Array<Mon
   return parsedMonitors;
 };
 
+const TYPE_DATA_SECRET_FIELDS = ["body", "proxy", "connectionString", "secretString", "tlsKey"];
+
+type TypeDataHeader = { key?: unknown; value?: unknown } | null | undefined;
+
+function mapTypeDataSecrets(
+  typeData: Record<string, unknown>,
+  stored: Record<string, unknown> | null | undefined,
+  transform: (secret: string, storedSecret: unknown) => string,
+): Record<string, unknown> {
+  const result = { ...typeData };
+  for (const field of TYPE_DATA_SECRET_FIELDS) {
+    const value = result[field];
+    if (typeof value === "string" && value) result[field] = transform(value, stored?.[field]);
+  }
+  if (Array.isArray(result.headers)) {
+    const storedHeaders = (Array.isArray(stored?.headers) ? stored.headers : []) as TypeDataHeader[];
+    const matches = MatchStoredHeaders(result.headers, storedHeaders);
+    result.headers = result.headers.map((header: TypeDataHeader, i) => {
+      if (typeof header?.value !== "string" || !header.value) return header;
+      return { ...header, value: transform(header.value, matches[i]?.value) };
+    });
+  }
+  return result;
+}
+
+/** Returns a copy of a monitor with each non-empty type_data secret and header value replaced by `********`. */
+export function MaskMonitorSecrets(monitor: MonitorRecordTyped): MonitorRecordTyped {
+  if (!monitor.type_data) return monitor;
+  return { ...monitor, type_data: mapTypeDataSecrets(monitor.type_data, null, () => MASKED_SECRET) };
+}
+
+/**
+ * MaskMonitorSecrets for a dashboard row, whose type_data is a JSON string. `keepHeartbeatSecret` leaves
+ * `secretString` readable for monitor writers, who need the heartbeat URL and can set the secret anyway.
+ */
+export function MaskMonitorRecordSecrets(monitor: MonitorRecord, keepHeartbeatSecret: boolean): MonitorRecord {
+  if (!monitor.type_data) return monitor;
+  const typeData = parseTypeData(monitor.type_data) ?? {};
+  const masked = mapTypeDataSecrets(typeData, null, () => MASKED_SECRET);
+  if (keepHeartbeatSecret && typeData.secretString !== undefined) masked.secretString = typeData.secretString;
+  return { ...monitor, type_data: JSON.stringify(masked) };
+}
+
+/**
+ * Puts the stored secret back for each type_data secret or header value sent as `********`. A header is matched by key.
+ * A mask with no stored secret saves an empty string, so a mask copied from another monitor is never stored.
+ */
+export function RestoreMonitorSecrets(
+  typeData: Record<string, unknown>,
+  stored: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  return mapTypeDataSecrets(typeData, stored, (value, storedValue) =>
+    value === MASKED_SECRET ? (typeof storedValue === "string" ? storedValue : "") : value,
+  );
+}
+
+/** RestoreMonitorSecrets against the saved monitor with this id. Without an id, the type_data comes back as sent. */
+export const RestoreSavedMonitorSecrets = async (
+  typeData: Record<string, unknown>,
+  monitorId?: number,
+): Promise<Record<string, unknown>> => {
+  const stored = monitorId ? (await db.getMonitors({ id: monitorId }))[0] : undefined;
+  return stored ? RestoreMonitorSecrets(typeData, parseTypeData(stored.type_data)) : typeData;
+};
+
 /**
  * type_data.proxy must be a valid http(s):// URL. Node silently ignores any other scheme and
  * throws on a malformed authority, both at check time, so save is where a typo has to fail.
  * `$SECRET` tokens are still raw here and pass. Unparseable type_data is not this check's problem.
+ * A proxy equal to `storedProxy` passes, so a bad stored value does not block an unrelated change.
  */
-function validateTypeDataProxy(monitor: MonitorInput): void {
+export function ValidateTypeDataProxy(monitor: Pick<MonitorInput, "type_data">, storedProxy?: unknown): void {
   if (!monitor.type_data) return;
   let typeData: unknown;
   try {
@@ -327,16 +435,53 @@ function validateTypeDataProxy(monitor: MonitorInput): void {
   // type_data is parsed JSON, so `proxy` can be any type. Absent or blank means no proxy;
   // anything else - an object or a number included - has to be a proxy URL.
   const proxy = (typeData as { proxy?: unknown } | null)?.proxy;
-  if (proxy === undefined || proxy === null) return;
+  if (proxy === undefined || proxy === null || isDeepStrictEqual(proxy, storedProxy)) return;
   if (typeof proxy === "string" && proxy.trim() === "") return;
   if (!IsValidProxyURL(proxy)) {
     throw new Error("Proxy URL must be a valid http:// or https:// URL");
   }
 }
 
+function parseTypeData(typeData: string | null | undefined): Record<string, unknown> | null {
+  if (!typeData) return {};
+  try {
+    const parsed: unknown = JSON.parse(typeData);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+const newHeartbeatSecret = (): string => randomName() + "-" + randomName();
+
+/**
+ * Returns the HEARTBEAT monitor to save, with a generated secret when it has none. Throws when
+ * the secret is new or changed and breaks the rule; an unchanged stored secret is kept as is.
+ */
+export function WithValidHeartbeatSecret<T extends Pick<MonitorInput, "monitor_type" | "type_data">>(
+  monitor: T,
+  storedSecret?: unknown,
+): T {
+  if (monitor.monitor_type !== "HEARTBEAT") return monitor;
+  const typeData = parseTypeData(monitor.type_data);
+  if (!typeData) return monitor;
+  const secret = typeData.secretString;
+  if (secret !== undefined && secret !== storedSecret && !IsValidHeartbeatSecret(secret)) {
+    throw new Error(`Heartbeat secret breaks the rule. ${HEARTBEAT_SECRET_RULE}`);
+  }
+  if (secret) return monitor;
+  return { ...monitor, type_data: JSON.stringify({ ...typeData, secretString: newHeartbeatSecret() }) };
+}
+
 export const CreateUpdateMonitor = async (monitor: MonitorInput): Promise<number | number[]> => {
   let monitorData = { ...monitor };
-  validateTypeDataProxy(monitorData);
+  const stored = monitorData.id ? (await db.getMonitors({ id: monitorData.id }))[0] : undefined;
+  const storedTypeData = parseTypeData(stored?.type_data);
+  const typeData = monitorData.type_data ? parseTypeData(monitorData.type_data) : null;
+  if (stored && monitorData.type_data === undefined) monitorData.type_data = stored.type_data;
+  else if (typeData) monitorData.type_data = JSON.stringify(RestoreMonitorSecrets(typeData, storedTypeData));
+  ValidateTypeDataProxy(monitorData, storedTypeData?.proxy);
+  monitorData = WithValidHeartbeatSecret(monitorData, storedTypeData?.secretString);
   if (monitorData.id) {
     return await db.updateMonitor(monitorData as MonitorRecord);
   } else {
@@ -395,6 +540,7 @@ export const CreateMonitor = async (monitor: MonitorInput): Promise<number[]> =>
     throw new Error("monitor id must be empty or 0");
   }
   validateMonitorTag(monitorData.tag);
+<<<<<<< HEAD
   validateTypeDataProxy(monitorData);
   // I3e: set explicitly rather than left to the repository's fallback, which
   // cannot know the org prefix.
@@ -402,6 +548,10 @@ export const CreateMonitor = async (monitor: MonitorInput): Promise<number[]> =>
   const created = await db.insertMonitor(monitorData);
   await reconcileAfterMonitorChange(monitorData.tag);
   return created;
+=======
+  ValidateTypeDataProxy(monitorData);
+  return await db.insertMonitor(monitorData);
+>>>>>>> dc9d9f118d8acb9bbd1e7f743f22d4b0fed90efe
 };
 
 interface CloneMonitorInput {
@@ -457,7 +607,10 @@ export const CloneMonitor = async ({ sourceTag, newTag, newName }: CloneMonitorI
     monitor_type: source.monitor_type,
     down_trigger: source.down_trigger,
     degraded_trigger: source.degraded_trigger,
-    type_data: source.type_data,
+    type_data:
+      source.monitor_type === "HEARTBEAT"
+        ? JSON.stringify({ ...parseTypeData(source.type_data), secretString: newHeartbeatSecret() })
+        : source.type_data,
     day_degraded_minimum_count: source.day_degraded_minimum_count,
     day_down_minimum_count: source.day_down_minimum_count,
     confirmation_threshold: source.confirmation_threshold,
@@ -630,6 +783,40 @@ export const GetLatestStatusActiveAll = async (): Promise<{ status: string }> =>
 export const GetLatestMonitoringDataAllActive = async (monitor_tags: string[]): Promise<MonitoringData[]> => {
   let latestData = await db.getLatestMonitoringDataAllActive(monitor_tags);
   return latestData;
+};
+
+/**
+ * expiry_at and issuer_* live only in Redis last_status, not in monitoring_data.
+ * Attach them only when the cached entry is the same check as the DB row.
+ */
+export function mergeLatestMonitoringWithSslCache(
+  fromDb: MonitoringData | null | undefined,
+  cached: MonitoringData | null | undefined,
+): MonitoringData | null {
+  if (!fromDb) return null;
+  if (
+    !cached ||
+    cached.timestamp !== fromDb.timestamp ||
+    cached.status !== fromDb.status ||
+    cached.type !== fromDb.type
+  ) {
+    return fromDb;
+  }
+  return {
+    ...fromDb,
+    expiry_at: cached.expiry_at,
+    issuer_cn: cached.issuer_cn,
+    issuer_o: cached.issuer_o,
+    cert_trusted: cached.cert_trusted,
+  };
+}
+
+export const AttachSslCacheFields = async (
+  fromDb: MonitoringData | null | undefined,
+): Promise<MonitoringData | null> => {
+  if (!fromDb) return null;
+  const cached = await GetLastMonitoringValue(fromDb.monitor_tag).catch(() => null);
+  return mergeLatestMonitoringWithSslCache(fromDb, cached);
 };
 
 export const GetLastHeartbeat = async (monitor_tag: string): Promise<MonitoringData | undefined> => {
