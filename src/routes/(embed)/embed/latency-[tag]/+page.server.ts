@@ -1,8 +1,13 @@
 import { ResolveVisiblePublicMonitor } from "$lib/server/controllers/publicMonitorResolver";
 import type { PageServerLoad } from "./$types";
+<<<<<<< HEAD
 import { error } from "@sveltejs/kit";
 import db from "$lib/server/db/db";
 import { buildMonitorBarResponse, endOfDayAtTz } from "$lib/server/api-server/monitor-bar/shared";
+=======
+import { parseIntParam } from "$lib/server/api-server/monitor-bar/shared";
+import { GetMinuteStartNowTimestampUTC } from "$lib/server/tool";
+>>>>>>> dc9d9f118d8acb9bbd1e7f743f22d4b0fed90efe
 
 const DEFAULT_DAYS = 90;
 const MAX_DAYS = 90;
@@ -14,8 +19,8 @@ export const load: PageServerLoad = async ({ params, url }) => {
   const daysParam = url.searchParams.get("days");
   const heightParam = url.searchParams.get("height");
   const metric = url.searchParams.get("metric") || "average"; // default to average if not provided
-  const days = Math.min(MAX_DAYS, Math.max(1, daysParam ? parseInt(daysParam, 10) : DEFAULT_DAYS));
-  const height = Math.max(50, heightParam ? parseInt(heightParam, 10) : DEFAULT_HEIGHT);
+  const days = Math.min(MAX_DAYS, Math.max(1, parseIntParam(daysParam, DEFAULT_DAYS)));
+  const height = Math.max(50, parseIntParam(heightParam, DEFAULT_HEIGHT));
 
   // See the monitor-[tag] load: the server cannot know the viewer's timezone, so
   // it renders UTC unless ?tz= pins one, and the page refetches only on a real

@@ -48,14 +48,21 @@
     "Get notified about incidents updates": "Nhận thông báo về các cập nhật sự cố",
     "Get notified about scheduled maintenance": "Nhận thông báo khi có lịch bảo trì",
     "IDENTIFIED": "ĐÃ XÁC ĐỊNH",
+    "INSECURE": "KHÔNG AN TOÀN",
+    "UNKNOWN": "KHÔNG XÁC ĐỊNH",
     "iFrame": "iFrame",
     "Impact": "Mức ảnh hưởng",
     "incident": "Sự cố",
     "Incident Updates": "Cập nhật sự cố",
     "Incidents": "Sự cố",
     "Included Monitors (%count)": "Mục giám sát được bao gồm (%count)",
+<<<<<<< HEAD
     "Inherited from %monitors": "Kế thừa từ %monitors",
+=======
+    "Issued By": "Cấp bởi",
+>>>>>>> dc9d9f118d8acb9bbd1e7f743f22d4b0fed90efe
     "INVESTIGATING": "ĐANG ĐIỀU TRA",
+    "Expires At": "Hết hạn lúc",
     "Last Updated": "Cập nhật lần cuối",
     "Latency": "Độ trễ",
     "Latency Embed": "Nhúng độ trễ",
@@ -114,13 +121,18 @@
     "Read more": "Đọc thêm",
     "READY": "SẴN SÀNG",
     "Recurring": "Định kỳ",
+<<<<<<< HEAD
     "Region %id": "Khu vực %id",
     "Remove": "Xóa",
+=======
+    "Time Remaining": "Thời gian còn lại",
+>>>>>>> dc9d9f118d8acb9bbd1e7f743f22d4b0fed90efe
     "RESOLVED": "ĐÃ KHẮC PHỤC",
     "RSS feed": "Nguồn RSS",
     "SCHEDULED": "ĐÃ LÊN LỊCH",
     "Scheduled Events (%count)": "Sự kiện đã lên lịch (%count)",
     "Script": "Kịch bản",
+    "SECURED": "AN TOÀN",
     "Select Language": "Chọn ngôn ngữ",
     "Select latency metric to display": "Chọn chỉ số độ trễ để hiển thị",
     "Select Range": "Chọn phạm vi",

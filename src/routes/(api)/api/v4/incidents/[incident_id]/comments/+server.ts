@@ -8,6 +8,7 @@ import type {
   BadRequestResponse,
 } from "$lib/types/api";
 import GC from "$lib/global-constants";
+import { AddIncidentComment } from "$lib/server/controllers/incidentController";
 import { GetMinuteStartTimestampUTC, GetMinuteStartNowTimestampUTC, parseDbTimestamp } from "$lib/server/tool";
 
 const VALID_STATES: string[] = [GC.INVESTIGATING, GC.IDENTIFIED, GC.MONITORING, GC.RESOLVED];
@@ -114,6 +115,7 @@ export const POST: RequestHandler = async ({ locals, request }) => {
     return json(errorResponse, { status: 400 });
   }
 
+<<<<<<< HEAD
   // Create comment
   const createdComment = await db.insertIncidentComment(incident.id, body.comment.trim(), body.state, timestamp);
 
@@ -148,6 +150,20 @@ export const POST: RequestHandler = async ({ locals, request }) => {
     mitigated_at: incident.mitigated_at,
     resolved_at: incident.resolved_at,
   });
+=======
+  let createdComment: Awaited<ReturnType<typeof AddIncidentComment>>;
+  try {
+    createdComment = await AddIncidentComment(incident.id, body.comment.trim(), body.state, timestamp);
+  } catch (err) {
+    const errorResponse: BadRequestResponse = {
+      error: {
+        code: "BAD_REQUEST",
+        message: err instanceof Error ? err.message : "Failed to add comment",
+      },
+    };
+    return json(errorResponse, { status: 400 });
+  }
+>>>>>>> dc9d9f118d8acb9bbd1e7f743f22d4b0fed90efe
 
   const response: CreateCommentResponse = {
     comment: formatCommentResponse(createdComment),
