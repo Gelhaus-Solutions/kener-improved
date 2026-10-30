@@ -11,10 +11,14 @@ import eventRelayQueue from "./queues/eventRelayQueue.js";
 import backfillQueue from "./queues/backfillQueue.js";
 import { registerAllConsumers } from "./events/consumers/index.js";
 import { InstallEnvProxy } from "./proxy.js";
+<<<<<<< HEAD
 import { InvalidateAllSiteDataCaches } from "./cache/siteDataCache.js";
 import db from "./db/db.js";
 import { runAcrossOrgs } from "./db/orgContext.js";
 import probeWsServer from "./probes/wsServer.js";
+=======
+import { SecretKeyWarning } from "./controllers/commonController.js";
+>>>>>>> dc9d9f118d8acb9bbd1e7f743f22d4b0fed90efe
 
 process.env.TZ = "UTC";
 
@@ -22,6 +26,7 @@ async function Startup(): Promise<void> {
   // After dotenv: main.ts calls dotenv.config() in its body, which runs after static imports,
   // so this cannot be module top-level. Covers fetch (triggers, Resend, OIDC) and the global agents.
   InstallEnvProxy();
+<<<<<<< HEAD
   // Seeds insert missing site_data keys through knex, with no way to reach the
   // cache. main.ts runs them just before this, so drop the cache once on boot;
   // otherwise a warm Redis could mask a newly seeded key for the whole TTL.
@@ -34,6 +39,10 @@ async function Startup(): Promise<void> {
     const orgs = await db.getAllOrgs();
     await InvalidateAllSiteDataCaches(orgs.map((o) => o.id));
   });
+=======
+  const secretKeyWarning = SecretKeyWarning();
+  if (secretKeyWarning) console.warn(secretKeyWarning);
+>>>>>>> dc9d9f118d8acb9bbd1e7f743f22d4b0fed90efe
   await mainScheduler.start();
   await maintenanceScheduler.start();
   await dailyCleanupScheduler.start();
