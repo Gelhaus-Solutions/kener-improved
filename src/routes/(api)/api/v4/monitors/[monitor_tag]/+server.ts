@@ -1,6 +1,14 @@
 import { json, type RequestHandler } from "@sveltejs/kit";
 import db from "$lib/server/db/db";
-import { GetMonitorsParsed, DeleteMonitorCompletelyUsingTag } from "$lib/server/controllers/monitorsController";
+import {
+  GetMonitorsParsed,
+  DeleteMonitorCompletelyUsingTag,
+  MaskMonitorSecrets,
+  RestoreMonitorSecrets,
+  UpdateMonitor,
+  ValidateTypeDataProxy,
+  WithValidHeartbeatSecret,
+} from "$lib/server/controllers/monitorsController";
 import type {
   GetMonitorResponse,
   MonitorResponse,
@@ -15,7 +23,7 @@ export const GET: RequestHandler = async ({ locals }) => {
   const monitor = locals.monitor!;
 
   const response: GetMonitorResponse = {
-    monitor,
+    monitor: MaskMonitorSecrets(monitor),
   };
 
   return json(response);
@@ -102,8 +110,10 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
           existingTypeData = {};
         }
       }
-      // Merge existing with new data
-      const mergedTypeData = { ...existingTypeData, ...body.type_data };
+      const mergedTypeData = RestoreMonitorSecrets(
+        { ...existingTypeData, ...body.type_data },
+        existingMonitor.type_data,
+      );
       updateData.type_data = JSON.stringify(mergedTypeData);
     }
   } else {
@@ -131,7 +141,21 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
     updateData.monitor_settings_json = JSON.stringify(existingMonitor.monitor_settings_json);
   }
 
-  await db.updateMonitor(updateData as unknown as Parameters<typeof db.updateMonitor>[0]);
+  let monitorToSave: Parameters<typeof db.updateMonitor>[0];
+  try {
+    monitorToSave = WithValidHeartbeatSecret(
+      updateData as unknown as Parameters<typeof db.updateMonitor>[0],
+      existingMonitor.type_data?.secretString,
+    );
+    ValidateTypeDataProxy(monitorToSave, existingMonitor.type_data?.proxy);
+  } catch (e) {
+    const errorResponse: BadRequestResponse = {
+      error: { code: "BAD_REQUEST", message: (e as Error).message },
+    };
+    return json(errorResponse, { status: 400 });
+  }
+
+  await UpdateMonitor(monitorToSave);
 
   // Fetch the updated monitor
   const updatedMonitor = await GetMonitorsParsed({ tag: monitorTag }).then((monitors) => monitors[0]);
@@ -147,7 +171,7 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
   }
 
   const response: UpdateMonitorResponse = {
-    monitor: updatedMonitor,
+    monitor: MaskMonitorSecrets(updatedMonitor),
   };
 
   return json(response);
