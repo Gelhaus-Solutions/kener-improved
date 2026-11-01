@@ -10,7 +10,17 @@ import type {
 } from "$lib/types/api";
 import { GetMinuteStartTimestampUTC, parseDbTimestamp } from "$lib/server/tool";
 import { GetSiteURL } from "$lib/server/controllers/siteDataController";
+import {
+  AddIncidentMonitor,
+  ClearIncidentEndTime,
+  DeleteIncident,
+  RemoveIncidentMonitor,
+  UpdateIncident,
+} from "$lib/server/controllers/incidentController";
 import serverResolver from "$lib/server/resolver";
+import GC from "$lib/global-constants";
+
+const VALID_IMPACTS: string[] = [GC.DOWN, GC.DEGRADED, GC.MAINTENANCE];
 
 async function buildIncidentResponse(incidentId: number): Promise<IncidentDetailResponse | null> {
   const incident = await db.getIncidentById(incidentId);
@@ -109,9 +119,20 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
         };
         return json(errorResponse, { status: 400 });
       }
+
+      if (monitor.impact && !VALID_IMPACTS.includes(monitor.impact)) {
+        const errorResponse: BadRequestResponse = {
+          error: {
+            code: "BAD_REQUEST",
+            message: `Invalid impact '${monitor.impact}'. Must be one of: ${VALID_IMPACTS.join(", ")}`,
+          },
+        };
+        return json(errorResponse, { status: 400 });
+      }
     }
   }
 
+<<<<<<< HEAD
   // Build update data - only include fields that are present in the request
   const updateData = {
     id: existingIncident.id,
@@ -154,37 +175,37 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
     mitigated_at: existingIncident.mitigated_at,
     resolved_at: existingIncident.resolved_at,
   };
+=======
+  try {
+    if (body.end_date_time === null) {
+      await ClearIncidentEndTime(existingIncident.id);
+    }
+    await UpdateIncident(existingIncident.id, {
+      title: body.title,
+      start_date_time:
+        body.start_date_time !== undefined ? GetMinuteStartTimestampUTC(body.start_date_time) : undefined,
+      end_date_time: body.end_date_time ? GetMinuteStartTimestampUTC(body.end_date_time) : undefined,
+    });
+  } catch (err) {
+    const errorResponse: BadRequestResponse = {
+      error: {
+        code: "BAD_REQUEST",
+        message: err instanceof Error ? err.message : "Failed to update incident",
+      },
+    };
+    return json(errorResponse, { status: 400 });
+  }
+>>>>>>> ad97b3cd77c5a98c99d19dad1dfa43effff07e04
 
-  // Update the incident
-  await db.updateIncident(updateData);
-
-  // Handle monitors update if provided
   if (body.monitors !== undefined) {
-    // Get current monitors
-    const currentMonitors = await db.getIncidentMonitorsByIncidentID(existingIncident.id);
-
-    // If empty array, remove all monitors
-    if (body.monitors.length === 0) {
-      for (const monitor of currentMonitors) {
-        await db.removeIncidentMonitor(existingIncident.id, monitor.monitor_tag);
+    const newMonitorTags = body.monitors.map((m) => m.monitor_tag);
+    for (const current of await db.getIncidentMonitorsByIncidentID(existingIncident.id)) {
+      if (!newMonitorTags.includes(current.monitor_tag)) {
+        await RemoveIncidentMonitor(existingIncident.id, current.monitor_tag);
       }
-    } else {
-      // Remove monitors that are not in the new list
-      const newMonitorTags = body.monitors.map((m) => m.monitor_tag);
-      for (const currentMonitor of currentMonitors) {
-        if (!newMonitorTags.includes(currentMonitor.monitor_tag)) {
-          await db.removeIncidentMonitor(existingIncident.id, currentMonitor.monitor_tag);
-        }
-      }
-
-      // Add or update monitors from the new list
-      for (const monitor of body.monitors) {
-        await db.insertIncidentMonitorWithMerge({
-          incident_id: existingIncident.id,
-          monitor_tag: monitor.monitor_tag,
-          monitor_impact: monitor.impact || "DOWN",
-        });
-      }
+    }
+    for (const monitor of body.monitors) {
+      await AddIncidentMonitor(existingIncident.id, monitor.monitor_tag, monitor.impact || "DOWN");
     }
   }
 
@@ -206,26 +227,7 @@ export const DELETE: RequestHandler = async ({ locals }) => {
   // Incident is validated by middleware and available in locals
   const incident = locals.incident!;
 
-  // Set incident_id to null in monitor_alerts_v2
-  const alerts = await db.getAlertsByIncidentId(incident.id);
-  for (const alert of alerts) {
-    await db.updateMonitorAlertV2(alert.id, { incident_id: null });
-  }
-
-  // Delete incident monitors
-  const monitors = await db.getIncidentMonitorsByIncidentID(incident.id);
-  for (const monitor of monitors) {
-    await db.removeIncidentMonitor(incident.id, monitor.monitor_tag);
-  }
-
-  // Delete incident comments (hard delete by setting status to DELETED)
-  const comments = await db.getIncidentComments(incident.id);
-  for (const comment of comments) {
-    await db.updateIncidentCommentStatusByID(comment.id, "DELETED");
-  }
-
-  // Actually delete the incident from the database
-  await db.deleteIncident(incident.id);
+  await DeleteIncident(incident.id);
 
   const response: DeleteIncidentResponse = {
     message: `Incident with id '${incident.id}' deleted successfully`,

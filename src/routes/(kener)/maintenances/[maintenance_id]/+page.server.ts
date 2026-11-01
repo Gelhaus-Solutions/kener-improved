@@ -9,7 +9,7 @@ import db from "$lib/server/db/db";
 import { GetVisiblePublicMonitorsByTags } from "$lib/server/controllers/publicMonitorResolver";
 import type { MaintenanceEventRecord } from "$lib/server/db/dbimpl";
 
-export const load: PageServerLoad = async ({ params, url }) => {
+export const load: PageServerLoad = async ({ params, url, parent }) => {
   const { maintenance_id } = params;
   let idType = "event";
 
@@ -67,6 +67,7 @@ export const load: PageServerLoad = async ({ params, url }) => {
   }> = [];
 
   if (monitorTags.length > 0) {
+<<<<<<< HEAD
     // KENER-126: this filtered hidden monitors but not inactive ones, which is a
     // third hand-rolled spelling of a rule that now has one definition. Folding
     // it in also stops a deactivated monitor being listed as affected by an
@@ -79,11 +80,24 @@ export const load: PageServerLoad = async ({ params, url }) => {
       monitor_image: m.image || null,
       monitor_impact: monitorRecords.find((mr) => mr.monitor_tag === m.tag)?.monitor_impact || "",
     }));
+=======
+    const { canSeeHiddenMonitors } = await parent();
+    const monitors = await db.getMonitorsByTags(monitorTags);
+    affectedMonitors = monitors
+      .filter((m) => canSeeHiddenMonitors || m.is_hidden !== "YES")
+      .map((m) => ({
+        monitor_tag: m.tag,
+        monitor_name: m.name,
+        monitor_image: m.image || null,
+        monitor_impact: monitorRecords.find((mr) => mr.monitor_tag === m.tag)?.monitor_impact || "",
+      }));
+>>>>>>> ad97b3cd77c5a98c99d19dad1dfa43effff07e04
   }
 
+  const visibleTags = new Set(affectedMonitors.map((m) => m.monitor_tag));
   return {
     ...{
-      maintenance,
+      maintenance: { ...maintenance, monitors: maintenance.monitors?.filter((m) => visibleTags.has(m.monitor_tag)) },
       maintenanceEvent, // The specific event that was clicked
       affectedMonitors,
     },

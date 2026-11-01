@@ -9,6 +9,7 @@
   import PlayIcon from "@lucide/svelte/icons/play";
   import type { MonitorRecord } from "$lib/server/types/db.js";
   import type { GroupMonitorTypeData, MonitoringResult } from "$lib/server/types/monitor.js";
+  import type { DockerConnectionDefaults } from "$lib/types/docker.js";
   import { MONITOR_TYPES, type MonitorType } from "$lib/types/monitor.js";
   import { toast } from "svelte-sonner";
   import {
@@ -19,7 +20,13 @@
     IsValidURL,
     IsValidPort
   } from "$lib/clientTools";
-  import { GAMEDIG_SOCKET_TIMEOUT, DOCKER_CONNECTION_TYPES, DOCKER_CHECK_TYPES, IsValidProxyURL } from "$lib/anywhere";
+  import {
+    GAMEDIG_SOCKET_TIMEOUT,
+    DOCKER_CONNECTION_TYPES,
+    DOCKER_CHECK_TYPES,
+    IsValidProxyURL,
+    IsValidHeartbeatSecret
+  } from "$lib/anywhere";
   import { resolve } from "$app/paths";
   import clientResolver from "$lib/client/resolver.js";
   // Type-specific components
@@ -46,9 +53,10 @@
     // the various strongly-typed type editors (API/PING/HEARTBEAT/etc.) without TS errors.
     typeData: any;
     availableMonitors: MonitorRecord[];
+    dockerDefaults: DockerConnectionDefaults;
   }
 
-  let { monitor = $bindable(), typeData = $bindable(), availableMonitors }: Props = $props();
+  let { monitor = $bindable(), typeData = $bindable(), availableMonitors, dockerDefaults }: Props = $props();
 
   const GROUP_MIN_MONITORS = 2;
   const GROUP_MIN_TIMEOUT_MS = 1000;
@@ -104,6 +112,10 @@
     typeData = normalizeGroupTypeData(typeData);
   }
 
+  const storedHeartbeatSecret = typeData?.secretString;
+  const storedProxy = typeData?.proxy;
+  const storedConnectionString = typeData?.connectionString;
+
   let savingType = $state(false);
   let testingMonitor = $state(false);
   let testResult = $state<MonitoringResult | null>(null);
@@ -135,7 +147,7 @@
         if (!data.url) return false;
         if (!IsValidURL(data.url)) return false;
         if (!data.timeout || data.timeout < 1) return false;
-        if (data.proxy && !IsValidProxyURL(data.proxy)) return false;
+        if (data.proxy && data.proxy !== storedProxy && !IsValidProxyURL(data.proxy)) return false;
         return true;
       }
 
@@ -197,18 +209,31 @@
 
       case "SSL": {
         const data = typeData as any;
-        if (!data.host || !IsValidHost(data.host)) return false;
+        if (!data.host || ValidateIpAddress(String(data.host).trim()) === "Invalid") return false;
         if (!IsValidPort(data.port)) return false;
-        if (!data.degradedRemainingHours || data.degradedRemainingHours < 0) return false;
-        if (!data.downRemainingHours || data.downRemainingHours < 0) return false;
-        if (data.degradedRemainingHours <= data.downRemainingHours) return false;
+        const degraded = Number(data.degradedRemainingHours ?? NaN);
+        const down = Number(data.downRemainingHours ?? NaN);
+        if (!Number.isFinite(degraded) || degraded < 0) return false;
+        if (!Number.isFinite(down) || down < 0) return false;
+        if (degraded <= down) return false;
+        if (
+          data.timeout !== undefined &&
+          (typeof data.timeout !== "number" || !Number.isFinite(data.timeout) || data.timeout < 1)
+        )
+          return false;
+        const sslServername = (data.tlsServername || "").trim();
+        if (sslServername && !IsValidHost(sslServername)) return false;
         return true;
       }
 
       case "SQL": {
         const data = typeData as any;
         if (!data.connectionString) return false;
-        if (!data.connectionString.startsWith("postgresql://") && !data.connectionString.startsWith("mysql://"))
+        if (
+          data.connectionString !== storedConnectionString &&
+          !data.connectionString.startsWith("postgresql://") &&
+          !data.connectionString.startsWith("mysql://")
+        )
           return false;
         if (!data.timeout || data.timeout < 1) return false;
         if (!data.query) return false;
@@ -219,6 +244,7 @@
         const data = typeData as any;
         if (!data.degradedRemainingMinutes || data.degradedRemainingMinutes < 1) return false;
         if (!data.downRemainingMinutes || data.downRemainingMinutes <= data.degradedRemainingMinutes) return false;
+        if (data.secretString !== storedHeartbeatSecret && !IsValidHeartbeatSecret(data.secretString)) return false;
         return true;
       }
 
@@ -242,7 +268,7 @@
       case "PROMETHEUS": {
         const data = typeData as any;
         if (!data.url || !IsValidURL(data.url)) return false;
-        if (data.proxy && !IsValidProxyURL(data.proxy)) return false;
+        if (data.proxy && data.proxy !== storedProxy && !IsValidProxyURL(data.proxy)) return false;
         if (!data.query || !data.query.trim()) return false;
         for (const key of ["down", "degraded"] as const) {
           const t = data[key];
@@ -387,9 +413,13 @@
       {:else if monitor.monitor_type === "PROMETHEUS"}
         <MonitorPrometheus bind:data={typeData} />
       {:else if monitor.monitor_type === "DOCKER"}
+<<<<<<< HEAD
         <MonitorDocker bind:data={typeData} />
       {:else if monitor.monitor_type === "MULTI_REGION"}
         <MonitorMultiRegion bind:data={typeData} tag={monitor.tag} />
+=======
+        <MonitorDocker bind:data={typeData} defaults={dockerDefaults} monitorId={monitor.id} />
+>>>>>>> ad97b3cd77c5a98c99d19dad1dfa43effff07e04
       {:else if monitor.monitor_type === "NONE"}
         <MonitorNone bind:data={typeData} />
       {/if}
@@ -448,6 +478,37 @@
                   </div>
                 </div>
               </div>
+              {#if monitor.monitor_type === "SSL" && testResult.expiry_at}
+                <div class="rounded-lg border p-4 text-center">
+                  <div class="text-muted-foreground text-xs uppercase">Expires At</div>
+                  <div class="mt-1 text-sm font-semibold break-all">
+                    {new Date(testResult.expiry_at).toLocaleString(undefined, {
+                      year: "numeric",
+                      month: "long",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit"
+                    })}
+                  </div>
+                </div>
+              {/if}
+              {#if monitor.monitor_type === "SSL" && (testResult.issuer_cn || testResult.issuer_o)}
+                <div class="grid grid-cols-2 gap-4">
+                  <div class="rounded-lg border p-4 text-center">
+                    <div class="text-muted-foreground text-xs uppercase">Issued By (CN)</div>
+                    <div class="mt-1 text-sm font-semibold break-all">
+                      {testResult.issuer_cn || "—"}
+                    </div>
+                  </div>
+                  <div class="rounded-lg border p-4 text-center">
+                    <div class="text-muted-foreground text-xs uppercase">Issued By (O)</div>
+                    <div class="mt-1 text-sm font-semibold break-all">
+                      {testResult.issuer_o || "—"}
+                    </div>
+                  </div>
+                </div>
+              {/if}
               <div class="flex justify-end">
                 <Button variant="outline" size="sm" onclick={testMonitor} disabled={testingMonitor}>
                   <PlayIcon class="size-3" />

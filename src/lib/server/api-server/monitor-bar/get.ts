@@ -4,7 +4,8 @@ import { ResolveVisiblePublicMonitor } from "$lib/server/controllers/publicMonit
 import { GetMinuteStartNowTimestampUTC } from "$lib/server/tool";
 import type { StatusType } from "$lib/types/status";
 import type { TimestampStatusCount } from "$lib/server/types/db";
-import { buildMonitorBarResponse } from "./shared";
+import { buildMonitorBarResponse, parseIntParam } from "./shared";
+import GC from "$lib/global-constants";
 
 const DEFAULT_DAYS = 90;
 const MAX_DAYS = 90;
@@ -34,6 +35,7 @@ export interface MonitorBarResponse {
   toTimeStamp: number;
   maxLatency: string;
   minLatency: string;
+<<<<<<< HEAD
   /**
    * The whole window's percentiles, merged from the histograms (B4).
    *
@@ -48,6 +50,13 @@ export interface MonitorBarResponse {
    * status page fetches for every monitor on the page.
    */
   latencyPercentiles?: LatencyPercentileSet;
+=======
+  monitorType?: string;
+  sslExpiresAt?: number | null;
+  sslTrusted?: boolean | null;
+  issuerCn?: string | null;
+  issuerO?: string | null;
+>>>>>>> ad97b3cd77c5a98c99d19dad1dfa43effff07e04
 }
 
 /**
@@ -59,17 +68,22 @@ export default async function get(req: APIServerRequest): Promise<Response> {
   const tag = req.query.get("tag");
   const daysStr = req.query.get("days");
   // const numberOfDaysReceived
-  const days = Math.min(MAX_DAYS, Math.max(1, daysStr ? parseInt(daysStr, 10) : DEFAULT_DAYS));
+  const days = Math.min(MAX_DAYS, Math.max(1, parseIntParam(daysStr, DEFAULT_DAYS)));
   const endOfDayTodayAtTzStr = req.query.get("endOfDayTodayAtTz");
-  const endOfDayTodayAtTz = endOfDayTodayAtTzStr ? parseInt(endOfDayTodayAtTzStr, 10) : GetMinuteStartNowTimestampUTC();
+  const endOfDayTodayAtTz = parseIntParam(endOfDayTodayAtTzStr, GetMinuteStartNowTimestampUTC());
   if (!tag) {
     return error(400, { message: "tag query parameter is required" });
   }
 
+<<<<<<< HEAD
   // Visible, not merely existing (KENER-126). This endpoint answered for any
   // monitor whose tag you knew, hidden and inactive included, and returned its
   // name, description, image and ninety days of history.
   const monitor = await ResolveVisiblePublicMonitor(tag);
+=======
+  const monitors = await db.getMonitors({ tag, status: GC.ACTIVE, is_hidden: GC.NO });
+  const monitor = monitors[0];
+>>>>>>> ad97b3cd77c5a98c99d19dad1dfa43effff07e04
   if (!monitor) {
     return error(404, { message: "Monitor not found" });
   }

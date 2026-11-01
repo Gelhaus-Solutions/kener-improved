@@ -9,8 +9,12 @@
   import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import GC from "$lib/global-constants.js";
+<<<<<<< HEAD
   import { latencySampleAdvice, type LatencyMetric } from "$lib/latency-metrics.js";
   import AlertTriangleIcon from "@lucide/svelte/icons/triangle-alert";
+=======
+  import { ResolveEventListPlacement } from "$lib/clientTools";
+>>>>>>> ad97b3cd77c5a98c99d19dad1dfa43effff07e04
   import SaveIcon from "@lucide/svelte/icons/save";
   import Loader from "@lucide/svelte/icons/loader";
   import UploadIcon from "@lucide/svelte/icons/upload";
@@ -28,6 +32,7 @@
   import type {
     DataRetentionPolicy,
     EventDisplaySettings,
+    EventListPlacement,
     GlobalPageVisibilitySettings,
     SitemapXMLConfig,
     GlobalMaintenanceNotificationSettings
@@ -727,6 +732,7 @@
     return {
       showInlineEvents:
         typeof parsed?.showInlineEvents === "boolean" ? parsed.showInlineEvents : defaults.showInlineEvents,
+      eventListPlacement: ResolveEventListPlacement(parsed),
       incidents: {
         ...defaults.incidents,
         ...parsed?.incidents,
@@ -882,8 +888,7 @@
             fileName: file.name,
             maxWidth: type === "favicon" ? 64 : type === "socialPreviewImage" ? 640 : 256,
             maxHeight: type === "favicon" ? 64 : type === "socialPreviewImage" ? 320 : 256,
-            forceDimensions: type === "socialPreviewImage",
-            prefix: `${type}_`
+            forceDimensions: type === "socialPreviewImage"
           }
         })
       });
@@ -941,8 +946,7 @@
             mimeType: file.type,
             fileName: file.name,
             maxWidth: 32,
-            maxHeight: 32,
-            prefix: "navicon_"
+            maxHeight: 32
           }
         })
       });
@@ -1776,10 +1780,47 @@
           <div class="space-y-0.5">
             <Label for="events-display-inline">Display Events Inline</Label>
             <p class="text-muted-foreground text-xs">
-              Turn on to show events inline on the status page. Off shows them in the notification list.
+              Turn on to show ongoing incidents and maintenances, and upcoming maintenances, above the monitors.
             </p>
           </div>
           <Switch id="events-display-inline" bind:checked={eventDisplaySettings.showInlineEvents} />
+        </div>
+
+        <div class="space-y-3 rounded-lg border p-4">
+          <div class="space-y-0.5">
+            <Label>Event List</Label>
+            <p class="text-muted-foreground text-xs">
+              Choose where the list of current and past events appears on status pages.
+            </p>
+          </div>
+          <RadioGroup.Root
+            aria-label="Event List"
+            value={eventDisplaySettings.eventListPlacement}
+            onValueChange={(v: string) => (eventDisplaySettings.eventListPlacement = v as EventListPlacement)}
+            class="flex flex-col gap-3"
+          >
+            <div class="flex items-center space-x-2">
+              <RadioGroup.Item value="button" id="event-list-button" />
+              <Label for="event-list-button" class="cursor-pointer font-normal">Top bar button</Label>
+            </div>
+            <div class="flex items-center space-x-2">
+              <RadioGroup.Item value="aside" id="event-list-aside" />
+              <Label for="event-list-aside" class="cursor-pointer font-normal">Side column</Label>
+            </div>
+            <div class="flex items-center space-x-2">
+              <RadioGroup.Item value="hidden" id="event-list-hidden" />
+              <Label for="event-list-hidden" class="cursor-pointer font-normal">Hidden</Label>
+            </div>
+          </RadioGroup.Root>
+          <p class="text-muted-foreground text-xs">
+            {#if eventDisplaySettings.eventListPlacement === "button"}
+              A button in the top bar opens the event list.
+            {:else if eventDisplaySettings.eventListPlacement === "aside"}
+              The event list shows in a column next to the monitors. Monitor pages show the top bar button.
+            {:else}
+              No event list shows. The events pages stay available.
+            {/if}
+          </p>
         </div>
 
         <!-- Incidents -->
