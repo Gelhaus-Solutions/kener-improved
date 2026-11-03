@@ -11,7 +11,9 @@ import type {
 import GC from "$lib/global-constants";
 import { GetMinuteStartTimestampUTC, parseDbTimestamp } from "$lib/server/tool";
 import { GetSiteURL } from "$lib/server/controllers/siteDataController";
+import { AddIncidentMonitor, CreateIncident } from "$lib/server/controllers/incidentController";
 import serverResolver from "$lib/server/resolver";
+import { readRequestBody } from "$lib/server/requestBody";
 
 export const GET: RequestHandler = async ({ url }) => {
   // Parse query params for filtering
@@ -78,22 +80,11 @@ export const GET: RequestHandler = async ({ url }) => {
 };
 
 export const POST: RequestHandler = async ({ request }) => {
-  let body: CreateIncidentRequest;
-
-  try {
-    body = await request.json();
-  } catch {
-    const errorResponse: BadRequestResponse = {
-      error: {
-        code: "BAD_REQUEST",
-        message: "Invalid JSON body",
-      },
-    };
-    return json(errorResponse, { status: 400 });
-  }
+  const body = await readRequestBody<CreateIncidentRequest>(request, "POST /api/v4/incidents");
+  if (body instanceof Response) return body;
 
   // Validate required fields
-  if (!body.title || typeof body.title !== "string" || body.title.trim().length === 0) {
+  if (body.title.trim().length === 0) {
     const errorResponse: BadRequestResponse = {
       error: {
         code: "BAD_REQUEST",
@@ -103,40 +94,10 @@ export const POST: RequestHandler = async ({ request }) => {
     return json(errorResponse, { status: 400 });
   }
 
-  if (body.start_date_time === undefined || body.start_date_time === null) {
-    const errorResponse: BadRequestResponse = {
-      error: {
-        code: "BAD_REQUEST",
-        message: "start_date_time is required",
-      },
-    };
-    return json(errorResponse, { status: 400 });
-  }
-
-  if (typeof body.start_date_time !== "number" || isNaN(body.start_date_time)) {
-    const errorResponse: BadRequestResponse = {
-      error: {
-        code: "BAD_REQUEST",
-        message: "start_date_time must be a valid timestamp (UTC seconds)",
-      },
-    };
-    return json(errorResponse, { status: 400 });
-  }
-
   // Validate monitors if provided
   if (body.monitors !== undefined) {
-    if (!Array.isArray(body.monitors)) {
-      const errorResponse: BadRequestResponse = {
-        error: {
-          code: "BAD_REQUEST",
-          message: "monitors must be an array",
-        },
-      };
-      return json(errorResponse, { status: 400 });
-    }
-
     for (const monitor of body.monitors) {
-      if (!monitor.monitor_tag || typeof monitor.monitor_tag !== "string") {
+      if (!monitor.monitor_tag) {
         const errorResponse: BadRequestResponse = {
           error: {
             code: "BAD_REQUEST",
@@ -160,29 +121,32 @@ export const POST: RequestHandler = async ({ request }) => {
     }
   }
 
-  // Create incident
-  const incidentData = {
-    title: body.title.trim(),
-    start_date_time: GetMinuteStartTimestampUTC(body.start_date_time),
-    end_date_time: body.end_date_time ? GetMinuteStartTimestampUTC(body.end_date_time) : null,
-    status: "OPEN",
-    state: GC.INVESTIGATING,
-    incident_type: GC.INCIDENT,
-    incident_source: "API",
-  };
-
-  const createdIncident = await db.createIncident(incidentData);
-
-  // Add monitors if provided
-  if (body.monitors && body.monitors.length > 0) {
-    for (const monitor of body.monitors) {
-      await db.insertIncidentMonitor({
-        incident_id: createdIncident.id,
-        monitor_tag: monitor.monitor_tag,
-        monitor_impact: monitor.impact || "DOWN",
-      });
-    }
+  let incidentId: number;
+  try {
+    ({ incident_id: incidentId } = await CreateIncident({
+      title: body.title.trim(),
+      start_date_time: GetMinuteStartTimestampUTC(body.start_date_time),
+      end_date_time: body.end_date_time ? GetMinuteStartTimestampUTC(body.end_date_time) : null,
+      status: "OPEN",
+      state: GC.INVESTIGATING,
+      incident_type: GC.INCIDENT,
+      incident_source: "API",
+    }));
+  } catch (err) {
+    const errorResponse: BadRequestResponse = {
+      error: {
+        code: "BAD_REQUEST",
+        message: err instanceof Error ? err.message : "Failed to create incident",
+      },
+    };
+    return json(errorResponse, { status: 400 });
   }
+
+  for (const monitor of body.monitors ?? []) {
+    await AddIncidentMonitor(incidentId, monitor.monitor_tag, monitor.impact || "DOWN");
+  }
+
+  const [createdIncident] = await db.getIncidentsPaginated(1, 1, { id: incidentId });
 
   // Fetch monitors for response
   const monitors = await db.getIncidentMonitorsByIncidentID(createdIncident.id);

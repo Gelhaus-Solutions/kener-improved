@@ -3,12 +3,14 @@ import db from "$lib/server/db/db";
 import { InvalidateSiteDataCache, InvalidateInstanceSiteDataCache } from "$lib/server/cache/siteDataCache";
 import { isInstanceScoped } from "$lib/server/controllers/siteDataScope";
 import { siteDataKeys } from "$lib/server/controllers/siteDataKeys";
+import { GetSiteDataByKey, InsertKeyValue, MaskSiteDataSecret } from "$lib/server/controllers/siteDataController";
 import type {
   GetSiteDataKeyResponse,
   UpdateSiteDataKeyResponse,
   NotFoundResponse,
   BadRequestResponse,
 } from "$lib/types/api";
+import { readRequestBody } from "$lib/server/requestBody";
 
 export const GET: RequestHandler = async ({ params }) => {
   const configKey = params.config_key as string;
@@ -49,7 +51,7 @@ export const GET: RequestHandler = async ({ params }) => {
 
   const response: GetSiteDataKeyResponse = {
     key: data.key,
-    value: data.data_type === "object" ? JSON.parse(data.value) : data.value,
+    value: MaskSiteDataSecret(data.key, data.data_type === "object" ? JSON.parse(data.value) : data.value),
     data_type: data.data_type,
   };
 
@@ -81,18 +83,8 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
     return json(errorResponse, { status: 404 });
   }
 
-  let body: { value: unknown };
-  try {
-    body = await request.json();
-  } catch {
-    const errorResponse: BadRequestResponse = {
-      error: {
-        code: "BAD_REQUEST",
-        message: "Invalid JSON body",
-      },
-    };
-    return json(errorResponse, { status: 400 });
-  }
+  const body = await readRequestBody<{ value: unknown }>(request, "PATCH /api/v4/site/{config_key}");
+  if (body instanceof Response) return body;
 
   if (body.value === undefined) {
     const errorResponse: BadRequestResponse = {
@@ -119,6 +111,7 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
   }
 
   // Insert or update the value
+<<<<<<< HEAD
   await db.insertOrUpdateSiteData(configKey, valueToStore, keyConfig.data_type);
   // This route validates for itself instead of going through InsertKeyValue, so
   // it has to invalidate the site data cache for itself too - including I3g's
@@ -126,10 +119,13 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
   // org reads through.
   if (isInstanceScoped(configKey)) await InvalidateInstanceSiteDataCache();
   else await InvalidateSiteDataCache();
+=======
+  await InsertKeyValue(configKey, valueToStore);
+>>>>>>> e782f13915f9902f6fc57e499540da21373159c6
 
   const response: UpdateSiteDataKeyResponse = {
     key: configKey,
-    value: keyConfig.data_type === "object" ? body.value : valueToStore,
+    value: MaskSiteDataSecret(configKey, await GetSiteDataByKey(configKey)),
     data_type: keyConfig.data_type,
   };
 
