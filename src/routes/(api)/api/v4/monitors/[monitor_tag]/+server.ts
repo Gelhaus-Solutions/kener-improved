@@ -1,6 +1,14 @@
 import { json, type RequestHandler } from "@sveltejs/kit";
 import db from "$lib/server/db/db";
-import { GetMonitorsParsed, DeleteMonitorCompletelyUsingTag } from "$lib/server/controllers/monitorsController";
+import {
+  GetMonitorsParsed,
+  DeleteMonitorCompletelyUsingTag,
+  MaskMonitorSecrets,
+  RestoreMonitorSecrets,
+  UpdateMonitor,
+  ValidateTypeDataProxy,
+  WithValidHeartbeatSecret,
+} from "$lib/server/controllers/monitorsController";
 import type {
   GetMonitorResponse,
   MonitorResponse,
@@ -9,13 +17,14 @@ import type {
   DeleteMonitorResponse,
   BadRequestResponse,
 } from "$lib/types/api";
+import { readRequestBody } from "$lib/server/requestBody";
 
 export const GET: RequestHandler = async ({ locals }) => {
   // Monitor is validated by middleware and available in locals
   const monitor = locals.monitor!;
 
   const response: GetMonitorResponse = {
-    monitor,
+    monitor: MaskMonitorSecrets(monitor),
   };
 
   return json(response);
@@ -26,19 +35,8 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
   const existingMonitor = locals.monitor!;
   const monitorTag = existingMonitor.tag;
 
-  let body: UpdateMonitorRequest;
-
-  try {
-    body = await request.json();
-  } catch {
-    const errorResponse: BadRequestResponse = {
-      error: {
-        code: "BAD_REQUEST",
-        message: "Invalid JSON body",
-      },
-    };
-    return json(errorResponse, { status: 400 });
-  }
+  const body = await readRequestBody<UpdateMonitorRequest>(request, "PATCH /api/v4/monitors/{monitor_tag}");
+  if (body instanceof Response) return body;
 
   // Build update data - only include fields that are provided
   const updateData: Record<string, unknown> = {
@@ -47,7 +45,7 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
   };
 
   if (body.name !== undefined) {
-    if (typeof body.name !== "string" || body.name.trim().length === 0) {
+    if (body.name.trim().length === 0) {
       const errorResponse: BadRequestResponse = {
         error: {
           code: "BAD_REQUEST",
@@ -68,6 +66,8 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
   updateData.status = body.status !== undefined ? body.status : existingMonitor.status;
   updateData.category_name = body.category_name !== undefined ? body.category_name : existingMonitor.category_name;
   updateData.monitor_type = body.monitor_type !== undefined ? body.monitor_type : existingMonitor.monitor_type;
+  updateData.include_degraded_in_downtime =
+    body.include_degraded_in_downtime ?? existingMonitor.include_degraded_in_downtime;
 
   updateData.is_hidden = body.is_hidden !== undefined ? body.is_hidden : existingMonitor.is_hidden;
   updateData.external_url = body.external_url !== undefined ? body.external_url : existingMonitor.external_url;
@@ -76,8 +76,8 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
     // Explicit null resets the grace period to the default (1 = off); undefined keeps the existing value.
     updateData.confirmation_threshold = 1;
   } else if (body.confirmation_threshold !== undefined) {
-    const ct = Number(body.confirmation_threshold);
-    if (!Number.isInteger(ct) || ct < 1 || ct > 60) {
+    const ct = body.confirmation_threshold;
+    if (ct < 1 || ct > 60) {
       const errorResponse: BadRequestResponse = {
         error: { code: "BAD_REQUEST", message: "confirmation_threshold must be an integer between 1 and 60" },
       };
@@ -102,8 +102,10 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
           existingTypeData = {};
         }
       }
-      // Merge existing with new data
-      const mergedTypeData = { ...existingTypeData, ...body.type_data };
+      const mergedTypeData = RestoreMonitorSecrets(
+        { ...existingTypeData, ...body.type_data },
+        existingMonitor.type_data,
+      );
       updateData.type_data = JSON.stringify(mergedTypeData);
     }
   } else {
@@ -131,7 +133,21 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
     updateData.monitor_settings_json = JSON.stringify(existingMonitor.monitor_settings_json);
   }
 
-  await db.updateMonitor(updateData as unknown as Parameters<typeof db.updateMonitor>[0]);
+  let monitorToSave: Parameters<typeof db.updateMonitor>[0];
+  try {
+    monitorToSave = WithValidHeartbeatSecret(
+      updateData as unknown as Parameters<typeof db.updateMonitor>[0],
+      existingMonitor.type_data?.secretString,
+    );
+    ValidateTypeDataProxy(monitorToSave, existingMonitor.type_data?.proxy);
+  } catch (e) {
+    const errorResponse: BadRequestResponse = {
+      error: { code: "BAD_REQUEST", message: (e as Error).message },
+    };
+    return json(errorResponse, { status: 400 });
+  }
+
+  await UpdateMonitor(monitorToSave);
 
   // Fetch the updated monitor
   const updatedMonitor = await GetMonitorsParsed({ tag: monitorTag }).then((monitors) => monitors[0]);
@@ -147,7 +163,7 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
   }
 
   const response: UpdateMonitorResponse = {
-    monitor: updatedMonitor,
+    monitor: MaskMonitorSecrets(updatedMonitor),
   };
 
   return json(response);

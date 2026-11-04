@@ -54,7 +54,10 @@ probe/node_modules/
 
 # Claude session-local state (ralph-loop etc.)
 .claude/*.local.md
+<<<<<<< HEAD
 
 # Vitest browser-mode failure screenshots. Diagnostic output from a test run,
 # never a source artifact; two were committed by accident in 14308d98.
+=======
+>>>>>>> f6b9a1a81eca1ce9f4ea77613768c8af9dbb88fb
 .vitest-attachments/

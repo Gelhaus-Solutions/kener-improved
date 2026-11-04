@@ -10,10 +10,9 @@ import type {
   BadRequestResponse,
   NotFoundResponse,
 } from "$lib/types/api";
-import GC from "$lib/global-constants";
 import { GetMinuteStartTimestampUTC } from "$lib/server/tool";
-
-const VALID_STATES: string[] = [GC.INVESTIGATING, GC.IDENTIFIED, GC.MONITORING, GC.RESOLVED];
+import { UpdateCommentByID, UpdateCommentStatusByID } from "$lib/server/controllers/incidentController";
+import { readRequestBody } from "$lib/server/requestBody";
 
 function formatCommentResponse(comment: {
   id: number;
@@ -73,7 +72,7 @@ export const GET: RequestHandler = async ({ params, locals }) => {
     return json(errorResponse, { status: 404 });
   }
 
-  if (comment.status === "DELETED") {
+  if (comment.status !== "ACTIVE") {
     const errorResponse: NotFoundResponse = {
       error: {
         code: "NOT_FOUND",
@@ -128,7 +127,7 @@ export const PATCH: RequestHandler = async ({ params, locals, request }) => {
     return json(errorResponse, { status: 404 });
   }
 
-  if (existingComment.status === "DELETED") {
+  if (existingComment.status !== "ACTIVE") {
     const errorResponse: NotFoundResponse = {
       error: {
         code: "NOT_FOUND",
@@ -138,30 +137,11 @@ export const PATCH: RequestHandler = async ({ params, locals, request }) => {
     return json(errorResponse, { status: 404 });
   }
 
-  let body: UpdateCommentRequest;
-
-  try {
-    body = await request.json();
-  } catch {
-    const errorResponse: BadRequestResponse = {
-      error: {
-        code: "BAD_REQUEST",
-        message: "Invalid JSON body",
-      },
-    };
-    return json(errorResponse, { status: 400 });
-  }
-
-  // Validate state if provided
-  if (body.state !== undefined && !VALID_STATES.includes(body.state)) {
-    const errorResponse: BadRequestResponse = {
-      error: {
-        code: "BAD_REQUEST",
-        message: `state must be one of: ${VALID_STATES.join(", ")}`,
-      },
-    };
-    return json(errorResponse, { status: 400 });
-  }
+  const body = await readRequestBody<UpdateCommentRequest>(
+    request,
+    "PATCH /api/v4/incidents/{incident_id}/comments/{comment_id}",
+  );
+  if (body instanceof Response) return body;
 
   // Build update values - only update fields that are present in the request
   const updateComment = body.comment !== undefined ? body.comment : existingComment.comment;
@@ -169,8 +149,17 @@ export const PATCH: RequestHandler = async ({ params, locals, request }) => {
   const updateTimestamp =
     body.timestamp !== undefined ? GetMinuteStartTimestampUTC(body.timestamp) : existingComment.commented_at;
 
-  // Update the comment (does NOT change incident state)
-  await db.updateIncidentCommentByID(commentId, updateComment, updateState, updateTimestamp);
+  try {
+    await UpdateCommentByID(incident.id, commentId, updateComment, updateState, updateTimestamp);
+  } catch (err) {
+    const errorResponse: BadRequestResponse = {
+      error: {
+        code: "BAD_REQUEST",
+        message: err instanceof Error ? err.message : "Failed to update comment",
+      },
+    };
+    return json(errorResponse, { status: 400 });
+  }
 
   // Fetch updated comment
   const updatedComment = await db.getIncidentCommentByIDAndIncident(incident.id, commentId);
@@ -224,7 +213,7 @@ export const DELETE: RequestHandler = async ({ params, locals }) => {
     return json(errorResponse, { status: 404 });
   }
 
-  if (existingComment.status === "DELETED") {
+  if (existingComment.status !== "ACTIVE") {
     const errorResponse: NotFoundResponse = {
       error: {
         code: "NOT_FOUND",
@@ -234,8 +223,7 @@ export const DELETE: RequestHandler = async ({ params, locals }) => {
     return json(errorResponse, { status: 404 });
   }
 
-  // Soft delete the comment
-  await db.updateIncidentCommentStatusByID(commentId, "DELETED");
+  await UpdateCommentStatusByID(incident.id, commentId, "INACTIVE");
 
   const response: DeleteCommentResponse = {
     message: `Comment with id '${commentId}' deleted successfully`,
