@@ -98,6 +98,7 @@ describe("describeError", () => {
   });
 });
 
+<<<<<<< HEAD
 /**
  * D5. A maintenance mail has no reader to detect a timezone from, so it has to
  * name the one it used. These pin both halves of the bug: the label, and the
@@ -139,5 +140,21 @@ describe("maintenanceToVariables renders times unambiguously", () => {
       seen.add(render());
     }
     expect(seen.size).toBe(1);
+=======
+describe("maintenanceToVariables", () => {
+  it("flags the mail as a maintenance one, for templates that style by it", () => {
+    const event = {
+      id: 3,
+      maintenance_id: 5,
+      title: "Database upgrade",
+      description: "",
+      start_date_time: 1767225600,
+      end_date_time: 1767229200,
+    } as unknown as Parameters<typeof maintenanceToVariables>[0];
+
+    expect(maintenanceToVariables(event, "api", "has started", "start", "Maintenance Started").is_maintenance).toBe(
+      true,
+    );
+>>>>>>> 9c95f8a2aec4e3ace82f7e4cec7348b8a18cba6e
   });
 });

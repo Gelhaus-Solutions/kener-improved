@@ -6,7 +6,12 @@ import type { ImageRecord, ImageRecordInsert } from "../../types/db.js";
  */
 export class ImagesRepository extends BaseRepository {
   async insertImage(data: ImageRecordInsert): Promise<string> {
+<<<<<<< HEAD
     await this.table("images").insert(data);
+=======
+    // MySQL compiles ignore() to INSERT IGNORE, which stores over-long data cut short instead of failing.
+    await this.knex("images").insert(data).onConflict("id").merge(["id"]);
+>>>>>>> 9c95f8a2aec4e3ace82f7e4cec7348b8a18cba6e
     return data.id;
   }
 
