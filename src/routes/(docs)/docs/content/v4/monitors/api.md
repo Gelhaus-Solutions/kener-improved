@@ -25,6 +25,9 @@ API monitors send HTTP requests and evaluate the response with JavaScript.
 | `proxy`               | `string`                                       | —                | Optional forward proxy, e.g. `http://user:$PROXY_PASS@proxy.internal:3128`; overrides the [environment proxy](/docs/v4/setup/environment-variables#http-proxy) |
 | `eval`                | `string` (JS function)                         | built-in default | Receives response details                                                                                                                                      |
 
+> [!WARNING]
+> Header, body, URL and proxy values support `$SECRET` env substitution. If the URL (or an `http://` proxy) is unencrypted, the substituted secrets are sent in cleartext — use `https://` unless the endpoint is on a trusted network.
+
 ## Default eval behavior {#default-eval}
 
 Built-in eval marks the monitor **UP** when:
@@ -49,11 +52,13 @@ It must return:
 { status: "UP" | "DEGRADED" | "DOWN" | "MAINTENANCE", latency: number }
 ```
 
+Eval code runs in a [sandbox](/docs/v4/monitors/overview#eval-sandbox).
+
 ## Example {#example}
 
 ```json
 {
-    "type": "API",
+    "monitor_type": "API",
     "type_data": {
         "url": "https://api.example.com/health",
         "method": "GET",
@@ -67,4 +72,5 @@ It must return:
 - **Always DOWN**: verify URL/method/headers/body
 - **TLS errors**: enable `allowSelfSignedCert` only for trusted self-signed endpoints
 - **Eval errors**: simplify eval and validate return shape
+- **`'fetch' is not defined`**: eval code has no Node.js or browser features; see the [sandbox](/docs/v4/monitors/overview#eval-sandbox)
 - **`Failed to establish tunnel`**: the proxy refused the connection; see [proxy settings](/docs/v4/setup/environment-variables#http-proxy)
