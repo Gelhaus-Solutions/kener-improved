@@ -13,14 +13,29 @@
   import IncidentItem from "$lib/components/IncidentItem.svelte";
   import MaintenanceItem from "$lib/components/MaintenanceItem.svelte";
   import { page } from "$app/state";
+<<<<<<< HEAD
   import RegionMap from "$lib/components/regions/RegionMap.svelte";
   import { liveStatus } from "$lib/client/liveStatus.svelte.js";
   import { statusFromSample, type RegionMapEntry } from "$lib/regions/mapModel";
+=======
+  import { GetSslSecurityState, SslSecurityLabelKey, SslSecurityTextClass, FormatSslRemaining } from "$lib/clientTools";
+  import { getSslNowMs } from "$lib/client/sslClock.svelte";
+>>>>>>> 4079600afe3f6da59b17879df918a79932f30404
   let { data } = $props();
+
+  let isSsl = $derived(data.monitorType === "SSL");
+  let sslSecurity = $derived(GetSslSecurityState(data.monitorSslExpiresAt, getSslNowMs(), data.monitorSslTrusted));
+  let sslRemaining = $derived(FormatSslRemaining(data.monitorSslExpiresAt, getSslNowMs()));
+  let sslIssuer = $derived(
+    [data.monitorIssuerCn && `CN=${data.monitorIssuerCn}`, data.monitorIssuerO && `O=${data.monitorIssuerO}`]
+      .filter(Boolean)
+      .join(", ")
+  );
 
   // State
   let descriptionExpanded = $state(false);
   let showInlineEvents = $derived(data.eventDisplaySettings?.showInlineEvents === true);
+  let eventListPlacement = $derived(data.eventDisplaySettings?.eventListPlacement);
 
   function toggleDescription(expanded: boolean) {
     descriptionExpanded = expanded;
@@ -110,7 +125,7 @@
   <ThemePlus
     monitor_tags={[data.monitorTag]}
     embedMonitorTag={data.monitorTag}
-    hideNotificationsPopover={showInlineEvents}
+    hideNotificationsPopover={eventListPlacement === "hidden"}
   />
   <div class="flex flex-col gap-2 px-4 py-2">
     {#if data.monitorImage}
@@ -199,7 +214,24 @@
           </p>
         {/if}
       </div>
-      {#if !!data.monitorLastLatency}
+      {#if isSsl}
+        <div class="flex flex-col items-end gap-1">
+          <p class="text-right text-2xl font-semibold {SslSecurityTextClass(sslSecurity)}">
+            {$t(SslSecurityLabelKey(sslSecurity))}
+          </p>
+          {#if sslRemaining}
+            <p class="text-muted-foreground text-right text-xs">{$t("Time Remaining")}: {sslRemaining}</p>
+          {/if}
+          {#if data.monitorSslExpiresAt}
+            <p class="text-muted-foreground text-right text-xs">
+              {$t("Expires At")}: {$formatDate(data.monitorSslExpiresAt, "MMMM d, yyyy HH:mm:ss")}
+            </p>
+          {/if}
+          {#if sslIssuer}
+            <p class="text-muted-foreground text-right text-xs">{$t("Issued By")}: {sslIssuer}</p>
+          {/if}
+        </div>
+      {:else if !!data.monitorLastLatency}
         <div class="flex flex-col items-end gap-1">
           <p class="text-right text-2xl font-semibold">
             {data.monitorLastLatency}
@@ -262,8 +294,12 @@
     monitorTag={data.monitorTag}
     maxDays={data.maxDays}
     groupTags={data.extendedTags || []}
+<<<<<<< HEAD
     dependsOnTags={data.dependsOnTags || []}
     partOfTags={data.partOfTags || []}
+=======
+    groupMemberDisplay={data.groupMemberDisplay}
+>>>>>>> 4079600afe3f6da59b17879df918a79932f30404
     class="mb-4"
   />
 </div>
