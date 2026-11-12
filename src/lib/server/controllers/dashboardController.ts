@@ -2,8 +2,12 @@ import db from "../db/db.js";
 import { GetMinuteStartNowTimestampUTC, BeginningOfMinute, BeginningOfDay } from "../tool.js";
 import { GetPageByPathWithMonitors, GetLatestMonitoringDataAllActive } from "./controller.js";
 import { GetMonitorsParsed } from "./monitorsController.js";
+<<<<<<< HEAD
 import { getPageStatus, type LatestStatus, type PageStatus } from "../incidents/pageStatus.js";
 import { publicSloSurfacesFor, type PublicSlo } from "../services/sloPublic.js";
+=======
+import { GetStatusSummary, GetStatusBgColor, ResolveGroupMemberDisplay } from "../../clientTools";
+>>>>>>> 4079600afe3f6da59b17879df918a79932f30404
 
 import type {
   IncidentRecord,
@@ -15,7 +19,7 @@ import type {
   PageSettingsType,
   IncidentMonitorDetailRecord,
 } from "../types/db.js";
-import type { GroupMonitorTypeData } from "../types/monitor.js";
+import type { GroupMemberDisplay, GroupMonitorTypeData } from "../types/monitor.js";
 import GC from "../../global-constants.js";
 import type { LayoutServerData } from "./layoutController.js";
 import type { NotificationEvent } from "../../types/notifications.js";
@@ -166,8 +170,9 @@ export const GetIncidentCommentsByIncidentId = async (incident_id: number): Prom
  */
 export const GetAffectedMonitorsByIncidentId = async (
   incident_id: number,
+  includeHidden = false,
 ): Promise<Array<IncidentMonitorDetailRecord>> => {
-  return await db.getMonitorsByIncidentId(incident_id);
+  return await db.getMonitorsByIncidentId(incident_id, includeHidden);
 };
 
 // ============ Page Dashboard Data ============
@@ -195,6 +200,7 @@ export interface PageDashboardData {
   upcomingMaintenances: MaintenanceEventsMonitorList[];
   monitorTags: string[];
   monitorGroupMembersByTag: Record<string, string[]>;
+<<<<<<< HEAD
   /**
    * G2: each monitor's `category_name`, keyed by the same tag as `monitorTags`.
    *
@@ -241,6 +247,9 @@ export interface PageDashboardData {
   pageSlos: PublicSlo[];
   categorySlos: Record<string, PublicSlo[]>;
   monitorSlos: Record<string, PublicSlo[]>;
+=======
+  monitorGroupMemberDisplayByTag: Record<string, GroupMemberDisplay>;
+>>>>>>> 4079600afe3f6da59b17879df918a79932f30404
   pageDetails: PageRecordTyped;
   socialPagePreviewImage?: string;
   metaPageTitle?: string;
@@ -348,8 +357,7 @@ export const GetPageDashboardData = async (
   pagePath: string,
   layoutData: LayoutServerData,
 ): Promise<PageDashboardData | null> => {
-  // Fetch page by path with monitors
-  const pageData = await GetPageByPathWithMonitors(pagePath);
+  const pageData = await GetPageByPathWithMonitors(pagePath, layoutData.canSeeHiddenMonitors);
   if (!pageData) {
     return null;
   }
@@ -418,9 +426,13 @@ export const GetPageDashboardData = async (
       upcomingMaintenances: [],
       monitorTags,
       monitorGroupMembersByTag: {},
+<<<<<<< HEAD
       monitorCategoriesByTag: {},
       monitorSlugsByTag: {},
       ...emptySurfaces,
+=======
+      monitorGroupMemberDisplayByTag: {},
+>>>>>>> 4079600afe3f6da59b17879df918a79932f30404
       pageDetails: pageDetailsTyped,
       socialPagePreviewImage,
       metaPageTitle,
@@ -432,7 +444,11 @@ export const GetPageDashboardData = async (
   // Fetch all dashboard data in parallel (respecting feature toggles)
   const [latestData, parsedMonitors, ongoingIncidents, ongoingMaintenances, upcomingMaintenances] = await Promise.all([
     GetLatestMonitoringDataAllActive(monitorTags),
-    GetMonitorsParsed({ tags: monitorTags, status: "ACTIVE", is_hidden: "NO" }),
+    GetMonitorsParsed({
+      tags: monitorTags,
+      status: "ACTIVE",
+      is_hidden: layoutData.canSeeHiddenMonitors ? undefined : "NO",
+    }),
     showInlineEvents && eventSettings.incidents.enabled && eventSettings.incidents.ongoing.show
       ? GetOngoingIncidentsForMonitorList(monitorTags)
       : Promise.resolve([] as IncidentForMonitorListWithComments[]),
@@ -454,6 +470,7 @@ export const GetPageDashboardData = async (
   // what makes them capable of agreeing.
   const pageStatus = await getPageStatus(monitorTags, nowTs, latestData as LatestStatus[]);
   const monitorGroupMembersByTag: Record<string, string[]> = {};
+<<<<<<< HEAD
   // G2. Trimmed and emptied to null here rather than in the component, so
   // "   " and "" and null are one case by the time anything renders them.
   const monitorCategoriesByTag: Record<string, string | null> = {};
@@ -465,6 +482,9 @@ export const GetPageDashboardData = async (
     monitorCategoriesByTag[monitor.tag] = category.length > 0 ? category : null;
     monitorSlugsByTag[monitor.tag] = monitor.slug || monitor.tag;
   }
+=======
+  const monitorGroupMemberDisplayByTag: Record<string, GroupMemberDisplay> = {};
+>>>>>>> 4079600afe3f6da59b17879df918a79932f30404
 
   for (const monitor of parsedMonitors) {
     if (monitor.monitor_type !== "GROUP") continue;
@@ -473,6 +493,7 @@ export const GetPageDashboardData = async (
     if (!groupData?.monitors || !Array.isArray(groupData.monitors)) continue;
 
     monitorGroupMembersByTag[monitor.tag] = groupData.monitors.map((member) => member.tag);
+    monitorGroupMemberDisplayByTag[monitor.tag] = ResolveGroupMemberDisplay(groupData.memberDisplay);
   }
 
   // F1a. Published SLO figures, bucketed by the surface they were placed on.
@@ -499,9 +520,13 @@ export const GetPageDashboardData = async (
     upcomingMaintenances,
     monitorTags,
     monitorGroupMembersByTag,
+<<<<<<< HEAD
     monitorCategoriesByTag,
     monitorSlugsByTag,
     ...sloSurfaces,
+=======
+    monitorGroupMemberDisplayByTag,
+>>>>>>> 4079600afe3f6da59b17879df918a79932f30404
     pageDetails: pageDetailsTyped,
     socialPagePreviewImage,
     metaPageTitle,
