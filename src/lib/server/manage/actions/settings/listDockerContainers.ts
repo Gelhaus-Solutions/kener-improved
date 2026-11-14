@@ -9,7 +9,7 @@ export default {
   handler: async (data: LegacyPayload) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let resp: any;
-    resp = await ListDockerContainers(data);
+    resp = await ListDockerContainers(data.type_data, data.monitor_id);
     return resp;
   },
 } satisfies ActionDefinition<LegacyPayload>;

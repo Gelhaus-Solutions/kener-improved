@@ -1,4 +1,5 @@
 import { GetMonitorAlertConfigById } from "$lib/server/controllers/monitorAlertConfigController.js";
+import { MaskAlertConfigTriggerSecrets } from "$lib/server/controllers/triggerController.js";
 import type { ActionDefinition, LegacyPayload } from "../../types.js";
 
 /**
@@ -13,10 +14,11 @@ export default {
   handler: async (data: LegacyPayload) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let resp: any;
-    resp = await GetMonitorAlertConfigById(data.id);
-    if (!resp) {
+    const config = await GetMonitorAlertConfigById(data.id);
+    if (!config) {
       throw new Error("Monitor alert config not found");
     }
+    resp = MaskAlertConfigTriggerSecrets(config);
     return resp;
   },
 } satisfies ActionDefinition<LegacyPayload>;

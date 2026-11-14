@@ -1,5 +1,6 @@
 import { json, error } from "@sveltejs/kit";
 import type { APIServerRequest } from "$lib/server/types/api-server";
+import { CanSeeHiddenMonitors, GetLoggedInSession } from "$lib/server/controllers/userController";
 import db from "$lib/server/db/db";
 import { ResolveVisiblePublicMonitor } from "$lib/server/controllers/publicMonitorResolver";
 import { GetMinuteStartNowTimestampUTC } from "$lib/server/tool";
@@ -42,8 +43,10 @@ export default async function get(req: APIServerRequest): Promise<Response> {
     return error(400, { message: "tag query parameter is required" });
   }
 
-  // Visible, not merely existing. See publicMonitorResolver (KENER-126).
-  const monitor = await ResolveVisiblePublicMonitor(tag);
+  // Visible, not merely existing. See publicMonitorResolver (KENER-126). Hidden
+  // ones are included for a reader whose role has monitors.read (upstream #697).
+  const canSeeHidden = await CanSeeHiddenMonitors(await GetLoggedInSession(req.cookies));
+  const monitor = await ResolveVisiblePublicMonitor(tag, canSeeHidden);
   if (!monitor) {
     return error(404, { message: "Monitor not found" });
   }

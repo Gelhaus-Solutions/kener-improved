@@ -1,6 +1,7 @@
 import { GetSiteDataByKey, InsertKeyValue } from "$lib/server/controllers/controller.js";
-import { ClearOidcConfigCache, OIDC_SECRET_PURPOSE } from "$lib/server/controllers/oidcController.js";
+import { OIDC_SECRET_PURPOSE } from "$lib/server/controllers/oidcController.js";
 import { sealIfPlain } from "$lib/server/crypto/secretBox.js";
+import { IsMaskedString } from "$lib/server/tool.js";
 import {
   SITE_DATA_KEY as LATENCY_THRESHOLD_KEY,
   invalidateLatencyThresholdCache,
@@ -18,12 +19,15 @@ async function storeSiteData(data: { [x: string]: any }) {
       if (key === "socialPreviewImage" && (element === null || element === undefined)) {
         element = "";
       }
-      // If oidcSettings is saved without client_secret, preserve the existing one.
-      // An explicit empty string clears it.
+      // If oidcSettings is saved without client_secret, or with the masked value
+      // a read handed out, preserve the existing one. An explicit empty string
+      // clears it. Restored here rather than in InsertKeyValue (upstream's
+      // RestoreSiteDataSecret) because a mask must never reach `sealIfPlain`.
       if (key === "oidcSettings" && typeof element === "string") {
         try {
           const newSettings = JSON.parse(element);
-          if (newSettings.client_secret === undefined) {
+          const secret = newSettings.client_secret;
+          if (secret === undefined || (typeof secret === "string" && IsMaskedString(secret))) {
             const existing = await GetSiteDataByKey("oidcSettings");
             if (existing && typeof existing === "object") {
               // Already encrypted on the way in, so carrying it forward keeps it
@@ -42,13 +46,8 @@ async function storeSiteData(data: { [x: string]: any }) {
           // If parsing fails, proceed with the original value
         }
       }
+      // Clears the OIDC config cache itself for oidcSettings (upstream #889).
       await InsertKeyValue(key, element);
-
-      // Clear OIDC config cache when settings change so logins
-      // pick up new credentials immediately
-      if (key === "oidcSettings") {
-        ClearOidcConfigCache();
-      }
 
       // B5's threshold has its own 10-second per-process memo, because it is
       // read on every check of every monitor. `InvalidateSiteDataCache` inside

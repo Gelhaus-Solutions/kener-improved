@@ -144,7 +144,7 @@ export const pageStatusConsumer: EventConsumer = {
       return { ok: false, error: `Page ${target.target_id} no longer exists`, permanent: true };
     }
 
-    const monitors = await db.getPageMonitorsExcludeHidden(pageId);
+    const monitors = await db.getActivePageMonitors(pageId);
     const status = await getPageStatus(
       monitors.map((m) => m.monitor_tag),
       GetMinuteStartNowTimestampUTC(),

@@ -11,6 +11,7 @@ import type { SubscriptionVariableMap } from "../../notification/types.js";
 import type { MaintenanceEventRecordDetailed } from "../../types/db.js";
 import type { EventType } from "$lib/event-taxonomy.js";
 import type { EventConsumer, OutboxEvent, DeliveryTarget, DeliveryResult, DeliveryOptions } from "../types.js";
+import GC from "../../../global-constants.js";
 
 // Subscriber email as a consumer of the bus.
 //
@@ -151,7 +152,7 @@ async function maintenanceGates(): Promise<Record<string, boolean>> {
  * broke", and the second is the bug this is looking for.
  */
 async function isNotifiable(event: OutboxEvent): Promise<boolean> {
-  if (event.type === "incident.comment_added") return true;
+  if (event.type === "incident.comment_added") return await isShownOnStatusPage(event);
 
   // C1. The second incident-family event this consumer listens to, and the only
   // one gated on the row rather than on a site setting: a postmortem says for
@@ -168,7 +169,37 @@ async function isNotifiable(event: OutboxEvent): Promise<boolean> {
 
   const notification = MAINTENANCE_NOTIFICATIONS[event.type as EventType];
   if (!notification) return false;
-  return (await maintenanceGates())[notification.gate] === true;
+  if ((await maintenanceGates())[notification.gate] !== true) return false;
+  return await isShownOnStatusPage(event);
+}
+
+/**
+ * Upstream's rule, transcribed from the old path (`notifySubscribersOfComment`
+ * and `pushMaintenanceUpdate`): subscribers hear only of an incident or a
+ * maintenance a status page shows, which means global, or with a monitor that
+ * is not hidden. `getMonitorsByIncidentId` and `getMonitorsByMaintenanceId`
+ * already leave hidden monitors out, so an empty list is the "hidden only" case.
+ *
+ * A row that cannot be read answers true, so the miss surfaces in `deliver()`
+ * as a rebuild failure instead of as silence.
+ */
+async function isShownOnStatusPage(event: OutboxEvent): Promise<boolean> {
+  const payload = payloadOf(event);
+  if (event.type === "incident.comment_added") {
+    const incidentId = Number(payload.incident_id ?? event.aggregate_id);
+    if (!Number.isFinite(incidentId)) return true;
+    const incident = await db.getIncidentById(incidentId);
+    if (!incident || incident.is_global === "YES") return true;
+    return (await db.getMonitorsByIncidentId(incidentId)).length > 0;
+  }
+
+  const maintenanceEventId = Number(payload.maintenance_event_id ?? event.aggregate_id);
+  if (!Number.isFinite(maintenanceEventId)) return true;
+  const maintenanceEvent = await db.getMaintenanceEventById(maintenanceEventId);
+  if (!maintenanceEvent) return true;
+  const maintenance = await db.getMaintenanceById(maintenanceEvent.maintenance_id);
+  if (maintenance?.is_global === "YES") return true;
+  return (await db.getMonitorsByMaintenanceId(maintenanceEvent.maintenance_id)).length > 0;
 }
 
 /** Rebuilds the incident comment notification from the event. */
@@ -184,6 +215,15 @@ async function renderIncidentComment(event: OutboxEvent): Promise<SubscriptionVa
   const siteUrl = siteDataToVariables(await GetAllSiteData()).site_url;
   const comment = String(payload.comment ?? "");
   const state = String(payload.state ?? "");
+  // The state and impact flags, read the way the live path reads them: a failed
+  // read costs the flags, not the mail.
+  let impacts: Array<string | null> | null = null;
+  try {
+    impacts = (await db.getMonitorsByIncidentId(incidentId)).map((m) => m.monitor_impact);
+  } catch {
+    impacts = null;
+  }
+  const impact = impacts?.includes(GC.DOWN) ? GC.DOWN : impacts?.includes(GC.DEGRADED) ? GC.DEGRADED : "";
 
   return {
     title: incident.title,
@@ -194,6 +234,14 @@ async function renderIncidentComment(event: OutboxEvent): Promise<SubscriptionVa
     update_subject: `[#${incidentId}:${state}] ${incident.title}`,
     update_id: String(commentId),
     event_type: "incidents",
+    update_state: state,
+    is_investigating: state === GC.INVESTIGATING,
+    is_identified: state === GC.IDENTIFIED,
+    is_monitoring: state === GC.MONITORING,
+    is_resolved: state === GC.RESOLVED,
+    incident_impact: impact,
+    is_down: impact === GC.DOWN,
+    is_degraded: impact === GC.DEGRADED,
   };
 }
 

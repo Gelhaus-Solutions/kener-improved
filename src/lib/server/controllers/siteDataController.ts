@@ -1,7 +1,10 @@
 import db from "../db/db.js";
 import { GetSiteDataCached, InvalidateSiteDataCache, InvalidateInstanceSiteDataCache } from "../cache/siteDataCache.js";
 import { isInstanceScoped } from "./siteDataScope.js";
+import { IsMaskedString, MaskString } from "../tool.js";
+import { isSealed, sealIfPlain } from "../crypto/secretBox.js";
 import { siteDataKeys } from "./siteDataKeys.js";
+import { ClearOidcConfigCache, OIDC_SECRET_PURPOSE } from "./oidcController.js";
 import type { Cookies } from "@sveltejs/kit";
 import type {
   DataRetentionPolicy,
@@ -72,6 +75,56 @@ export interface SiteDataTransformed {
   globalMaintenanceNotificationSettings?: GlobalMaintenanceNotificationSettings;
 }
 
+function secretPath(key: string): string[] | null {
+  if (key === "oidcSettings") return ["client_secret"];
+  if (key.startsWith("captcha.")) return ["requirements", "Secret Key"];
+  return null;
+}
+
+function readPath(value: unknown, path: string[]): unknown {
+  return path.reduce<unknown>(
+    (v, k) => (v && typeof v === "object" ? (v as Record<string, unknown>)[k] : undefined),
+    value,
+  );
+}
+
+function writePath(value: unknown, [head, ...rest]: string[], secret: string): Record<string, unknown> {
+  const obj = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  return { ...obj, [head]: rest.length ? writePath(obj[head], rest, secret) : secret };
+}
+
+/** Returns a copy of a site-data value with its secret field masked, for any response that leaves the server. */
+export function MaskSiteDataSecret(key: string, value: unknown): unknown {
+  const path = secretPath(key);
+  const secret = path && readPath(value, path);
+  if (!path || typeof secret !== "string" || !secret) return value;
+  // Fork: the OIDC client secret is stored encrypted, and masking a ciphertext
+  // would show four characters that match nothing the operator typed.
+  return writePath(value, path, isSealed(secret) ? "********" : MaskString(secret));
+}
+
+/**
+ * Puts the stored secret back when a save sends any masked secret or leaves it out. An empty string clears it.
+ * A masked secret with no stored secret saves an empty string, so a mask copied from another instance is never stored.
+ */
+export function RestoreSiteDataSecret(key: string, value: unknown, stored: unknown): unknown {
+  const path = secretPath(key);
+  if (!path || !value || typeof value !== "object") return value;
+  const storedSecret = readPath(stored, path);
+  const restored = typeof storedSecret === "string" ? storedSecret : "";
+  const incoming = readPath(value, path);
+  if (typeof incoming === "string" && IsMaskedString(incoming)) return writePath(value, path, restored);
+  if (incoming === undefined && restored) return writePath(value, path, restored);
+  return value;
+}
+
+function sealOidcClientSecret(value: string): string {
+  const settings = JSON.parse(value) as Record<string, unknown>;
+  const secret = settings.client_secret;
+  if (typeof secret !== "string" || secret.length === 0) return value;
+  return JSON.stringify({ ...settings, client_secret: sealIfPlain(secret, OIDC_SECRET_PURPOSE) });
+}
+
 export async function InsertKeyValue(key: string, value: string): Promise<number[]> {
   let f = siteDataKeys.find((k) => k.key === key);
   if (!f) {
@@ -82,6 +135,13 @@ export async function InsertKeyValue(key: string, value: string): Promise<number
     console.trace(`Invalid value for key: ${key}`);
     throw new Error(`Invalid value for key: ${key}`);
   }
+  if (secretPath(key)) {
+    value = JSON.stringify(RestoreSiteDataSecret(key, JSON.parse(value), await GetSiteDataByKey(key)));
+  }
+  // Fork: the OIDC client secret is stored encrypted. Sealed here, where the
+  // dashboard and `PATCH /api/v4/site/oidcSettings` both write, so neither can
+  // store it in plain text.
+  if (key === "oidcSettings") value = sealOidcClientSecret(value);
   const result = await db.insertOrUpdateSiteData(key, value, f.data_type);
   // Not the only writer: the v4 config API validates differently and calls
   // db.insertOrUpdateSiteData directly, so it invalidates for itself.
@@ -91,6 +151,7 @@ export async function InsertKeyValue(key: string, value: string): Promise<number
   // other tenant serving the old value until the Redis TTL expired.
   if (isInstanceScoped(key)) await InvalidateInstanceSiteDataCache();
   else await InvalidateSiteDataCache();
+  if (key === "oidcSettings") ClearOidcConfigCache();
   return result;
 }
 
@@ -184,11 +245,7 @@ export const GetSiteDataByKey = async (key: string): Promise<unknown> => {
 
 /** Checks the env vars required for setup, without touching the database. */
 export const HasRequiredEnv = (): boolean => {
-  return (
-    process.env.KENER_SECRET_KEY !== undefined &&
-    process.env.ORIGIN !== undefined &&
-    process.env.REDIS_URL !== undefined
-  );
+  return !!process.env.KENER_SECRET_KEY && process.env.ORIGIN !== undefined && process.env.REDIS_URL !== undefined;
 };
 
 export const IsSetupComplete = async (): Promise<boolean> => {

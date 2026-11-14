@@ -40,7 +40,7 @@ export default {
     if (!page) throw new ActionError(404, "That page does not exist");
 
     const nowSeconds = GetMinuteStartNowTimestampUTC();
-    const pageMonitors = await db.getPageMonitorsExcludeHidden(pageId);
+    const pageMonitors = await db.getActivePageMonitors(pageId);
     const monitorTags = pageMonitors.map((row) => row.monitor_tag);
 
     if (monitorTags.length === 0) {

@@ -1,4 +1,6 @@
-import { runAcrossOrgs } from "../orgContext.js";
+import type { Knex } from "knex";
+import { runAcrossOrgs, DEFAULT_ORG_ID } from "../orgContext.js";
+import { isTenantTable } from "../tenantTables.js";
 
 /**
  * Wraps a repository so every method runs outside any organisation (I3c).
@@ -24,6 +26,27 @@ export function unscoped<T extends object>(repository: T): T {
       if (typeof value !== "function") return value;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return (...args: any[]) => runAcrossOrgs(async () => value.apply(target, args));
+    },
+  });
+}
+
+/**
+ * A knex whose inserts into tenant tables belong to the default org (I3).
+ *
+ * For integration tests that write fixtures with raw knex and read them back
+ * through org-scoped repositories: a row with a null `org_id` is in no org, so
+ * nothing would ever find it. Rows that name an `org_id` keep it.
+ */
+export function defaultOrgKnex(knex: Knex): Knex {
+  return new Proxy(knex, {
+    apply(target, thisArg, args: [string]) {
+      const builder = Reflect.apply(target, thisArg, args) as Knex.QueryBuilder;
+      if (!isTenantTable(args[0])) return builder;
+      const insert = builder.insert.bind(builder) as (...a: unknown[]) => unknown;
+      const stamp = (row: Record<string, unknown>) => ({ org_id: DEFAULT_ORG_ID, ...row });
+      builder.insert = ((rows: Record<string, unknown> | Record<string, unknown>[], ...rest: unknown[]) =>
+        insert(Array.isArray(rows) ? rows.map(stamp) : stamp(rows), ...rest)) as never;
+      return builder;
     },
   });
 }

@@ -10,7 +10,15 @@ import type {
 } from "$lib/types/api";
 import { GetMinuteStartTimestampUTC, parseDbTimestamp } from "$lib/server/tool";
 import { GetSiteURL } from "$lib/server/controllers/siteDataController";
+import {
+  AddIncidentMonitor,
+  ClearIncidentEndTime,
+  DeleteIncident,
+  RemoveIncidentMonitor,
+  UpdateIncident,
+} from "$lib/server/controllers/incidentController";
 import serverResolver from "$lib/server/resolver";
+import { readRequestBody } from "$lib/server/requestBody";
 
 async function buildIncidentResponse(incidentId: number): Promise<IncidentDetailResponse | null> {
   const incident = await db.getIncidentById(incidentId);
@@ -61,34 +69,13 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
   // Incident is validated by middleware and available in locals
   const existingIncident = locals.incident!;
 
-  let body: UpdateIncidentRequest;
-
-  try {
-    body = await request.json();
-  } catch {
-    const errorResponse: BadRequestResponse = {
-      error: {
-        code: "BAD_REQUEST",
-        message: "Invalid JSON body",
-      },
-    };
-    return json(errorResponse, { status: 400 });
-  }
+  const body = await readRequestBody<UpdateIncidentRequest>(request, "PATCH /api/v4/incidents/{incident_id}");
+  if (body instanceof Response) return body;
 
   // Validate monitors if provided
   if (body.monitors !== undefined) {
-    if (!Array.isArray(body.monitors)) {
-      const errorResponse: BadRequestResponse = {
-        error: {
-          code: "BAD_REQUEST",
-          message: "monitors must be an array",
-        },
-      };
-      return json(errorResponse, { status: 400 });
-    }
-
     for (const monitor of body.monitors) {
-      if (!monitor.monitor_tag || typeof monitor.monitor_tag !== "string") {
+      if (!monitor.monitor_tag) {
         const errorResponse: BadRequestResponse = {
           error: {
             code: "BAD_REQUEST",
@@ -112,79 +99,35 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
     }
   }
 
-  // Build update data - only include fields that are present in the request
-  const updateData = {
-    id: existingIncident.id,
-    title: body.title !== undefined ? body.title : existingIncident.title,
-    start_date_time:
-      body.start_date_time !== undefined
-        ? GetMinuteStartTimestampUTC(body.start_date_time)
-        : existingIncident.start_date_time,
-    end_date_time:
-      body.end_date_time !== undefined
-        ? body.end_date_time !== null
-          ? GetMinuteStartTimestampUTC(body.end_date_time)
-          : null
-        : existingIncident.end_date_time,
-    status: existingIncident.status,
-    state: existingIncident.state,
-    // These fields are required by IncidentRecord but not used by updateIncident
-    created_at: existingIncident.created_at,
-    updated_at: existingIncident.updated_at,
-    incident_type: existingIncident.incident_type,
-    incident_source: "", // Not used by updateIncident
-    is_global: existingIncident.is_global,
-    // Carried through unchanged. This endpoint does not edit them, and rebuilding
-    // the record without them would write the column defaults over an operator's
-    // severity every time somebody renamed an incident over the API.
-    severity: existingIncident.severity,
-    severity_changed_at: existingIncident.severity_changed_at,
-    impact_override: existingIncident.impact_override,
-    suppress_notifications: existingIncident.suppress_notifications,
-    template_id: existingIncident.template_id,
-    // C2c, carried for the same reason: this endpoint writes a whole record, so
-    // a column it omits is a column it erases. Note that it also bypasses
-    // `UpdateIncident`, so a v4 state change stamps no lifecycle timestamp and
-    // emits nothing. That is inherited behaviour and v5 is where it is fixed;
-    // v4 stays byte-compatible with what its callers already get.
-    detected_at: existingIncident.detected_at,
-    acknowledged_at: existingIncident.acknowledged_at,
-    acknowledged_by_user_id: existingIncident.acknowledged_by_user_id,
-    identified_at: existingIncident.identified_at,
-    mitigated_at: existingIncident.mitigated_at,
-    resolved_at: existingIncident.resolved_at,
-  };
+  try {
+    if (body.end_date_time === null) {
+      await ClearIncidentEndTime(existingIncident.id);
+    }
+    await UpdateIncident(existingIncident.id, {
+      title: body.title,
+      start_date_time:
+        body.start_date_time !== undefined ? GetMinuteStartTimestampUTC(body.start_date_time) : undefined,
+      end_date_time: body.end_date_time ? GetMinuteStartTimestampUTC(body.end_date_time) : undefined,
+    });
+  } catch (err) {
+    const errorResponse: BadRequestResponse = {
+      error: {
+        code: "BAD_REQUEST",
+        message: err instanceof Error ? err.message : "Failed to update incident",
+      },
+    };
+    return json(errorResponse, { status: 400 });
+  }
 
-  // Update the incident
-  await db.updateIncident(updateData);
-
-  // Handle monitors update if provided
   if (body.monitors !== undefined) {
-    // Get current monitors
-    const currentMonitors = await db.getIncidentMonitorsByIncidentID(existingIncident.id);
-
-    // If empty array, remove all monitors
-    if (body.monitors.length === 0) {
-      for (const monitor of currentMonitors) {
-        await db.removeIncidentMonitor(existingIncident.id, monitor.monitor_tag);
+    const newMonitorTags = body.monitors.map((m) => m.monitor_tag);
+    for (const current of await db.getIncidentMonitorsByIncidentID(existingIncident.id)) {
+      if (!newMonitorTags.includes(current.monitor_tag)) {
+        await RemoveIncidentMonitor(existingIncident.id, current.monitor_tag);
       }
-    } else {
-      // Remove monitors that are not in the new list
-      const newMonitorTags = body.monitors.map((m) => m.monitor_tag);
-      for (const currentMonitor of currentMonitors) {
-        if (!newMonitorTags.includes(currentMonitor.monitor_tag)) {
-          await db.removeIncidentMonitor(existingIncident.id, currentMonitor.monitor_tag);
-        }
-      }
-
-      // Add or update monitors from the new list
-      for (const monitor of body.monitors) {
-        await db.insertIncidentMonitorWithMerge({
-          incident_id: existingIncident.id,
-          monitor_tag: monitor.monitor_tag,
-          monitor_impact: monitor.impact || "DOWN",
-        });
-      }
+    }
+    for (const monitor of body.monitors) {
+      await AddIncidentMonitor(existingIncident.id, monitor.monitor_tag, monitor.impact || "DOWN");
     }
   }
 
@@ -206,26 +149,7 @@ export const DELETE: RequestHandler = async ({ locals }) => {
   // Incident is validated by middleware and available in locals
   const incident = locals.incident!;
 
-  // Set incident_id to null in monitor_alerts_v2
-  const alerts = await db.getAlertsByIncidentId(incident.id);
-  for (const alert of alerts) {
-    await db.updateMonitorAlertV2(alert.id, { incident_id: null });
-  }
-
-  // Delete incident monitors
-  const monitors = await db.getIncidentMonitorsByIncidentID(incident.id);
-  for (const monitor of monitors) {
-    await db.removeIncidentMonitor(incident.id, monitor.monitor_tag);
-  }
-
-  // Delete incident comments (hard delete by setting status to DELETED)
-  const comments = await db.getIncidentComments(incident.id);
-  for (const comment of comments) {
-    await db.updateIncidentCommentStatusByID(comment.id, "DELETED");
-  }
-
-  // Actually delete the incident from the database
-  await db.deleteIncident(incident.id);
+  await DeleteIncident(incident.id);
 
   const response: DeleteIncidentResponse = {
     message: `Incident with id '${incident.id}' deleted successfully`,

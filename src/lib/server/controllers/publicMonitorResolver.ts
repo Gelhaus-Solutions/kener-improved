@@ -80,6 +80,26 @@ export function isPubliclyVisible(monitor: Pick<MonitorRecord, "status" | "is_hi
 }
 
 /**
+ * `isPubliclyVisible`, widened for a reader who may see hidden monitors.
+ *
+ * Upstream's #697: a signed-in user whose role holds `monitors.read` sees hidden
+ * monitors on the status page, as the page route does with
+ * `canSeeHiddenMonitors`. The caller decides `canSeeHidden` with
+ * `CanSeeHiddenMonitors`, whose role lookup is org-scoped, so it never reaches
+ * another tenant. An INACTIVE monitor stays invisible to everyone.
+ *
+ * A second function rather than a second parameter on `isPubliclyVisible`,
+ * because that one is passed straight to `.filter()`, which would hand it the
+ * array index as the flag.
+ */
+export function isVisibleOnStatusPage(
+  monitor: Pick<MonitorRecord, "status" | "is_hidden">,
+  canSeeHidden: boolean,
+): boolean {
+  return canSeeHidden ? monitor.status === GC.ACTIVE : isPubliclyVisible(monitor);
+}
+
+/**
  * The monitor behind a public URL segment, but only if the public may see it.
  *
  * What every anonymous read surface should call. `ResolvePublicMonitor` is the
@@ -89,10 +109,13 @@ export function isPubliclyVisible(monitor: Pick<MonitorRecord, "status" | "is_hi
  * into its own function is what lets those two keep working while the public
  * surfaces get the check they were missing.
  */
-export async function ResolveVisiblePublicMonitor(nameInUrl: string): Promise<MonitorRecord | undefined> {
+export async function ResolveVisiblePublicMonitor(
+  nameInUrl: string,
+  canSeeHidden = false,
+): Promise<MonitorRecord | undefined> {
   const monitor = await ResolvePublicMonitor(nameInUrl);
   if (!monitor) return undefined;
-  return isPubliclyVisible(monitor) ? monitor : undefined;
+  return isVisibleOnStatusPage(monitor, canSeeHidden) ? monitor : undefined;
 }
 
 /**
@@ -103,9 +126,9 @@ export async function ResolveVisiblePublicMonitor(nameInUrl: string): Promise<Mo
  * only caller receives them from a page's own serialised data, where they are
  * already physical.
  */
-export async function GetVisiblePublicMonitorsByTags(tags: string[]): Promise<MonitorRecord[]> {
+export async function GetVisiblePublicMonitorsByTags(tags: string[], canSeeHidden = false): Promise<MonitorRecord[]> {
   if (tags.length === 0) return [];
-  return (await db.getMonitorsByTags(tags)).filter(isPubliclyVisible);
+  return (await db.getMonitorsByTags(tags)).filter((monitor) => isVisibleOnStatusPage(monitor, canSeeHidden));
 }
 
 /**
@@ -121,7 +144,10 @@ export async function GetVisiblePublicMonitorsByTags(tags: string[]): Promise<Mo
  * `ResolvePublicMonitor`. Both queries are org-scoped, so neither can reach
  * another tenant.
  */
-export async function ResolveVisiblePublicMonitors(namesInUrl: string[]): Promise<Map<string, MonitorRecord>> {
+export async function ResolveVisiblePublicMonitors(
+  namesInUrl: string[],
+  canSeeHidden = false,
+): Promise<Map<string, MonitorRecord>> {
   const resolved = new Map<string, MonitorRecord>();
   if (namesInUrl.length === 0) return resolved;
 
@@ -136,7 +162,7 @@ export async function ResolveVisiblePublicMonitors(namesInUrl: string[]): Promis
 
   for (const name of namesInUrl) {
     const monitor = bySlug.get(name) ?? byTag.get(name);
-    if (monitor && isPubliclyVisible(monitor)) resolved.set(name, monitor);
+    if (monitor && isVisibleOnStatusPage(monitor, canSeeHidden)) resolved.set(name, monitor);
   }
   return resolved;
 }

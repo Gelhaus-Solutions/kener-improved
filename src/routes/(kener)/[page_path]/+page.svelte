@@ -6,6 +6,7 @@
   import MonitorSloPanel from "$lib/components/MonitorSloPanel.svelte";
   import IncidentItem from "$lib/components/IncidentItem.svelte";
   import MaintenanceItem from "$lib/components/MaintenanceItem.svelte";
+  import NotificationsList from "$lib/components/NotificationsList.svelte";
   import mdToHTML from "$lib/marked.js";
   import clientResolver, { absoluteResolve } from "$lib/client/resolver.js";
   import { resolve } from "$app/paths";
@@ -25,6 +26,7 @@
   let endOfDayTodayAtTz = $derived(getEndOfDayAtTz($selectedTimezone));
 
   let showInlineEvents = $derived(data.eventDisplaySettings?.showInlineEvents === true);
+  let eventListPlacement = $derived(data.eventDisplaySettings?.eventListPlacement);
 </script>
 
 <svelte:head>
@@ -58,7 +60,7 @@
 
 <!-- page title -->
 <div class="flex flex-col gap-3 sm:gap-4">
-  <ThemePlus monitor_tags={data.monitorTags} hideNotificationsPopover={showInlineEvents} />
+  <ThemePlus monitor_tags={data.monitorTags} hideNotificationsPopover={eventListPlacement !== "button"} />
   <div class="flex flex-col gap-2 px-3 py-2 sm:px-4">
     {#if data.pageDetails?.page_logo}
       <img
@@ -84,51 +86,65 @@
       </Item.Content>
     </Item.Root>
   </div>
-  {#if !!data.monitorTags.length}
-    <LivePageStatusCard statusClass={data.pageStatus.statusClass} statusText={data.pageStatus.statusSummary} />
-    {#if showInlineEvents && data.ongoingIncidents && data.ongoingIncidents.length > 0}
-      <div class="flex flex-col gap-3">
-        {#each data.ongoingIncidents as incident, i (incident.id ?? i)}
-          <div class=" rounded-3xl border p-3 sm:p-4">
-            <IncidentItem {incident} />
+  <div class="grid grid-cols-1 gap-4 sm:grid-cols-16">
+    <div
+      class="col-span-1 flex flex-col gap-3 sm:gap-4 {eventListPlacement === 'aside'
+        ? 'sm:col-span-11'
+        : 'sm:col-span-16'}"
+    >
+      {#if !!data.monitorTags.length}
+        <LivePageStatusCard statusClass={data.pageStatus.statusClass} statusText={data.pageStatus.statusSummary} />
+        {#if showInlineEvents && data.ongoingIncidents && data.ongoingIncidents.length > 0}
+          <div class="flex flex-col gap-3">
+            {#each data.ongoingIncidents as incident, i (incident.id ?? i)}
+              <div class=" rounded-3xl border p-3 sm:p-4">
+                <IncidentItem {incident} />
+              </div>
+            {/each}
           </div>
-        {/each}
+        {/if}
+        {#if showInlineEvents && data.ongoingMaintenances && data.ongoingMaintenances.length > 0}
+          <div class="flex flex-col gap-3">
+            {#each data.ongoingMaintenances as maintenance, i (maintenance.id ?? i)}
+              <div class="rounded-3xl border p-3 sm:p-4">
+                <MaintenanceItem {maintenance} />
+              </div>
+            {/each}
+          </div>
+        {/if}
+        {#if showInlineEvents && data.upcomingMaintenances && data.upcomingMaintenances.length > 0}
+          <div class="flex flex-col gap-3">
+            {#each data.upcomingMaintenances as maintenance, i (maintenance.id ?? i)}
+              <div class="rounded-3xl border p-3 sm:p-4">
+                <MaintenanceItem {maintenance} />
+              </div>
+            {/each}
+          </div>
+        {/if}
+        <!-- F1a: page-scoped SLOs placed at the top of this page, plus any
+             page-scoped breach wherever it was placed, plus category-scoped
+             figures when this page draws no category sections to hang them on.
+             Mirrored in `(kener)/+page.svelte`: this page exists twice. -->
+        <MonitorSloPanel slos={data.pageSlos} heading={$t("Service Level Agreement")} />
+        <MonitorList
+          pagePath={data.pageDetails.page_path}
+          monitorTags={data.monitorTags}
+          monitorSlugsByTag={data.monitorSlugsByTag}
+          monitorCategoriesByTag={data.monitorCategoriesByTag}
+          monitorGroupMembersByTag={data.monitorGroupMembersByTag}
+          monitorGroupMemberDisplayByTag={data.monitorGroupMemberDisplayByTag}
+          monitorSlos={data.monitorSlos}
+          categorySlos={data.categorySlos}
+          {pageSettings}
+          {barCount}
+          {endOfDayTodayAtTz}
+        />
+      {/if}
+    </div>
+    {#if eventListPlacement === "aside"}
+      <div class="col-span-1 overflow-hidden rounded-3xl border sm:col-span-5">
+        <NotificationsList monitorTags={data.monitorTags} />
       </div>
     {/if}
-    {#if showInlineEvents && data.ongoingMaintenances && data.ongoingMaintenances.length > 0}
-      <div class="flex flex-col gap-3">
-        {#each data.ongoingMaintenances as maintenance, i (maintenance.id ?? i)}
-          <div class="rounded-3xl border p-3 sm:p-4">
-            <MaintenanceItem {maintenance} />
-          </div>
-        {/each}
-      </div>
-    {/if}
-    {#if showInlineEvents && data.upcomingMaintenances && data.upcomingMaintenances.length > 0}
-      <div class="flex flex-col gap-3">
-        {#each data.upcomingMaintenances as maintenance, i (maintenance.id ?? i)}
-          <div class="rounded-3xl border p-3 sm:p-4">
-            <MaintenanceItem {maintenance} />
-          </div>
-        {/each}
-      </div>
-    {/if}
-    <!-- F1a: page-scoped SLOs placed at the top of this page, plus any
-         page-scoped breach wherever it was placed, plus category-scoped figures
-         when this page draws no category sections to hang them on. Mirrored in
-         `(kener)/+page.svelte`: this page exists twice. -->
-    <MonitorSloPanel slos={data.pageSlos} heading={$t("Service Level Agreement")} />
-    <MonitorList
-      pagePath={data.pageDetails.page_path}
-      monitorTags={data.monitorTags}
-      monitorSlugsByTag={data.monitorSlugsByTag}
-      monitorCategoriesByTag={data.monitorCategoriesByTag}
-      monitorGroupMembersByTag={data.monitorGroupMembersByTag}
-      monitorSlos={data.monitorSlos}
-      categorySlos={data.categorySlos}
-      {pageSettings}
-      {barCount}
-      {endOfDayTodayAtTz}
-    />
-  {/if}
+  </div>
 </div>

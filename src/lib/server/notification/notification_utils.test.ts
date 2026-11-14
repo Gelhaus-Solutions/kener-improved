@@ -141,3 +141,20 @@ describe("maintenanceToVariables renders times unambiguously", () => {
     expect(seen.size).toBe(1);
   });
 });
+
+describe("maintenanceToVariables", () => {
+  it("flags the mail as a maintenance one, for templates that style by it", () => {
+    const event = {
+      id: 3,
+      maintenance_id: 5,
+      title: "Database upgrade",
+      description: "",
+      start_date_time: 1767225600,
+      end_date_time: 1767229200,
+    } as unknown as Parameters<typeof maintenanceToVariables>[0];
+
+    expect(maintenanceToVariables(event, "api", "has started", "start", "Maintenance Started").is_maintenance).toBe(
+      true,
+    );
+  });
+});

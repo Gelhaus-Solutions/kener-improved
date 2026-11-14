@@ -4,6 +4,7 @@ import { GetPageByPathWithMonitors, GetLatestMonitoringDataAllActive } from "./c
 import { GetMonitorsParsed } from "./monitorsController.js";
 import { getPageStatus, type LatestStatus, type PageStatus } from "../incidents/pageStatus.js";
 import { publicSloSurfacesFor, type PublicSlo } from "../services/sloPublic.js";
+import { ResolveGroupMemberDisplay } from "../../clientTools";
 
 import type {
   IncidentRecord,
@@ -15,7 +16,7 @@ import type {
   PageSettingsType,
   IncidentMonitorDetailRecord,
 } from "../types/db.js";
-import type { GroupMonitorTypeData } from "../types/monitor.js";
+import type { GroupMemberDisplay, GroupMonitorTypeData } from "../types/monitor.js";
 import GC from "../../global-constants.js";
 import type { LayoutServerData } from "./layoutController.js";
 import type { NotificationEvent } from "../../types/notifications.js";
@@ -166,8 +167,9 @@ export const GetIncidentCommentsByIncidentId = async (incident_id: number): Prom
  */
 export const GetAffectedMonitorsByIncidentId = async (
   incident_id: number,
+  includeHidden = false,
 ): Promise<Array<IncidentMonitorDetailRecord>> => {
-  return await db.getMonitorsByIncidentId(incident_id);
+  return await db.getMonitorsByIncidentId(incident_id, includeHidden);
 };
 
 // ============ Page Dashboard Data ============
@@ -241,6 +243,7 @@ export interface PageDashboardData {
   pageSlos: PublicSlo[];
   categorySlos: Record<string, PublicSlo[]>;
   monitorSlos: Record<string, PublicSlo[]>;
+  monitorGroupMemberDisplayByTag: Record<string, GroupMemberDisplay>;
   pageDetails: PageRecordTyped;
   socialPagePreviewImage?: string;
   metaPageTitle?: string;
@@ -348,8 +351,7 @@ export const GetPageDashboardData = async (
   pagePath: string,
   layoutData: LayoutServerData,
 ): Promise<PageDashboardData | null> => {
-  // Fetch page by path with monitors
-  const pageData = await GetPageByPathWithMonitors(pagePath);
+  const pageData = await GetPageByPathWithMonitors(pagePath, layoutData.canSeeHiddenMonitors);
   if (!pageData) {
     return null;
   }
@@ -421,6 +423,7 @@ export const GetPageDashboardData = async (
       monitorCategoriesByTag: {},
       monitorSlugsByTag: {},
       ...emptySurfaces,
+      monitorGroupMemberDisplayByTag: {},
       pageDetails: pageDetailsTyped,
       socialPagePreviewImage,
       metaPageTitle,
@@ -432,7 +435,11 @@ export const GetPageDashboardData = async (
   // Fetch all dashboard data in parallel (respecting feature toggles)
   const [latestData, parsedMonitors, ongoingIncidents, ongoingMaintenances, upcomingMaintenances] = await Promise.all([
     GetLatestMonitoringDataAllActive(monitorTags),
-    GetMonitorsParsed({ tags: monitorTags, status: "ACTIVE", is_hidden: "NO" }),
+    GetMonitorsParsed({
+      tags: monitorTags,
+      status: "ACTIVE",
+      is_hidden: layoutData.canSeeHiddenMonitors ? undefined : "NO",
+    }),
     showInlineEvents && eventSettings.incidents.enabled && eventSettings.incidents.ongoing.show
       ? GetOngoingIncidentsForMonitorList(monitorTags)
       : Promise.resolve([] as IncidentForMonitorListWithComments[]),
@@ -465,6 +472,7 @@ export const GetPageDashboardData = async (
     monitorCategoriesByTag[monitor.tag] = category.length > 0 ? category : null;
     monitorSlugsByTag[monitor.tag] = monitor.slug || monitor.tag;
   }
+  const monitorGroupMemberDisplayByTag: Record<string, GroupMemberDisplay> = {};
 
   for (const monitor of parsedMonitors) {
     if (monitor.monitor_type !== "GROUP") continue;
@@ -473,6 +481,7 @@ export const GetPageDashboardData = async (
     if (!groupData?.monitors || !Array.isArray(groupData.monitors)) continue;
 
     monitorGroupMembersByTag[monitor.tag] = groupData.monitors.map((member) => member.tag);
+    monitorGroupMemberDisplayByTag[monitor.tag] = ResolveGroupMemberDisplay(groupData.memberDisplay);
   }
 
   // F1a. Published SLO figures, bucketed by the surface they were placed on.
@@ -502,6 +511,7 @@ export const GetPageDashboardData = async (
     monitorCategoriesByTag,
     monitorSlugsByTag,
     ...sloSurfaces,
+    monitorGroupMemberDisplayByTag,
     pageDetails: pageDetailsTyped,
     socialPagePreviewImage,
     metaPageTitle,

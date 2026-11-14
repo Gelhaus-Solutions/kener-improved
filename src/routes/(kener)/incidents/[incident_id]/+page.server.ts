@@ -7,7 +7,7 @@ import {
 } from "$lib/server/controllers/dashboardController.js";
 import { GetPublishedPostmortem } from "$lib/server/incidents/postmortem.js";
 
-export const load: PageServerLoad = async ({ params }) => {
+export const load: PageServerLoad = async ({ params, parent }) => {
   const { incident_id } = params;
   const incidentIdNum = Number(incident_id);
   if (isNaN(incidentIdNum)) {
@@ -23,7 +23,8 @@ export const load: PageServerLoad = async ({ params }) => {
   const comments = await GetIncidentCommentsByIncidentId(incidentIdNum);
 
   // Fetch affected monitors
-  const affectedMonitors = await GetAffectedMonitorsByIncidentId(incidentIdNum);
+  const { canSeeHiddenMonitors } = await parent();
+  const affectedMonitors = await GetAffectedMonitorsByIncidentId(incidentIdNum, canSeeHiddenMonitors);
 
   // C1. `GetPublishedPostmortem` rather than the draft-inclusive reader, and the
   // two are separate functions rather than one with a flag precisely so that this

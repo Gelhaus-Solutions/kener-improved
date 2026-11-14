@@ -9,7 +9,7 @@ import db from "$lib/server/db/db";
 import { GetVisiblePublicMonitorsByTags } from "$lib/server/controllers/publicMonitorResolver";
 import type { MaintenanceEventRecord } from "$lib/server/db/dbimpl";
 
-export const load: PageServerLoad = async ({ params, url }) => {
+export const load: PageServerLoad = async ({ params, url, parent }) => {
   const { maintenance_id } = params;
   let idType = "event";
 
@@ -70,8 +70,10 @@ export const load: PageServerLoad = async ({ params, url }) => {
     // KENER-126: this filtered hidden monitors but not inactive ones, which is a
     // third hand-rolled spelling of a rule that now has one definition. Folding
     // it in also stops a deactivated monitor being listed as affected by an
-    // upcoming maintenance, which it no longer is.
-    const monitors = await GetVisiblePublicMonitorsByTags(monitorTags);
+    // upcoming maintenance, which it no longer is. Hidden monitors stay for a
+    // reader whose role has monitors.read (upstream #697).
+    const { canSeeHiddenMonitors } = await parent();
+    const monitors = await GetVisiblePublicMonitorsByTags(monitorTags, canSeeHiddenMonitors);
     affectedMonitors = monitors.map((m) => ({
       monitor_tag: m.tag,
       monitor_slug: m.slug || m.tag,
@@ -81,9 +83,10 @@ export const load: PageServerLoad = async ({ params, url }) => {
     }));
   }
 
+  const visibleTags = new Set(affectedMonitors.map((m) => m.monitor_tag));
   return {
     ...{
-      maintenance,
+      maintenance: { ...maintenance, monitors: maintenance.monitors?.filter((m) => visibleTags.has(m.monitor_tag)) },
       maintenanceEvent, // The specific event that was clicked
       affectedMonitors,
     },

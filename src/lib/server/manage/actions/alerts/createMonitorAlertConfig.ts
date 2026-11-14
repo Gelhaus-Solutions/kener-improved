@@ -1,4 +1,5 @@
 import { CreateMonitorAlertConfig } from "$lib/server/controllers/monitorAlertConfigController.js";
+import { MaskAlertConfigTriggerSecrets } from "$lib/server/controllers/triggerController.js";
 import type { ActionDefinition, LegacyPayload } from "../../types.js";
 
 /**
@@ -9,7 +10,7 @@ export default {
   handler: async (data: LegacyPayload) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let resp: any;
-    resp = await CreateMonitorAlertConfig(data);
+    resp = MaskAlertConfigTriggerSecrets(await CreateMonitorAlertConfig(data));
     return resp;
   },
 } satisfies ActionDefinition<LegacyPayload>;

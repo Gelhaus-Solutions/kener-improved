@@ -1,4 +1,5 @@
 import { GetMonitorAlertConfigsPaginated } from "$lib/server/controllers/monitorAlertConfigController.js";
+import { MaskAlertConfigTriggerSecrets } from "$lib/server/controllers/triggerController.js";
 import type { ActionDefinition, LegacyPayload } from "../../types.js";
 
 /**
@@ -16,7 +17,12 @@ export default {
     if (data.monitor_tag) filter.monitor_tag = data.monitor_tag;
     if (data.is_active) filter.is_active = data.is_active as "YES" | "NO";
     if (data.alert_for) filter.alert_for = data.alert_for as "STATUS" | "LATENCY" | "UPTIME";
-    resp = await GetMonitorAlertConfigsPaginated(page, limit, Object.keys(filter).length > 0 ? filter : undefined);
+    const result = await GetMonitorAlertConfigsPaginated(
+      page,
+      limit,
+      Object.keys(filter).length > 0 ? filter : undefined,
+    );
+    resp = { ...result, configs: result.configs.map(MaskAlertConfigTriggerSecrets) };
     return resp;
   },
 } satisfies ActionDefinition<LegacyPayload>;

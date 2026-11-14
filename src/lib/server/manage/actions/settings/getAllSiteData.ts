@@ -1,4 +1,4 @@
-import { GetAllSiteData } from "$lib/server/controllers/controller.js";
+import { GetAllSiteData, MaskSiteDataSecret } from "$lib/server/controllers/controller.js";
 import type { ActionDefinition } from "../../types.js";
 
 /**
@@ -9,5 +9,9 @@ import type { ActionDefinition } from "../../types.js";
  */
 export default {
   action: "getAllSiteData",
-  handler: async () => await GetAllSiteData(),
+  // Upstream 66946f31: a stored secret never leaves the server unmasked.
+  handler: async () =>
+    Object.fromEntries(
+      Object.entries(await GetAllSiteData()).map(([key, value]) => [key, MaskSiteDataSecret(key, value)]),
+    ),
 } satisfies ActionDefinition;

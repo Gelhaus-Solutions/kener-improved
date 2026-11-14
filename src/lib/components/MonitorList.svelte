@@ -11,6 +11,7 @@
   import type { MonitorBarResponse } from "$lib/server/api-server/monitor-bar/get";
   import type { PageMonitorLayoutStyle } from "$lib/types/api";
   import type { PageSettingsType } from "$lib/server/types/db";
+  import type { GroupMemberDisplay } from "$lib/server/types/monitor";
   import type { StatusType } from "$lib/types/status";
   import { t } from "$lib/stores/i18n";
   import { liveStatus } from "$lib/client/liveStatus.svelte";
@@ -43,6 +44,8 @@
     /** Each monitor's per-org public name, keyed by its physical tag (I3e). */
     monitorSlugsByTag?: Record<string, string>;
     monitorGroupMembersByTag: Record<string, string[]>;
+    /** How each GROUP monitor shows its members, keyed by physical tag. */
+    monitorGroupMemberDisplayByTag?: Record<string, GroupMemberDisplay>;
     pageSettings: PageSettingsType | null;
     barCount: number;
     endOfDayTodayAtTz: number;
@@ -64,6 +67,7 @@
     monitorCategoriesByTag,
     monitorSlugsByTag,
     monitorGroupMembersByTag,
+    monitorGroupMemberDisplayByTag = {},
     pageSettings,
     barCount,
     endOfDayTodayAtTz,
@@ -276,6 +280,7 @@
           days={barCount}
           {endOfDayTodayAtTz}
           groupChildTags={monitorGroupMembersByTag?.[tag] || []}
+          groupMemberDisplay={monitorGroupMemberDisplayByTag[tag]}
           compact={isCompact}
           grid={isGrid}
         />
