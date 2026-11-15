@@ -6,6 +6,14 @@ const { db } = vi.hoisted(() => ({
 vi.mock("../db/db.js", () => ({ default: db }));
 
 import { HasRequiredEnv, InsertKeyValue, MaskSiteDataSecret } from "./siteDataController.js";
+import { open } from "../crypto/secretBox.js";
+import { OIDC_SECRET_PURPOSE } from "./oidcController.js";
+
+/** The fork stores the OIDC client secret sealed; these compare what it opens to. */
+const opened = (value: Record<string, unknown>) =>
+  typeof value.client_secret === "string" && value.client_secret !== ""
+    ? { ...value, client_secret: open(value.client_secret, OIDC_SECRET_PURPOSE) }
+    : value;
 
 describe("HasRequiredEnv", () => {
   it("treats an empty KENER_SECRET_KEY as missing", () => {
@@ -71,7 +79,7 @@ describe("InsertKeyValue", () => {
   it("keeps the stored OIDC secret when the save leaves it out", async () => {
     stored("oidcSettings", { client_id: "id", client_secret: "real-secret" });
     await InsertKeyValue("oidcSettings", JSON.stringify({ client_id: "new-id" }));
-    expect(written()).toEqual({ client_id: "new-id", client_secret: "real-secret" });
+    expect(opened(written())).toEqual({ client_id: "new-id", client_secret: "real-secret" });
   });
 
   it.each([
@@ -94,7 +102,7 @@ describe("InsertKeyValue", () => {
     stored("oidcSettings", { client_secret: "real-secret" });
     await InsertKeyValue("oidcSettings", JSON.stringify({ client_secret: "rotated" }));
     await InsertKeyValue("oidcSettings", JSON.stringify({ client_secret: "" }));
-    expect(written()).toEqual({ client_secret: "rotated" });
+    expect(opened(written())).toEqual({ client_secret: "rotated" });
     expect(JSON.parse(db.insertOrUpdateSiteData.mock.calls[1][1])).toEqual({ client_secret: "" });
   });
 });
