@@ -1936,7 +1936,8 @@
               "GAMEDIG",
               "GRPC",
               "PROMETHEUS",
-              "DOCKER"
+              "DOCKER",
+              "MULTI_REGION"
             ]
           },
           "type_data": {
@@ -2048,7 +2049,8 @@
               "GAMEDIG",
               "GRPC",
               "PROMETHEUS",
-              "DOCKER"
+              "DOCKER",
+              "MULTI_REGION"
             ]
           },
           "type_data": {
