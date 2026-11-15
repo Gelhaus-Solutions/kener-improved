@@ -184,7 +184,14 @@ describe("monitor save: heartbeat secret", () => {
 });
 
 describe("mergeLatestMonitoringWithSslCache", () => {
-  const dbRow: MonitoringData = { monitor_tag: "ssl", timestamp: 100, status: "UP", latency: 42, type: "REALTIME" };
+  const dbRow: MonitoringData = {
+    monitor_tag: "ssl",
+    timestamp: 100,
+    region_id: 0,
+    status: "UP",
+    latency: 42,
+    type: "REALTIME"
+  };
   const sslFields = {
     expiry_at: "2030-01-01T00:00:00.000Z",
     issuer_cn: "R3",

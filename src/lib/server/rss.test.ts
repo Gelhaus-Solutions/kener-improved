@@ -84,7 +84,13 @@ describe("/rss.xml with forceExclusivity off", () => {
   });
 
   it("lists every incident, with or without visible monitors", async () => {
-    const api = { monitor_tag: "api", monitor_impact: "DOWN", monitor_name: "API", monitor_image: null };
+    const api = {
+      monitor_tag: "api",
+      monitor_slug: "api",
+      monitor_impact: "DOWN",
+      monitor_name: "API",
+      monitor_image: null
+    };
     const xml = await rootFeed([incident({ id: 3, monitors: [api] }), incident({ id: 4, monitors: [] })], []);
     expect(itemFor(xml, "incident-3")).toContain("Affected: API");
     expect(itemFor(xml, "incident-4")).not.toContain("Affected:");
