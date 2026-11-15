@@ -16,7 +16,10 @@ const base = process.env.KENER_BASE_PATH || "";
 async function start() {
   // Dynamic import so BODY_SIZE_LIMIT from .env is available
   // before the handler reads it at module top-level
-  const { handler } = await import("../build/handler.js");
+  // Through a variable: tsc would resolve adapter-node's output, which a checkout has only after a
+  // build, so `npm run check` failed before one.
+  const handlerModule = "../build/handler.js";
+  const { handler } = await import(handlerModule);
 
   const app: any = express();
   const db = knex(knexOb);
