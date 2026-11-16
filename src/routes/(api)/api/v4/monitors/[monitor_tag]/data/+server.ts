@@ -10,8 +10,7 @@ import type {
 import GC from "$lib/global-constants";
 import { MAX_MANUAL_UPDATE_WINDOW_SECONDS, UpdateMonitoringData } from "$lib/server/controllers/monitorsController";
 import { GetMinuteStartTimestampUTC } from "$lib/server/tool";
-import { SetLastMonitoringValue } from "$lib/server/cache/setGet";
-import alertingQueue from "$lib/server/queues/alertingQueue";
+import { readRequestBody } from "$lib/server/requestBody";
 
 export const GET: RequestHandler = async ({ locals, url }) => {
   // Monitor is validated by middleware and available in locals
@@ -77,40 +76,11 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
   const monitor = locals.monitor!;
   const monitorTag = monitor.tag;
 
-  let body: UpdateMonitoringDataRangeRequest;
-
-  try {
-    body = await request.json();
-  } catch {
-    const errorResponse: BadRequestResponse = {
-      error: {
-        code: "BAD_REQUEST",
-        message: "Invalid JSON body",
-      },
-    };
-    return json(errorResponse, { status: 400 });
-  }
-
-  // Validate required fields
-  if (body.start_ts === undefined || body.end_ts === undefined) {
-    const errorResponse: BadRequestResponse = {
-      error: {
-        code: "BAD_REQUEST",
-        message: "start_ts and end_ts are required",
-      },
-    };
-    return json(errorResponse, { status: 400 });
-  }
-
-  if (typeof body.start_ts !== "number" || typeof body.end_ts !== "number") {
-    const errorResponse: BadRequestResponse = {
-      error: {
-        code: "BAD_REQUEST",
-        message: "start_ts and end_ts must be numbers (UTC timestamps in seconds)",
-      },
-    };
-    return json(errorResponse, { status: 400 });
-  }
+  const body = await readRequestBody<UpdateMonitoringDataRangeRequest>(
+    request,
+    "PATCH /api/v4/monitors/{monitor_tag}/data",
+  );
+  if (body instanceof Response) return body;
 
   if (body.start_ts >= body.end_ts) {
     const errorResponse: BadRequestResponse = {
@@ -122,6 +92,7 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
     return json(errorResponse, { status: 400 });
   }
 
+<<<<<<< HEAD
   // KENER-121 capped the window in the controller, which every caller now shares.
   // Checked here as well so this endpoint answers with its own 400 shape rather
   // than letting the controller's throw surface as a 500: the rest of this
@@ -148,6 +119,9 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
   }
 
   if (body.latency === undefined || typeof body.latency !== "number" || body.latency < 0) {
+=======
+  if (body.latency < 0) {
+>>>>>>> 4079600afe3f6da59b17879df918a79932f30404
     const errorResponse: BadRequestResponse = {
       error: {
         code: "BAD_REQUEST",
@@ -158,7 +132,7 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
   }
 
   const deviation = body.deviation ?? 0;
-  if (typeof deviation !== "number" || deviation < 0) {
+  if (deviation < 0) {
     const errorResponse: BadRequestResponse = {
       error: {
         code: "BAD_REQUEST",
@@ -168,7 +142,6 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
     return json(errorResponse, { status: 400 });
   }
 
-  // Use the existing UpdateMonitoringData function
   await UpdateMonitoringData({
     monitor_tag: monitorTag,
     start: body.start_ts,
@@ -178,24 +151,6 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
     latency: body.latency,
     deviation: deviation,
   });
-
-  // Update the cache so group monitors (and other cache consumers) see the latest status
-  const latestData = await db.getLatestMonitoringData(monitorTag);
-  if (latestData) {
-    await SetLastMonitoringValue(monitorTag, latestData);
-  }
-
-  // MANUAL samples are alert-visible (docs/adr/0005), so re-evaluate alerts once for the
-  // last written sample — for NONE monitors nothing else would ever trigger evaluation.
-  // UpdateMonitoringData floors both bounds to minute starts and writes through the floored
-  // end inclusive, so the last stored row is always at GetMinuteStartTimestampUTC(end_ts).
-  // Best-effort: the rows are already committed; a queue outage must not fail the request.
-  const lastWrittenTs = GetMinuteStartTimestampUTC(body.end_ts);
-  try {
-    await alertingQueue.push(monitorTag, lastWrittenTs, body.status);
-  } catch (err) {
-    console.error(`Failed to enqueue alert evaluation for ${monitorTag} after MANUAL data write:`, err);
-  }
 
   // Calculate the number of data points that will be returned by GET
   // GET uses: timestamp >= start_ts AND timestamp < end_ts

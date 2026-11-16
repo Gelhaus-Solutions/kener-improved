@@ -1,5 +1,12 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { buildBaseURL, buildRequestConfig, containerDisplayName, DockerError, resolveConnection } from "./docker";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  buildBaseURL,
+  buildRequestConfig,
+  containerDisplayName,
+  dockerDefaultsFromEnv,
+  DockerError,
+  resolveConnection,
+} from "./docker";
 import type { DockerConnection } from "./docker";
 
 function connection(daemon: string, connectionType: DockerConnection["connectionType"] = "tcp"): DockerConnection {
@@ -108,6 +115,48 @@ describe("resolveConnection", () => {
   });
 });
 
+describe("dockerDefaultsFromEnv", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const LOCAL_SOCKET = { connectionType: "socket", daemon: "/var/run/docker.sock" };
+
+  it.each([
+    [{}, LOCAL_SOCKET],
+    [{ DOCKER_HOST: "  " }, LOCAL_SOCKET],
+    [{ DOCKER_HOST: "unix:///var/run/docker.sock" }, LOCAL_SOCKET],
+    [{ DOCKER_HOST: "unix://" }, LOCAL_SOCKET],
+    [{ DOCKER_HOST: "unix:///run/proxy/docker.sock" }, { connectionType: "socket", daemon: "/run/proxy/docker.sock" }],
+    [{ DOCKER_HOST: "tcp://localhost:2375" }, { connectionType: "tcp", daemon: "localhost:2375" }],
+    [{ DOCKER_HOST: " TCP://socket-proxy:2375/ " }, { connectionType: "tcp", daemon: "socket-proxy:2375" }],
+    [
+      { DOCKER_HOST: "tcp://socket-proxy", DOCKER_TLS_VERIFY: "" },
+      { connectionType: "tcp", daemon: "socket-proxy" },
+    ],
+    [
+      { DOCKER_HOST: "tcp://docker.example.com:2376", DOCKER_TLS_VERIFY: "1" },
+      { connectionType: "tls", daemon: "docker.example.com:2376" },
+    ],
+    [
+      { DOCKER_HOST: "tcp://docker.example.com:2376", DOCKER_TLS: "1" },
+      { connectionType: "tls", daemon: "docker.example.com:2376" },
+    ],
+  ])("reads %j", (env, expected) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(dockerDefaultsFromEnv(env)).toEqual(expected);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it.each(["ssh://me@docker.example.com", "npipe:////./pipe/docker_engine", "tcp://", "localhost:2375"])(
+    "warns and falls back to the local socket for %s",
+    (host) => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      expect(dockerDefaultsFromEnv({ DOCKER_HOST: host, DOCKER_TLS_VERIFY: "1" })).toEqual(LOCAL_SOCKET);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toContain(host);
+    },
+  );
+});
+
 describe("buildRequestConfig", () => {
   it("uses socketPath for socket connections", () => {
     const config = buildRequestConfig(connection("/var/run/docker.sock", "socket"), "/_ping", 1000);
@@ -133,15 +182,13 @@ describe("buildRequestConfig", () => {
   });
 
   it("carries no TLS material for plain tcp, and honours the env proxy on both connection types", () => {
-    // Every axios call site opts out of axios's own env-proxy handling (plaintext, no CONNECT)
-    // and lets Node agents tunnel via proxyEnv; daemons use the process env only.
     const tcp = buildRequestConfig(connection("h"), "/_ping", 1000);
-    expect(tcp.proxy).toBe(false);
+    expect(tcp).not.toHaveProperty("proxy");
     expect(tcp.httpAgent.options.proxyEnv).toBe(process.env);
     expect(tcp.httpsAgent.options.ca).toBeUndefined();
     expect(tcp.httpsAgent.options.cert).toBeUndefined();
     const tls = buildRequestConfig(connection("h", "tls"), "/_ping", 1000);
-    expect(tls.proxy).toBe(false);
+    expect(tls).not.toHaveProperty("proxy");
     expect(tls.httpsAgent.options.proxyEnv).toBe(process.env);
   });
 });
