@@ -1,0 +1,41 @@
+name: Probe image
+
+on:
+  pull_request:
+    paths:
+      - "probe/**"
+      - "src/lib/server/services/**"
+      - "scripts/cheerio-guest.js"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/probe-image.yml"
+
+jobs:
+  build:
+    name: Build the probe image and run a custom eval's sandbox in it
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
+
+      - run: docker build -f probe/Dockerfile -t kener-probe .
+
+      - name: The cheerio guest is baked in
+        run: docker run --rm --entrypoint sh kener-probe -c '! grep -q __CHEERIO_GUEST__ probe.js'
+
+      - name: QuickJS loads beside the bundle, as the sandbox process loads it
+        run: |
+          docker run --rm --entrypoint node kener-probe -e '
+            const load = require("node:module").createRequire("file:///app/probe.js");
+            const { newQuickJSWASMModuleFromVariant } = load("quickjs-emscripten-core");
+            const variant = load("@jitl/quickjs-wasmfile-release-sync");
+            newQuickJSWASMModuleFromVariant(variant.default ?? variant).then((quickjs) => {
+              const context = quickjs.newContext();
+              const value = context.dump(context.unwrapResult(context.evalCode("6 * 7")));
+              if (value !== 42) throw new Error(`QuickJS answered ${value}`);
+              console.log("QuickJS answered 42");
+            });
+          '
