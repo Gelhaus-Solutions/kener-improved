@@ -24,6 +24,7 @@ RUN npm ci --ignore-scripts
 # migrations, seeds and the SvelteKit app into a layer that is thrown away.
 COPY knexfile.ts ./
 COPY src/lib ./src/lib
+COPY scripts/cheerio-guest.js ./scripts/cheerio-guest.js
 COPY probe ./probe
 
 RUN node probe/build.js
@@ -38,8 +39,13 @@ RUN apk add --no-cache iputils
 
 WORKDIR /app
 
-# The bundle and nothing else: no node_modules, no package.json, no source.
+# The bundle, plus the QuickJS packages a custom eval's sandbox process loads
+# with require at run time (they ship a .wasm, so they cannot be bundled). No
+# package.json and no source.
 COPY --from=build /repo/probe/dist/probe.js ./probe.js
+COPY --from=build /repo/node_modules/quickjs-emscripten-core ./node_modules/quickjs-emscripten-core
+COPY --from=build /repo/node_modules/@jitl/quickjs-ffi-types ./node_modules/@jitl/quickjs-ffi-types
+COPY --from=build /repo/node_modules/@jitl/quickjs-wasmfile-release-sync ./node_modules/@jitl/quickjs-wasmfile-release-sync
 
 # Not root. The probe opens outbound sockets and needs no privilege beyond that.
 USER node

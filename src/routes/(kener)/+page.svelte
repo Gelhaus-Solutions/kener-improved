@@ -26,6 +26,7 @@
   let endOfDayTodayAtTz = $derived(getEndOfDayAtTz($selectedTimezone));
 
   let showInlineEvents = $derived(data.eventDisplaySettings?.showInlineEvents === true);
+  let eventListPlacement = $derived(data.eventDisplaySettings?.eventListPlacement);
 </script>
 
 <svelte:head>
@@ -59,7 +60,7 @@
 
 <!-- page title -->
 <div class="flex flex-col gap-3 sm:gap-4">
-  <ThemePlus monitor_tags={data.monitorTags} hideNotificationsPopover={!!showInlineEvents} />
+  <ThemePlus monitor_tags={data.monitorTags} hideNotificationsPopover={eventListPlacement !== "button"} />
   <div class="flex flex-col gap-2 px-3 py-2 sm:px-4">
     {#if data.pageDetails?.page_logo}
       <img
@@ -86,7 +87,11 @@
     </Item.Root>
   </div>
   <div class="grid grid-cols-1 gap-4 sm:grid-cols-16">
-    <div class="col-span-1 flex flex-col gap-3 sm:gap-4 {!showInlineEvents ? 'sm:col-span-16' : 'sm:col-span-11'}">
+    <div
+      class="col-span-1 flex flex-col gap-3 sm:gap-4 {eventListPlacement === 'aside'
+        ? 'sm:col-span-11'
+        : 'sm:col-span-16'}"
+    >
       {#if !!data.monitorTags.length}
         <LivePageStatusCard statusClass={data.pageStatus.statusClass} statusText={data.pageStatus.statusSummary} />
         {#if showInlineEvents && data.ongoingIncidents && data.ongoingIncidents.length > 0}
@@ -127,6 +132,7 @@
           monitorSlugsByTag={data.monitorSlugsByTag}
           monitorCategoriesByTag={data.monitorCategoriesByTag}
           monitorGroupMembersByTag={data.monitorGroupMembersByTag}
+          monitorGroupMemberDisplayByTag={data.monitorGroupMemberDisplayByTag}
           monitorSlos={data.monitorSlos}
           categorySlos={data.categorySlos}
           {pageSettings}
@@ -135,8 +141,7 @@
         />
       {/if}
     </div>
-    {#if !!showInlineEvents}
-      <!-- Notification List -->
+    {#if eventListPlacement === "aside"}
       <div class="col-span-1 overflow-hidden rounded-3xl border sm:col-span-5">
         <NotificationsList monitorTags={data.monitorTags} />
       </div>

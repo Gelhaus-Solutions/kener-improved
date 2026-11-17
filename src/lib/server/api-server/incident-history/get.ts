@@ -71,7 +71,7 @@ export default async function get(req: APIServerRequest): Promise<Response> {
     if (!page) return error(404, { message: "Page not found" });
     // Excludes hidden and inactive monitors, which is what makes this the
     // page's *public* component list rather than its configured one.
-    const monitors = await db.getPageMonitorsExcludeHidden(page.id);
+    const monitors = await db.getActivePageMonitors(page.id);
     monitorTags = monitors.map((m) => m.monitor_tag);
   }
 

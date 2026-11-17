@@ -1,4 +1,4 @@
-import { GetAllTriggers } from "$lib/server/controllers/controller.js";
+import { GetAllTriggers, MaskTriggerSecrets } from "$lib/server/controllers/controller.js";
 import type { ActionDefinition, LegacyPayload } from "../../types.js";
 
 /**
@@ -9,7 +9,7 @@ export default {
   handler: async (data: LegacyPayload) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let resp: any;
-    resp = await GetAllTriggers(data);
+    resp = (await GetAllTriggers(data)).map(MaskTriggerSecrets);
     return resp;
   },
 } satisfies ActionDefinition<LegacyPayload>;

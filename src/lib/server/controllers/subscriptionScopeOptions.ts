@@ -43,14 +43,14 @@ export async function GetScopeOptionsForPage(pagePath?: string): Promise<ScopeOp
   // Excludes hidden and inactive monitors, the same rule every other public
   // surface applies (KENER-126). Offering a subscription to a monitor the
   // visitor cannot see would name it on a public screen.
-  const pageMonitors = await db.getPageMonitorsExcludeHidden(page.id);
+  const pageMonitors = await db.getActivePageMonitors(page.id);
   const tags = pageMonitors.map((m) => m.monitor_tag);
   const monitors = tags.length > 0 ? await db.getMonitorsByTags(tags) : [];
   const nameByTag = new Map(monitors.filter(isPubliclyVisible).map((m) => [m.tag, m.name]));
 
   return {
     page: { id: page.id, title: page.page_title },
-    // Ordered by the page's own ordering, which `getPageMonitorsExcludeHidden`
+    // Ordered by the page's own ordering, which `getActivePageMonitors`
     // already applies, so the picker reads in the same order as the page.
     components: tags.filter((tag) => nameByTag.has(tag)).map((tag) => ({ tag, name: nameByTag.get(tag) as string })),
   };

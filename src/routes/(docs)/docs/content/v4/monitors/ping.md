@@ -43,11 +43,13 @@ Return object:
 { status: "UP" | "DEGRADED" | "DOWN" | "MAINTENANCE", latency: number }
 ```
 
+Eval code runs in a [sandbox](/docs/v4/monitors/overview#eval-sandbox).
+
 ## Example {#example}
 
 ```json
 {
-    "type": "PING",
+    "monitor_type": "PING",
     "type_data": {
         "hosts": [{ "type": "IP4", "host": "8.8.8.8", "timeout": 1000, "count": 3 }]
     }

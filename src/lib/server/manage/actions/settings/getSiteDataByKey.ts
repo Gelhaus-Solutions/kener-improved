@@ -1,4 +1,4 @@
-import { GetSiteDataByKey } from "$lib/server/controllers/controller.js";
+import { GetSiteDataByKey, MaskSiteDataSecret } from "$lib/server/controllers/controller.js";
 import type { ActionDefinition, LegacyPayload } from "../../types.js";
 
 /**
@@ -17,7 +17,7 @@ export default {
     if (!!!siteData) {
       throw new Error("Site data not found for the given key");
     }
-    resp = siteData;
+    resp = MaskSiteDataSecret(key, siteData);
     return resp;
   },
 } satisfies ActionDefinition<LegacyPayload>;

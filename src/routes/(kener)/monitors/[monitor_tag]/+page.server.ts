@@ -10,14 +10,14 @@ import {
 } from "$lib/server/controllers/dashboardController.js";
 import { GetNowTimestampUTC, UptimeCalculator } from "$lib/server/tool";
 import GC from "$lib/global-constants.js";
-import { ParseLatency } from "$lib/clientTools";
+import { ParseLatency, ResolveGroupMemberDisplay, ResolveSslExpiresAtMs } from "$lib/clientTools";
 import { componentImpactSummary, componentImpactTextClass } from "$lib/server/incidents/pageStatus";
 import { getMonitorDependencyView } from "$lib/server/incidents/dependencyView";
-import { GetMonitorsParsed } from "$lib/server/controllers/monitorsController";
+import { AttachSslCacheFields, GetMonitorsParsed } from "$lib/server/controllers/monitorsController";
 import { ResolvePublicMonitorTag } from "$lib/server/controllers/publicMonitorResolver";
 import { publishedSlosFor } from "$lib/server/services/sloPublic";
 import { regionMapForMonitor } from "$lib/server/regions/mapData";
-import type { GroupMonitorTypeData } from "$lib/server/types/monitor";
+import type { GroupMemberDisplay, GroupMonitorTypeData } from "$lib/server/types/monitor";
 import type { MonitorSettings } from "$lib/server/types/db";
 
 export const load: PageServerLoad = async ({ params, parent }) => {
@@ -26,18 +26,11 @@ export const load: PageServerLoad = async ({ params, parent }) => {
   // I3e: the URL carries the monitor's per-org slug. Identical to the tag for
   // the default org, so existing links are unaffected.
   const resolvedTag = (await ResolvePublicMonitorTag(monitor_tag)) ?? monitor_tag;
-  // Validate monitor exists
-  const monitors = await GetMonitorsParsed({ tag: resolvedTag, status: "ACTIVE", is_hidden: "NO" });
-  if (!monitors || monitors.length === 0) {
-    throw error(404, { message: "Monitor not found" });
-  }
+  // Hidden monitors only for a reader whose role has monitors.read (upstream #697).
+  const is_hidden = parentData.canSeeHiddenMonitors ? undefined : "NO";
+  const monitors = await GetMonitorsParsed({ tag: resolvedTag, status: "ACTIVE", is_hidden });
   const monitor = monitors[0];
   if (!monitor) {
-    throw error(404, { message: "Monitor not found" });
-  }
-
-  // Check if monitor is hidden
-  if (monitor.is_hidden === "YES") {
     throw error(404, { message: "Monitor not found" });
   }
 
@@ -95,6 +88,7 @@ export const load: PageServerLoad = async ({ params, parent }) => {
   const lastStatus = await db.getLatestMonitoringData(monitor.tag);
   const lastSampleTimestamp = lastStatus ? lastStatus.timestamp : nowSeconds;
   const lastSampleLatency = lastStatus?.latency ?? 0;
+  const sslStatus = monitor.monitor_type === "SSL" ? await AttachSslCacheFields(lastStatus) : null;
 
   // The status, however, is derived exactly as the status page derives it:
   // declared incidents and maintenances first, then C3's dependency rollup.
@@ -106,19 +100,22 @@ export const load: PageServerLoad = async ({ params, parent }) => {
   //get status summary
   let extendedTags: string[] = [];
   let monitorGroupMembersByTag: Record<string, string[]> = {};
+  let groupMemberDisplay: GroupMemberDisplay | undefined;
   if (monitor.monitor_type === "GROUP") {
     const groupData = monitor.type_data as GroupMonitorTypeData;
     const memberTags = groupData.monitors.map((m) => m.tag);
     extendedTags = extendedTags.concat(memberTags);
+    groupMemberDisplay = ResolveGroupMemberDisplay(groupData.memberDisplay);
   }
 
   if (extendedTags.length > 0) {
-    const parsedExtendedMonitors = await GetMonitorsParsed({ tags: extendedTags, status: "ACTIVE", is_hidden: "NO" });
+    const parsedExtendedMonitors = await GetMonitorsParsed({ tags: extendedTags, status: "ACTIVE", is_hidden });
     // KENER-126: this list is serialised into the page and the browser then asks
     // the bar endpoint for each tag in it. Taken straight from `type_data` it
     // published the tag of any hidden or inactive group member, which is how a
     // monitor an operator hid became reachable. Narrowed to the members that
-    // survived the query above, which already applies the visibility filter.
+    // survived the query above, which already applies the visibility filter
+    // (hidden members stay for a reader whose role has monitors.read).
     //
     // A GROUP monitor's own *status* still comes from every member, hidden ones
     // included, because that is what `groupCall` computed at check time. Hiding a
@@ -186,6 +183,11 @@ export const load: PageServerLoad = async ({ params, parent }) => {
       partOfTags: dependencyView.partOf.map((node) => node.monitor_tag),
       monitorLastStatusTimestamp: lastSampleTimestamp,
       monitorLastLatency: ParseLatency(lastSampleLatency),
+      monitorType: monitor.monitor_type,
+      monitorSslExpiresAt: ResolveSslExpiresAtMs(sslStatus),
+      monitorSslTrusted: sslStatus?.cert_trusted ?? null,
+      monitorIssuerCn: sslStatus?.issuer_cn ?? null,
+      monitorIssuerO: sslStatus?.issuer_o ?? null,
       ongoingIncidents,
       ongoingMaintenances,
       upcomingMaintenances,
@@ -193,6 +195,7 @@ export const load: PageServerLoad = async ({ params, parent }) => {
       extendedTags,
       monitorGroupMembersByTag,
       publishedSlos,
+      groupMemberDisplay,
       maxDays,
       // B13 stage 1. Which probe regions are seeing this monitor, and how.
       //

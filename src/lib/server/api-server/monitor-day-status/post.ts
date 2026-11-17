@@ -1,5 +1,6 @@
 import { json, error } from "@sveltejs/kit";
 import type { APIServerRequest } from "$lib/server/types/api-server";
+import { CanSeeHiddenMonitors, GetLoggedInSession } from "$lib/server/controllers/userController";
 import db from "$lib/server/db/db";
 import {
   BeginningOfDay,
@@ -42,8 +43,10 @@ export default async function post(req: APIServerRequest): Promise<Response> {
       req.body.nowAtTz ? parseInt(req.body.nowAtTz || "0", 10) : GetMinuteStartNowTimestampUTC(),
     ) + 60;
 
-  // Visible, not merely existing (KENER-126).
-  const monitor = await ResolveVisiblePublicMonitor(body.tag);
+  // Visible, not merely existing (KENER-126), hidden ones included for a reader
+  // whose role has monitors.read (upstream #697).
+  const canSeeHidden = await CanSeeHiddenMonitors(await GetLoggedInSession(req.cookies));
+  const monitor = await ResolveVisiblePublicMonitor(body.tag, canSeeHidden);
   if (!monitor) {
     return error(404, { message: "Monitor not found" });
   }

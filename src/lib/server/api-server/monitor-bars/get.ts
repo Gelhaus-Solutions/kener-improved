@@ -1,12 +1,14 @@
 import { json, error } from "@sveltejs/kit";
 import type { APIServerRequest } from "$lib/server/types/api-server";
+import { CanSeeHiddenMonitors, GetLoggedInSession } from "$lib/server/controllers/userController";
 import { ResolveVisiblePublicMonitors } from "$lib/server/controllers/publicMonitorResolver";
 import { GetMinuteStartNowTimestampUTC } from "$lib/server/tool";
 import type { StatusType } from "$lib/types/status";
 import GC from "$lib/global-constants";
 import type { MonitorBarResponse } from "$lib/server/api-server/monitor-bar/get";
-import { buildMonitorBarResponseFromRawData } from "$lib/server/api-server/monitor-bar/shared";
+import { buildMonitorBarResponseFromRawData, parseIntParam } from "$lib/server/api-server/monitor-bar/shared";
 import {
+  AttachSslCacheFields,
   GetLatestMonitoringDataAllActive,
   GetStatusCountsByIntervalGroupedByMonitor,
 } from "$lib/server/controllers/monitorsController";
@@ -28,9 +30,9 @@ interface MonitorBarsResponse {
 export default async function get(req: APIServerRequest): Promise<Response> {
   const tagsStr = req.query.get("tags");
   const daysStr = req.query.get("days");
-  const days = Math.min(MAX_DAYS, Math.max(1, daysStr ? parseInt(daysStr, 10) : DEFAULT_DAYS));
+  const days = Math.min(MAX_DAYS, Math.max(1, parseIntParam(daysStr, DEFAULT_DAYS)));
   const endOfDayTodayAtTzStr = req.query.get("endOfDayTodayAtTz");
-  const endOfDayTodayAtTz = endOfDayTodayAtTzStr ? parseInt(endOfDayTodayAtTzStr, 10) : GetMinuteStartNowTimestampUTC();
+  const endOfDayTodayAtTz = parseIntParam(endOfDayTodayAtTzStr, GetMinuteStartNowTimestampUTC());
 
   if (!tagsStr) {
     return error(400, { message: "tags query parameter is required" });
@@ -54,6 +56,7 @@ export default async function get(req: APIServerRequest): Promise<Response> {
   }
 
   const startTime = endOfDayTodayAtTz - days * 24 * 60 * 60;
+  const canSeeHidden = await CanSeeHiddenMonitors(await GetLoggedInSession(req.cookies));
 
   // Resolve first, because everything below needs *physical* tags while the
   // caller may have asked with per-org slugs (KENER-127). The page hands the
@@ -61,10 +64,12 @@ export default async function get(req: APIServerRequest): Promise<Response> {
   // `tag` alone - so in an org with a `tag_prefix` every bar on the page came
   // back empty, reported as a missing tag.
   //
-  // Visible monitors only (KENER-126). Anything the caller may not see simply
-  // does not resolve, and falls through to `missingTags` exactly as a name that
-  // never existed does, so the response cannot be used to tell the two apart.
-  const resolved = await ResolveVisiblePublicMonitors(tags);
+  // Visible monitors only (KENER-126), hidden ones included for a reader whose
+  // role has monitors.read (upstream #697). Anything the caller may not see
+  // simply does not resolve, and falls through to `missingTags` exactly as a
+  // name that never existed does, so the response cannot be used to tell the
+  // two apart.
+  const resolved = await ResolveVisiblePublicMonitors(tags, canSeeHidden);
   const physicalTags = [...new Set([...resolved.values()].map((m) => m.tag))];
 
   const [latestDataAll, aggregatedData] = await Promise.all([
@@ -75,6 +80,7 @@ export default async function get(req: APIServerRequest): Promise<Response> {
   const latestStatusByTag = new Map<string, StatusType>(
     latestDataAll.map((d) => [d.monitor_tag, (d.status as StatusType) || GC.NO_DATA]),
   );
+  const latestDataByTag = new Map(latestDataAll.map((d) => [d.monitor_tag, d]));
 
   // Keyed by the name the caller used, not by the physical tag, so a browser that
   // asked for "api" can find "api" in the answer.
@@ -109,6 +115,7 @@ export default async function get(req: APIServerRequest): Promise<Response> {
         days,
         endOfDayTodayAtTz,
         latestStatusByTag.get(monitor.tag) || GC.NO_DATA,
+        monitor.monitor_type === "SSL" ? await AttachSslCacheFields(latestDataByTag.get(monitor.tag)) : null,
       );
       return { tag: requested, payload };
     }),

@@ -13,6 +13,14 @@ import type {
 import type { PageRecord } from "$lib/server/types/db";
 import GC from "$lib/global-constants";
 import { toApiPageSettings, applyPageSettingsPatch, validatePageSettings } from "$lib/server/pageSettings";
+import {
+  AddMonitorToPage,
+  DeletePage,
+  GetPageMonitors,
+  RemoveMonitorFromPage,
+  UpdatePage,
+} from "$lib/server/controllers/pagesController";
+import { readRequestBody } from "$lib/server/requestBody";
 
 async function formatPageResponse(page: PageRecord): Promise<PageResponse> {
   const pageSettings = toApiPageSettings(page.page_settings_json);
@@ -67,19 +75,8 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
     return json(errorResponse, { status: 404 });
   }
 
-  let body: UpdatePageRequest;
-
-  try {
-    body = await request.json();
-  } catch {
-    const errorResponse: BadRequestResponse = {
-      error: {
-        code: "BAD_REQUEST",
-        message: "Invalid JSON body",
-      },
-    };
-    return json(errorResponse, { status: 400 });
-  }
+  const body = await readRequestBody<UpdatePageRequest>(request, "PATCH /api/v4/pages/{page_path}");
+  if (body instanceof Response) return body;
 
   // API responses render the home page's path as ~home, so a read-modify-write
   // client sends it back unchanged; treat that as "no path change"
@@ -89,16 +86,6 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
 
   // Validate page_path if provided
   if (body.page_path !== undefined) {
-    if (typeof body.page_path !== "string") {
-      const errorResponse: BadRequestResponse = {
-        error: {
-          code: "BAD_REQUEST",
-          message: "page_path must be a string",
-        },
-      };
-      return json(errorResponse, { status: 400 });
-    }
-
     // Make page_path URL-friendly: lowercase, replace spaces with hyphens, remove special chars
     const sanitizedPagePath = body.page_path
       .toLowerCase()
@@ -138,7 +125,7 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
 
   // Validate page_title if provided
   if (body.page_title !== undefined) {
-    if (typeof body.page_title !== "string" || body.page_title.trim().length === 0) {
+    if (body.page_title.trim().length === 0) {
       const errorResponse: BadRequestResponse = {
         error: {
           code: "BAD_REQUEST",
@@ -151,7 +138,7 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
 
   // Validate page_header if provided
   if (body.page_header !== undefined) {
-    if (typeof body.page_header !== "string" || body.page_header.trim().length === 0) {
+    if (body.page_header.trim().length === 0) {
       const errorResponse: BadRequestResponse = {
         error: {
           code: "BAD_REQUEST",
@@ -163,7 +150,7 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
   }
 
   // Validate monitors if provided
-  if (body.monitors !== undefined && Array.isArray(body.monitors)) {
+  if (body.monitors !== undefined) {
     for (const monitorTag of body.monitors) {
       const monitor = await db.getMonitorByTag(monitorTag);
       if (!monitor) {
@@ -175,6 +162,15 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
         };
         return json(errorResponse, { status: 400 });
       }
+    }
+    if (new Set(body.monitors).size !== body.monitors.length) {
+      const errorResponse: BadRequestResponse = {
+        error: {
+          code: "BAD_REQUEST",
+          message: "monitors must not list a monitor tag twice",
+        },
+      };
+      return json(errorResponse, { status: 400 });
     }
   }
 
@@ -221,22 +217,16 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
 
   // Update page if there are changes
   if (Object.keys(updateData).length > 0) {
-    await db.updatePage(page.id, updateData);
+    await UpdatePage(page.id, updateData);
   }
 
   // Handle monitors update - replace all monitors
-  if (body.monitors !== undefined && Array.isArray(body.monitors)) {
-    // Delete all existing page monitors
-    await db.deletePageMonitorsByPageId(page.id);
-
-    // Add new monitors
+  if (body.monitors !== undefined) {
+    for (const current of await GetPageMonitors(page.id)) {
+      await RemoveMonitorFromPage(page.id, current.monitor_tag);
+    }
     for (let i = 0; i < body.monitors.length; i++) {
-      await db.addMonitorToPage({
-        page_id: page.id,
-        monitor_tag: body.monitors[i],
-        monitor_settings_json: null,
-        position: i,
-      });
+      await AddMonitorToPage(page.id, body.monitors[i], null, i);
     }
   }
 
@@ -285,11 +275,7 @@ export const DELETE: RequestHandler = async ({ locals }) => {
     return json(errorResponse, { status: 400 });
   }
 
-  // Delete all page monitors first
-  await db.deletePageMonitorsByPageId(page.id);
-
-  // Delete the page
-  await db.deletePage(page.id);
+  await DeletePage(page.id);
 
   const response: DeletePageResponse = {
     message: `Page '${page.page_path || GC.HOME_PAGE_TOKEN}' deleted successfully`,

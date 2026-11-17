@@ -114,6 +114,10 @@ export const ROUTE_SCOPE_MAP: Record<string, MethodScopes> = {
   // narrow keys only exist from this release onwards.
   "/(api)/api/v4/site": { GET: "settings.read" },
   "/(api)/api/v4/site/[config_key]": { GET: "settings.read", PATCH: "settings.write" },
+
+  // Images (upstream #890). The same `images.write` the admin API's uploadImage
+  // requires.
+  "/(api)/api/v4/images": { POST: "images.write" },
 };
 
 /**

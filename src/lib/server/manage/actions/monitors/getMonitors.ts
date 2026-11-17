@@ -1,16 +1,19 @@
 import db from "$lib/server/db/db.js";
-import { GetMonitors } from "$lib/server/controllers/controller.js";
+import { GetMonitors, MaskMonitorRecordSecrets } from "$lib/server/controllers/controller.js";
 import type { ActionDefinition, LegacyPayload } from "../../types.js";
 
 /**
  * Transcribed from the inherited action chain; behaviour unchanged except for
- * the opt-in filter below.
+ * the opt-in filter below, and upstream's secret masking (9d43ee10): type_data
+ * secrets are masked on read, and monitor writers keep the heartbeat secret
+ * because they need its URL and can set it anyway.
  */
 export default {
   action: "getMonitors",
-  handler: async (data: LegacyPayload) => {
+  handler: async (data: LegacyPayload, ctx) => {
+    const keepHeartbeatSecret = ctx.permissions.has("monitors.write");
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let resp: any = await GetMonitors(data);
+    let resp: any = (await GetMonitors(data)).map((monitor) => MaskMonitorRecordSecrets(monitor, keepHeartbeatSecret));
 
     /**
      * B12c. Leave out the regional endpoints of multi-region services.

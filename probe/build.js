@@ -2,6 +2,7 @@ import * as esbuild from "esbuild";
 import { readFileSync, mkdirSync } from "fs";
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
+import { buildCheerioGuest } from "../scripts/cheerio-guest.js";
 
 // Builds the standalone Kener probe (B1c).
 //
@@ -42,6 +43,8 @@ await esbuild.build({
     // than hardcoded in the source, so the version an operator reads on the
     // screen is the version of the image they are actually running.
     __KENER_PROBE_VERSION__: JSON.stringify(pkg.version),
+    // A custom eval that uses cheerio gets this bundle as its prelude, as on the server.
+    __CHEERIO_GUEST__: JSON.stringify(buildCheerioGuest()),
   },
   plugins: [
     {
