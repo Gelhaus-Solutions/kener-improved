@@ -24,6 +24,8 @@ env:
   UPSTREAM_URL: https://github.com/rajnandan1/kener.git
   UPSTREAM_BRANCH: ${{ inputs.upstream_branch || 'main' }}
   SYNC_LABEL: upstream-sync
+  # Every gh call acts on this fork: with an `upstream` remote in the checkout, gh would pick rajnandan1/kener.
+  GH_REPO: ${{ github.repository }}
 
 jobs:
   sync:
