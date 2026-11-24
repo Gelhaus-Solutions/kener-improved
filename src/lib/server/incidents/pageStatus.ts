@@ -389,6 +389,11 @@ export async function getPageStatus(
   if (monitorTags.length === 0) {
     return derivePageStatus({ monitorTags: [], latest: [], incidentImpacts: [], maintenanceImpacts: [] });
   }
+  // A standby with stale data knows no current status: every component is
+  // silent, declared impacts and pins included.
+  if ((await db.getStandbyFreshness())?.stale) {
+    return derivePageStatus({ monitorTags, latest: [], incidentImpacts: [], maintenanceImpacts: [] });
+  }
   const [resolvedLatest, incidentImpacts, maintenanceImpacts, edges, settings, groupMonitors] = await Promise.all([
     latest ? Promise.resolve(latest) : (db.getLatestMonitoringDataAllActive(monitorTags) as Promise<LatestStatus[]>),
     db.getDeclaredIncidentImpacts(timestamp, monitorTags),

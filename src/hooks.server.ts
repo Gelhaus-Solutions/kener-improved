@@ -1,6 +1,7 @@
 import { json, type Handle, type RequestEvent } from "@sveltejs/kit";
 import { sequence } from "@sveltejs/kit/hooks";
 import { requestIdHandle } from "$lib/server/http/requestId";
+import { standbyHandle } from "$lib/server/http/standby";
 import { manageRedirectHandle } from "$lib/server/http/manageRedirects";
 import { orgResolveHandle } from "$lib/server/http/orgResolve";
 import { isForbiddenCrossSiteForm } from "$lib/server/http/csrf";
@@ -241,6 +242,7 @@ const privateCacheHandle: Handle = async ({ event, resolve }) => {
 // sessionOrg.ts.
 export const handle = sequence(
   requestIdHandle,
+  standbyHandle,
   manageRedirectHandle,
   csrfHandle,
   privateCacheHandle,

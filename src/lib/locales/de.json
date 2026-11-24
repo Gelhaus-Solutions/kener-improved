@@ -153,6 +153,9 @@
     "Verifying": "Verifizieren",
     "We sent a 6-digit code to": "Wir haben einen 6-stelligen Code gesendet an",
     "What to send": "Was gesendet wird",
-    "You will only hear about these.": "Sie hören nur von diesen."
+    "You will only hear about these.": "Sie hören nur von diesen.",
+    "Status data is out of date": "Statusdaten sind veraltet",
+    "Last updated %time. Current status unknown.": "Zuletzt aktualisiert %time. Aktueller Status unbekannt.",
+    "No data yet. Current status unknown.": "Noch keine Daten. Aktueller Status unbekannt."
   }
 }

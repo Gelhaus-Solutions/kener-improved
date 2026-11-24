@@ -137,6 +137,8 @@ export const TENANT_TABLES: ReadonlySet<string> = new Set([
  *   org_domains      - same: the hostname is what discriminates the tenant.
  *   user_mfa*        - a second factor belongs to the person, not the tenant.
  *   knex_migrations* - schema bookkeeping.
+ *   standby_state    - a standby's own pull bookkeeping, about the instance, not
+ *                      any org it mirrors.
  */
 export const INSTANCE_TABLES: ReadonlySet<string> = new Set([
   "users",
@@ -147,6 +149,7 @@ export const INSTANCE_TABLES: ReadonlySet<string> = new Set([
   "org_domains",
   "knex_migrations",
   "knex_migrations_lock",
+  "standby_state",
 ]);
 
 /** Whether queries against `table` are automatically scoped to the current org. */

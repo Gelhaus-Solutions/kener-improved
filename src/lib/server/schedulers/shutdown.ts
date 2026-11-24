@@ -9,6 +9,7 @@ import rollupScheduler from "./rollupScheduler";
 import slaScheduler from "./slaScheduler";
 import certificateScheduler from "./certificateScheduler";
 import reportScheduler from "./reportScheduler";
+import standbyPuller from "../standby/pull";
 
 export default async () => {
   await appScheduler.shutdown();
@@ -19,4 +20,5 @@ export default async () => {
   await slaScheduler.shutdown();
   await certificateScheduler.shutdown();
   await reportScheduler.shutdown();
+  await standbyPuller.shutdown();
 };

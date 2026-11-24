@@ -36,6 +36,7 @@ import { PageDomainsRepository } from "./repositories/pageDomains.js";
 import { ProbesRepository } from "./repositories/probes.js";
 import { RegionTargetsRepository } from "./repositories/regionTargets.js";
 import { InboundRepository } from "./repositories/inbound.js";
+import { StandbyRepository } from "./repositories/standby.js";
 
 // Re-export types from base
 export type { MonitorFilter, TriggerFilter, IncidentFilter, CountResult } from "./repositories/base.js";
@@ -162,6 +163,7 @@ class DbImpl {
   private mfa!: MfaRepository;
   private subscriptionSystem!: SubscriptionSystemRepository;
   private emailTemplateConfig!: EmailTemplateConfigRepository;
+  private standby!: StandbyRepository;
 
   // Method bindings - declared with definite assignment assertion
   // ============ Monitoring Data ============
@@ -590,6 +592,13 @@ class DbImpl {
   getOrgById!: OrgsRepository["getOrgById"];
   getOrgBySlug!: OrgsRepository["getOrgBySlug"];
   getAllOrgs!: OrgsRepository["getAllOrgs"];
+  // ============ Standby mirror ============
+  getLatestMigrationName!: StandbyRepository["getLatestMigrationName"];
+  getStandbyState!: StandbyRepository["getStandbyState"];
+  getStandbyFreshness!: StandbyRepository["getStandbyFreshness"];
+  recordStandbyPullFailure!: StandbyRepository["recordStandbyPullFailure"];
+  exportStandbyPage!: StandbyRepository["exportStandbyPage"];
+  applyStandbyPage!: StandbyRepository["applyStandbyPage"];
   getOrgCounts!: OrgsRepository["getOrgCounts"];
   setOrgStatus!: OrgsRepository["setOrgStatus"];
   getActiveOrgIds!: OrgsRepository["getActiveOrgIds"];
@@ -1574,6 +1583,13 @@ class DbImpl {
     this.getActiveWebhookEndpointsForEvent = this.webhooks.getActiveEndpointsForEvent.bind(this.webhooks);
     this.recordWebhookEndpointOutcome = this.webhooks.recordEndpointOutcome.bind(this.webhooks);
     this.autoDisableWebhookEndpoint = this.webhooks.autoDisableEndpoint.bind(this.webhooks);
+    this.standby = new StandbyRepository(this.knex);
+    this.getLatestMigrationName = this.standby.getLatestMigrationName.bind(this.standby);
+    this.getStandbyState = this.standby.getStandbyState.bind(this.standby);
+    this.getStandbyFreshness = this.standby.getStandbyFreshness.bind(this.standby);
+    this.recordStandbyPullFailure = this.standby.recordStandbyPullFailure.bind(this.standby);
+    this.exportStandbyPage = this.standby.exportStandbyPage.bind(this.standby);
+    this.applyStandbyPage = this.standby.applyStandbyPage.bind(this.standby);
   }
 
   /**
