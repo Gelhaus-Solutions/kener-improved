@@ -70,6 +70,10 @@
                     {
                       "title": "Upgrading and Rolling Back",
                       "content": "v4/setup/upgrading"
+                    },
+                    {
+                      "title": "Standby Instance",
+                      "content": "v4/setup/standby"
                     }
                   ]
                 },

@@ -231,6 +231,7 @@ git push
 | `src/routes/(manage)/manage/api/+server.ts`                                                  | 7 lines here vs upstream's ~930; upstream's actions are reported, not merged                                                         |
 | `scripts/diff-upstream-actions.mjs`, `docs/agents/upstream-manage-api.snapshot.ts`           | The machinery that reports them                                                                                                      |
 | `svelte.config.js`                                                                           | `paths.relative: false`, so the `/o/<slug>/` org prefix survives into links                                                          |
+| `src/lib/server/standby/`, `src/lib/server/http/standby.ts`, `/healthcheck/instance`         | Fork-only: a read-only standby instance (`KENER_ROLE=standby`) that mirrors the primary's public page                                |
 | `src/**`, `migrations/**`                                                                    | Diverge by design; conflicts are resolved by hand on each sync                                                                       |
 | `LICENSE`, product name, UI strings, docs content                                            | **Unchanged** - the fork does not rebrand                                                                                            |
 

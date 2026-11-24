@@ -137,6 +137,14 @@ KENER_FORCE_LOCAL_LOGIN=true
 
 - Remove the variable once the identity provider is reachable again
 
+### KENER_ROLE {#kener-role}
+
+**Purpose**: Run this instance as a read-only standby of another.
+
+**Default**: `primary`
+
+See [Standby Instance](/docs/v4/setup/standby) for `KENER_ROLE=standby` and the `KENER_STANDBY_*` variables.
+
 ### PORT {#port}
 
 **Purpose**: The port number Kener will listen on.
