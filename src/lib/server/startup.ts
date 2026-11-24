@@ -16,6 +16,8 @@ import db from "./db/db.js";
 import { runAcrossOrgs } from "./db/orgContext.js";
 import probeWsServer from "./probes/wsServer.js";
 import { SecretKeyWarning } from "./controllers/commonController.js";
+import { GetInstanceRole } from "./standby/config.js";
+import standbyPuller from "./standby/pull.js";
 
 process.env.TZ = "UTC";
 
@@ -23,6 +25,8 @@ async function Startup(): Promise<void> {
   // After dotenv: main.ts calls dotenv.config() in its body, which runs after static imports,
   // so this cannot be module top-level. Covers fetch (triggers, Resend, OIDC) and the global agents.
   InstallEnvProxy();
+  // First, so an unknown KENER_ROLE stops the process before anything starts.
+  const role = GetInstanceRole();
   const secretKeyWarning = SecretKeyWarning();
   if (secretKeyWarning) console.warn(secretKeyWarning);
   // Seeds insert missing site_data keys through knex, with no way to reach the
@@ -37,6 +41,28 @@ async function Startup(): Promise<void> {
     const orgs = await db.getAllOrgs();
     await InvalidateAllSiteDataCaches(orgs.map((o) => o.id));
   });
+
+  if (role === "standby") {
+    // Nothing that checks, schedules, notifies or listens for probes: the primary
+    // does all of it, and a standby that did too would alert twice.
+    await standbyPuller.start();
+  } else {
+    await startPrimaryWork();
+  }
+
+  const runtimeVersion = version();
+
+  figlet("Kener v" + runtimeVersion, function (err, data) {
+    if (err) {
+      console.log("Something went wrong...");
+      return;
+    }
+    console.log(data);
+    console.log(`Kener version ${runtimeVersion} is running${role === "standby" ? " as a standby" : ""}!`);
+  });
+}
+
+async function startPrimaryWork(): Promise<void> {
   await mainScheduler.start();
   await maintenanceScheduler.start();
   await dailyCleanupScheduler.start();
@@ -75,17 +101,6 @@ async function Startup(): Promise<void> {
   // `KENER_PROBE_WS_PORT` is set, so an instance that does not use probes opens
   // no new listener.
   await probeWsServer.start();
-
-  const runtimeVersion = version();
-
-  figlet("Kener v" + runtimeVersion, function (err, data) {
-    if (err) {
-      console.log("Something went wrong...");
-      return;
-    }
-    console.log(data);
-    console.log(`Kener version ${runtimeVersion} is running!`);
-  });
 }
 
 // Call Startup() when run directly (works with both tsx and vite-node)
