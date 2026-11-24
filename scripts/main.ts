@@ -7,6 +7,7 @@ import shutdownSchedulers from "../src/lib/server/schedulers/shutdown.ts";
 import shutdownQueues from "../src/lib/server/queues/shutdown.ts";
 import dbInstance from "../src/lib/server/db/db.ts";
 import { redisConnection } from "../src/lib/server/redisConnector.ts";
+import { GetInstanceHealth } from "../src/lib/server/standby/health.ts";
 import knex from "knex";
 import knexOb from "../knexfile.js";
 
@@ -65,6 +66,13 @@ async function start() {
       db: dbOk,
       redis: redisOk,
     });
+  });
+
+  // The instance's role and, on a standby, how current its data is (docs: setup/standby).
+  // ?strict=1 answers 503 while a standby's data is stale, for a failover probe.
+  app.get(base + "/healthcheck/instance", async (req: any, res: any) => {
+    const health = await GetInstanceHealth();
+    res.status(req.query.strict === "1" && !health.ok ? 503 : 200).json(health);
   });
 
   app.use(handler);
