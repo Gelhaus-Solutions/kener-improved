@@ -4,6 +4,7 @@
   import { ModeWatcher } from "mode-watcher";
   import KenerNav from "$lib/components/KenerNav.svelte";
   import KenerFooter from "$lib/components/KenerFooter.svelte";
+  import StandbyBanner from "$lib/components/StandbyBanner.svelte";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { Toaster } from "$lib/components/ui/sonner/index.js";
   import { resolve } from "$app/paths";
@@ -58,6 +59,9 @@
   <KenerNav />
   <!-- Body -->
   <div class="mx-auto max-w-5xl px-4 pt-18">
+    {#if data.standbyNotice}
+      <StandbyBanner dataAt={data.standbyNotice.dataAt} />
+    {/if}
     <Tooltip.Provider>
       {@render children()}
     </Tooltip.Provider>

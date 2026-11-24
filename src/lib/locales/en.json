@@ -173,6 +173,9 @@
     "Verifying": "Verifying",
     "We sent a 6-digit code to": "We sent a 6-digit code to",
     "What to send": "What to send",
-    "You will only hear about these.": "You will only hear about these."
+    "You will only hear about these.": "You will only hear about these.",
+    "Status data is out of date": "Status data is out of date",
+    "Last updated %time. Current status unknown.": "Last updated %time. Current status unknown.",
+    "No data yet. Current status unknown.": "No data yet. Current status unknown."
   }
 }

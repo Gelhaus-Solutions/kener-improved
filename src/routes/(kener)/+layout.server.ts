@@ -3,6 +3,7 @@ import type { LayoutServerLoad } from "./$types";
 import { resolve } from "$app/paths";
 import { GetLayoutServerData } from "$lib/server/controllers/layoutController";
 import serverResolve from "$lib/server/resolver.js";
+import { GetStandbyNotice } from "$lib/server/standby/status";
 
 export const load: LayoutServerLoad = async ({ cookies, request, locals }) => {
   const data = await GetLayoutServerData(cookies, request);
@@ -20,5 +21,7 @@ export const load: LayoutServerLoad = async ({ cookies, request, locals }) => {
     // separately is how one gets missed. Client components read it as
     // `page.data.boundPagePath`.
     boundPagePath: locals.pagePath ?? null,
+    // A standby's banner once its data is stale; null everywhere else.
+    standbyNotice: await GetStandbyNotice(),
   };
 };

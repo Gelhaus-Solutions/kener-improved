@@ -3,6 +3,7 @@ import { BaseRepository } from "./base.js";
 import { requireOrgId } from "../orgContext.js";
 import { MERGED_REGION_ID } from "../regions.js";
 import { markRollupDirty } from "../rollupDirty.js";
+import { StandbyDataIsStale } from "../../standby/freshness.js";
 import { hasFloorFunction, supportsInsertReturning } from "../capabilities.js";
 import GC from "../../../global-constants.js";
 import type { MonitoringStatus } from "../../../types/status.js";
@@ -97,6 +98,10 @@ export class MonitoringRepository extends BaseRepository {
   }
 
   async getLatestMonitoringData(monitor_tag: string): Promise<MonitoringData | undefined> {
+    // Every current-status reader comes through here. A standby whose data is
+    // too old reports no sample, so each component reads as No Data rather than
+    // its last known status.
+    if (await StandbyDataIsStale(this.knexUnscoped)) return undefined;
     return await this.table("monitoring_data")
       .where("monitor_tag", monitor_tag)
       .where("region_id", MERGED_REGION_ID)

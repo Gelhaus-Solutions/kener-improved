@@ -159,11 +159,14 @@ export async function getMonitorDependencyView(tag: string, nowSeconds: number):
   }
 
   const closureTags = [...closure];
+  // A standby with stale data states no current status, as in getPageStatus.
+  const stale = (await db.getStandbyFreshness())?.stale === true;
   const [latest, incidentImpacts, maintenanceImpacts] = await Promise.all([
-    db.getLatestMonitoringDataAllActive(closureTags) as Promise<LatestStatus[]>,
-    db.getDeclaredIncidentImpacts(nowSeconds, closureTags),
-    db.getDeclaredMaintenanceImpacts(nowSeconds, closureTags),
+    stale ? [] : (db.getLatestMonitoringDataAllActive(closureTags) as Promise<LatestStatus[]>),
+    stale ? [] : db.getDeclaredIncidentImpacts(nowSeconds, closureTags),
+    stale ? [] : db.getDeclaredMaintenanceImpacts(nowSeconds, closureTags),
   ]);
+  const liveSettings: RollupSetting[] = stale ? [] : settings;
 
   const selfRollingTags = new Set(groupMonitors.map((m) => m.tag));
   const derived = derivePageStatus({
@@ -171,7 +174,7 @@ export async function getMonitorDependencyView(tag: string, nowSeconds: number):
     latest,
     incidentImpacts,
     maintenanceImpacts,
-    rollup: { edges, settings, selfRollingTags, nowSeconds },
+    rollup: { edges, settings: liveSettings, selfRollingTags, nowSeconds },
   });
 
   const byTag = new Map(derived.components.map((c) => [c.monitor_tag, c]));
@@ -195,7 +198,7 @@ export async function getMonitorDependencyView(tag: string, nowSeconds: number):
     // A live pin short-circuits the walk and answers with the pinned value. Here
     // that would report an operator's typed status as something the dependencies
     // said, so this monitor's pin is dropped for this pass only.
-    settings: settings.map((s) => (s.monitor_tag === tag ? { ...s, manual_override: null } : s)),
+    settings: liveSettings.map((s) => (s.monitor_tag === tag ? { ...s, manual_override: null } : s)),
     own: new Map(resolved).set(tag, "OPERATIONAL"),
     selfRollingTags,
     nowSeconds,
