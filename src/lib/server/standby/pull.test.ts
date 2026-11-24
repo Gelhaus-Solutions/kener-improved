@@ -53,17 +53,17 @@ describe("PullFromPrimary", () => {
       page({ generatedAt: 5001, next: "c2" }),
       page({ generatedAt: 5002 }),
     ];
-    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(pages.shift())));
+    const fetchImpl = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify(pages.shift())));
 
     const result = await PullFromPrimary(fetchImpl);
 
     expect(result).toEqual({ pages: 3, rows: 3, dataAt: 5000 });
-    const urls = fetchImpl.mock.calls.map((c) => new URL(c[0] as string));
+    const urls = fetchImpl.mock.calls.map((c) => new URL(c[0]));
     expect(urls[0].pathname).toBe("/status/ext/standby/export");
     expect(urls[0].searchParams.get("since")).toBe("4000");
     expect(urls[0].searchParams.get("images")).toBe("ff00");
     expect(urls.map((u) => u.searchParams.get("after"))).toEqual([null, "c1", "c2"]);
-    expect((fetchImpl.mock.calls[0][1] as RequestInit).headers).toMatchObject({ authorization: "Bearer t0ken" });
+    expect(fetchImpl.mock.calls[0][1]?.headers).toMatchObject({ authorization: "Bearer t0ken" });
     expect(fakeDb.applyStandbyPage.mock.calls.map((c) => [c[1].first, c[1].final, c[1].dataAt])).toEqual([
       [true, false, 5000],
       [false, false, 5000],
