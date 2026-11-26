@@ -373,6 +373,24 @@ describe("the standby's apply", () => {
     expect(await dump(standbyDb)).toEqual(once);
   });
 
+  it("writes the monitors before the page rows that name them, as SQLite's foreign keys require", async () => {
+    await standbyDb.schema.dropTable("pages_monitors");
+    await standbyDb.schema.createTable("pages_monitors", (t) => {
+      t.increments("id");
+      t.integer("org_id");
+      t.integer("page_id").references("id").inTable("pages").onDelete("CASCADE");
+      t.string("monitor_tag").references("tag").inTable("monitors").onDelete("CASCADE");
+    });
+    await standbyDb.raw("PRAGMA foreign_keys = ON");
+
+    // Twice: the second pull replaces rows the first one wrote.
+    await applyAll(await exportAll());
+    await applyAll(await exportAll());
+
+    const tags = (db: KnexType) => db("pages_monitors").pluck("monitor_tag").orderBy("monitor_tag");
+    expect(await tags(standbyDb)).toEqual(await tags(primaryDb));
+  });
+
   it("upserts a changed sample in place and prunes what fell out of the window", async () => {
     await applyAll(await exportAll());
     await standbyDb("monitoring_data").insert({

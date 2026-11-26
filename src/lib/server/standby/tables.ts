@@ -58,9 +58,10 @@ export const SNAPSHOT_TABLES = [
   "org_domains",
   "site_data",
   "pages",
+  // Before pages_monitors, which names a monitor by its tag: SQLite checks that foreign key on insert.
+  "monitors",
   "pages_monitors",
   "page_domains",
-  "monitors",
   "component_dependencies",
   "monitor_rollup_settings",
   "sla_targets",
